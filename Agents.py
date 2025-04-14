@@ -26,6 +26,7 @@ def extract_json_between_markers(llm_output):
                 parsed_json = json.loads(json_string_clean)
                 return parsed_json
             except json.JSONDecodeError:
+                print(f'Error in processing json {json_string}')
                 continue  # Try next match
 
     return None  # No valid JSON found
@@ -207,7 +208,7 @@ class BaseMeshAgent(BaseCoderAgent):
             prompt="""Your goal is to follow some instructions that I provide to you and write OpenAeroStruct mesh code, please follow the instructions and the code samples clearly. And output using the schema provided which is text.
             
             This is your task:
-            1. Read thezz inputs. You will be given the wing type, and the geometrical configuration. Your job is to change the span, root chord, and type of the wing if the user requirements invoke change and output the code.
+            1. Read these inputs. You will be given the wing type, and the geometrical configuration. Your job is to change the span, root chord, and type of the wing if the user requirements invoke change and output the code.
             2. Identify the requirements.
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
@@ -313,7 +314,7 @@ class OptimizerAgent(BaseCoderAgent):
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
 
-            This is an explained code sample for you to follow. Ddirectly edit the code and explain your changes in the calculations and explain field. I will tell you where you can edit.
+            This is an explained code sample for you to follow. Directly edit the code and explain your changes in the calculations and explain field. I will tell you where you can edit.
             ```python
             # Instantiate the problem and the model group
             prob = om.Problem()
