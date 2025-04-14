@@ -32,22 +32,41 @@ def extract_json_between_markers(llm_output):
 
 
 class GeneralAgent:
-    def __init__(self, name, role, prompt, schema=None):
+    def __init__(self, name, role, prompt, schema=None, PDFs = None):
         self.name = name
         self.role = role
         self.prompt = prompt
         self.schema = schema
+        self.PDFs = PDFs
         self.model = get_model()
 
     def role_description(self):
         return f"You are {self.name}, specializing in {self.role}."
 
     def execute_task(self, task_description):
+        # Setup the prompt text
         full_prompt = f"{self.prompt}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}"
-        response = self.model.generate_content(full_prompt)
+        
+        # Check if PDFs are provided
+        if hasattr(self, 'PDFs') and self.PDFs:
+            # Create a list of image files to be passed to the model
+            pdf_images = []
+            for pdf_path in self.PDFs:
+                try:
+                    with open(pdf_path, "rb") as f:
+                        pdf_images.append({"mime_type": "application/pdf", "data": f.read()})
+                except Exception as e:
+                    print(f"Error loading PDF {pdf_path}: {e}")
+            
+            # Generate content with both text and PDF images
+            response = self.model.generate_content([full_prompt] + pdf_images)
+        else:
+            # Generate content with just text
+            response = self.model.generate_content(full_prompt)
 
+        # Extract JSON from the response
         output = extract_json_between_markers(response.text)
-
+        
         return output
 
 
@@ -93,12 +112,66 @@ class ReformulatorAgent(GeneralAgent):
             """
         )
 
-class GraphReaderAgent(GeneralAgent):
+class ResultsReaderAgent(GeneralAgent):
     def __init__(self):
         super().__init__(
-            name="GraphAnalyst",
-            role="Graph data analysis",
-            prompt="You are an expert in graph theory. Your goal is to analyze and interpret network structures."
+            schema = {
+                "type": "object",
+                "properties": {
+                    "Analysis": {"type": "string", "description": ""},
+                    "Recommendations": {"type": "string", "description": ""},
+                    "Optimization Performance": {"type": "string", "description": ""},
+                    "Unrelated Observations": {"type": "string", "description": ""},
+                },
+            },
+
+            PDFs= ["/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Opt_History.pdf","/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf"],
+
+            name="Results Reader and Recommender",
+            role="Read the visual results and report on the key characteristics shown by them",
+            prompt="""Your goal is to read the results of the OpenAeroStruct optimization and provide recommendations. And output using the schema provided which is an object. You are also given the initial problem, and two PDF reports of the results.
+            This is your task:
+            1. Read the pdfs of the OpenAeroStruct optimization.
+            2. Identify the key information and results.
+            3. Use the provided schema to structure your response.
+
+            Have four parts to the response:
+            1) Analysis: Talk about whether the optimization was successful or not, and what the results mean.
+            2) Recommendations: Provide recommendations for the next steps, such as further optimizations, changes to the design variables, or other considerations. Consider whether the results are reasonable and if not, explain why.
+            3) Optimization Performance: Talk about the computational performance of the optimization, number of iterations to converge, time, and if it is unconverged suggest another optimization algorithm that may work.
+            4) Unrelated Observations: Provide any other observations that are not related to the optimization, such as manufacturability and variables that are not the design variables.
+
+            These are the details to capture:
+            1) Does the optimization meet the objectives? If not, why? What is the numerical values of the objective?
+            2) What are the key design variables and their values? Do they hit the limits? Do they make physical sense?
+            3) Look at the graphical plots and see if they make sense. Are there any anomalies? Is an elliptical lift distribution achieved for drag minimization problems, how far away is it from perfectly elliptical?
+            4) Report on the computational performance.
+            """
+        )
+
+class ReportWriter(GeneralAgent):
+    def __init__(self):
+        super().__init__(
+            schema = {
+                "type": "object",
+                "properties": {
+                    "ReportText": {"type": "string", "description": ""},
+                },
+            },
+
+            name="Report Writer",
+            role="Using Latex write a report on the optimization results",
+            prompt="""
+            Your goal is to rewrite the LLM's output into a report format. And output using the schema provided which is an object. You will be given the textual analysis of another LLM.
+
+            This is your task:
+            1. Read the analysis and recommendations.
+            2. Identify the key information and requirements.
+            3. Use the provided schema to structure your response.
+            4. Generate a response that answers the users question in paragraphs that are written in Latex and formatted correctly.
+
+            Use all the information given to you to write a detailed analysis of the results and recommendations.
+            """
         )
 
 class BaseCoderAgent:
@@ -325,12 +398,4 @@ class OptimizerAgent(BaseCoderAgent):
             print("CD = ", prob.get_val("flight_condition_0.wing_perf.CD")[0])
             ,,,
             """
-        )
-
-class PlottingAgent(BaseCoderAgent):
-    def __init__(self):
-        super().__init__(
-            name="VisualizationCoder",
-            role="Data visualization",
-            prompt="You are an expert in scientific visualization. Your goal is to create clear, informative plots."
         )

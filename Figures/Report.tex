@@ -1,0 +1,42 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{graphicx}
+
+\begin{document}
+
+\section*{Optimization Report: Wing Drag Minimization}
+
+\subsection*{Analysis of Results}
+
+The optimization process successfully minimized the drag, achieving a drag value of approximately 1.09387298 (unscaled). The lift coefficient constraint of $C_L = 0.5$ was accurately satisfied. The design variables converged to the following values:
+
+\begin{itemize}
+    \item Wing Taper: 0.2
+    \item Wing Sweep: 30 degrees
+\end{itemize}
+
+The resulting lift distribution closely resembles an elliptical shape, which confirms the effectiveness of the drag minimization process. This near-elliptical distribution is indicative of an efficient wing design from a drag perspective.
+
+\subsection*{Recommendations for Further Optimization}
+
+To potentially achieve even lower drag values, the following recommendations are suggested:
+
+\begin{enumerate}
+    \item \textbf{Expand Design Space:} Relax the bounds on the taper and sweep angles to allow for a broader exploration of the design space. This might uncover more optimal configurations that were initially excluded by the constraints.
+    \item \textbf{Explore Different Optimizers:} Investigate the performance of different optimization algorithms with varying convergence properties. Some optimizers might be more effective at navigating the design space and finding global minima compared to the Sequential Least Squares Programming (SLSQP) method used in this optimization.
+    \item \textbf{Higher-Fidelity Validation:} Verify the optimization results using higher-fidelity Computational Fluid Dynamics (CFD) simulations. OpenAeroStruct utilizes a vortex lattice method, which is an approximation. CFD simulations will provide a more accurate assessment of the wing's aerodynamic performance. Doing so will ensure the results seen here are valid.
+    \item \textbf{Consider Manufacturability:} Evaluate the manufacturability of the optimized wing design. Ensure that the taper and sweep are realistic from a manufacturing perspective. Optimizations may lead to designs that are not feasible to manufacture.
+\end{enumerate}
+
+\subsection*{Optimization Performance}
+
+The optimization process demonstrated fast convergence, completing in 12 iterations with a wall clock run time of less than a second. The SLSQP optimizer proved to be a suitable choice, given its rapid convergence for this particular problem.
+
+\subsection*{Additional Considerations}
+
+\begin{itemize}
+    \item The initial wing mesh was rectangular; however, the optimization process allowed for sweep and taper adjustments. If feasible, consider optimizing other variables, such as wing twist, to potentially further reduce drag. The addition of more design variables allows for more complex design optimization.
+    \item The report presents unscaled values. It is crucial to scale these values back to physical units for practical interpretation and application in real-world scenarios.
+\end{itemize}
+
+\end{document}
