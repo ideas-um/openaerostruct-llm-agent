@@ -26,6 +26,26 @@ GEMINI_API_KEY = YOUR_API_KEY_HERE
 
 Please also add the TeX Live and LaTeX Workshop extension on vscode so the latex report can be generated and updated.
 
+For the report generation and saving the figure automatically, go into the OpenAeroStruct package and change the plot_wing code by replacing one function.
+```bash
+def disp_plot(args=sys.argv):
+    disp = Display(args)
+    disp.draw_GUI()
+    plt.tight_layout()
+    disp.root.protocol("WM_DELETE_WINDOW", disp.quit)
+    
+    # Schedule image saving and program exit after a short delay
+    # to ensure GUI is fully rendered before capture
+    def save_and_quit():
+        disp.save_image()
+        disp.quit()
+    
+    # Wait 1000ms to ensure the GUI is fully rendered before saving
+    disp.root.after(1000, save_and_quit)
+    
+    Tk.mainloop()
+```
+
 ## Requirements
 - Will be added in the future
 
