@@ -20,8 +20,11 @@ uv venv
 source .venv/bin/activate
 uv pip install -r pyproject.toml #Install all required dependencies
 ```
+
 The user will also need to setup a .env file that contains the line
 GEMINI_API_KEY = YOUR_API_KEY_HERE
+
+Please also add the TeX Live and LaTeX Workshop extension on vscode so the latex report can be generated and updated.
 
 ## Requirements
 - Will be added in the future
