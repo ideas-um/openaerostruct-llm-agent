@@ -36,4 +36,6 @@ def plot_mesh(mesh):
 """Part 2:  DO THE GEOMETRY SETUP HERE"""
 
 
+
 """Part 3: PUT THE OPTIMIZER HERE """
+

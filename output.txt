@@ -1,0 +1,12 @@
+Optimization terminated successfully    (Exit mode 0)
+            Current function value: 1.0969473625100474
+            Iterations: 9
+            Function evaluations: 10
+            Gradient evaluations: 9
+Optimization Complete
+-----------------------------------
+
+Angle of attack = 3.947824301736471 deg
+CL =  0.4999999953845053
+CD =  0.010969473625100475
+/Users/conan/Desktop/LLM_Aerospace_Research/.venv/lib/python3.13/site-packages/openmdao/recorders/sqlite_recorder.py:231: UserWarning:The existing case recorder file, /Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/RunOAS_out/aero.db, is being overwritten.

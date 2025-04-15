@@ -2,6 +2,7 @@
 from geminiconfig import get_model
 import json
 import re
+import time
 
 def extract_json_between_markers(llm_output):
     # Regular expression pattern to find JSON content between ```json and ```
@@ -26,7 +27,6 @@ def extract_json_between_markers(llm_output):
                 parsed_json = json.loads(json_string_clean)
                 return parsed_json
             except json.JSONDecodeError:
-                print(f'Error in processing json {json_string}')
                 continue  # Try next match
 
     return None  # No valid JSON found
@@ -162,7 +162,8 @@ class ReportWriter(GeneralAgent):
 
             name="Report Writer",
             role="Using Latex write a report on the optimization results",
-            prompt="""
+            PDFs= ["/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Opt_History.pdf","/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf"],
+            prompt=f"""
             Your goal is to rewrite the LLM's output into a report format. And output using the schema provided which is an object. You will be given the textual analysis of another LLM.
 
             This is your task:
@@ -172,6 +173,11 @@ class ReportWriter(GeneralAgent):
             4. Generate a response that answers the users question in paragraphs that are written in Latex and formatted correctly.
 
             Use all the information given to you to write a detailed analysis of the results and recommendations.
+
+            Please add this figure to the report:
+            The filepath is "/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf", which is the optimized visualization of the wing. You are also given the figure so you can reference it in the analysis.
+
+            Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """
         )
 
@@ -208,7 +214,7 @@ class BaseMeshAgent(BaseCoderAgent):
             prompt="""Your goal is to follow some instructions that I provide to you and write OpenAeroStruct mesh code, please follow the instructions and the code samples clearly. And output using the schema provided which is text.
             
             This is your task:
-            1. Read these inputs. You will be given the wing type, and the geometrical configuration. Your job is to change the span, root chord, and type of the wing if the user requirements invoke change and output the code.
+            1. Read thezz inputs. You will be given the wing type, and the geometrical configuration. Your job is to change the span, root chord, and type of the wing if the user requirements invoke change and output the code.
             2. Identify the requirements.
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
@@ -232,10 +238,10 @@ class BaseMeshAgent(BaseCoderAgent):
             }
 
             # Generate VLM mesh for half-wing
-            mesh = generate_mesh(mesh_dict)   # this creates a rectangular wing mesh, do not edit
+            mesh = generate_mesh(mesh_dict)   # this creates a rectangular wing mesh, DO NOT EDIT THIS LINE
 
             # plot mesh
-            plot_mesh(mesh) # this plots the rectangular wing mesh, do not edit
+            plot_mesh(mesh)  #this plots the rectangular wing mesh, DO NOT EDIT THIS LINE
             ,,,
             """
         )
@@ -314,7 +320,12 @@ class OptimizerAgent(BaseCoderAgent):
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
 
-            This is an explained code sample for you to follow. Directly edit the code and explain your changes in the calculations and explain field. I will tell you where you can edit.
+            MAKE SURE TO NOT CONSTRAINT THE AREA AND SPAN AS THEY DO NOT WORK YET.
+            DO NOT ADD ANYTHING LIKE THIS TO THE CODE
+            prob.model.add_constraint('wing.S_ref', equals=400.0)
+            prob.model.add_constraint('wing.b_half_w', equals=30.0) # Half span
+
+            This is an explained code sample for you to follow. Ddirectly edit the code and explain your changes in the calculations and explain field. I will tell you where you can edit.
             ```python
             # Instantiate the problem and the model group
             prob = om.Problem()
@@ -375,7 +386,9 @@ class OptimizerAgent(BaseCoderAgent):
             #If the variables are not specified, you can comment them out, you can also change the upper and lower bounds.
             #You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep etc.
             #The way to add them is wing."var_name" and the lower and upper bounds are in the form of lower=0.0, upper=1.0
-            #these are the var names that you can use area = S_ref, taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp
+            #these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp
+            #remember to add alpha as a design variable if CL is a constraint. 
+            #DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
             prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)   # varies
             prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=0.5)   # impose CL = x
