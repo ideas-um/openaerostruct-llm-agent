@@ -1,0 +1,31 @@
+[project]
+name = "llm-aerospace-research"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13.2"
+dependencies = [
+    "cffi>=1.17.1",
+    "cssselect2>=0.8.0",
+    "fonttools>=4.56.0",
+    "google-generativeai>=0.8.4",
+    "ipykernel>=6.29.5",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.1",
+    "niceplots>=2.6.0",
+    "numpy>=2.2.4",
+    "openaerostruct>=2.10.0",
+    "openmdao>=3.38.0",
+    "pandas>=2.2.3",
+    "pandoc>=2.4",
+    "pango>=0.0.1",
+    "pdfkit>=1.0.0",
+    "pillow>=11.1.0",
+    "plotly>=6.0.1",
+    "pydyf>=0.11.0",
+    "pyphen>=0.17.2",
+    "tinycss2>=1.4.0",
+    "tinyhtml5>=2.0.0",
+    "weasyprint>=65.1",
+    "wkhtmltopdf>=0.2",
+]
