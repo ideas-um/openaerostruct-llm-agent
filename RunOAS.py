@@ -31,21 +31,21 @@ def plot_mesh(mesh):
 
 """Part 1: PUT THE BASELINE MESH OF THE WING HERE"""
 mesh_dict = {
-    "num_y": 19,
-    "num_x": 3,
-    "wing_type": "rect",
-    "symmetry": True,
-    "span": 60.0,
-    "root_chord": 6.6667,
-    "span_cos_spacing": 0.0,
-    "chord_cos_spacing": 0.0,
+    "num_y": 19, #number of panels in the y direction, 19 is a good starting number
+    "num_x": 3, #number of panels in the x direction, 3 is a good starting number
+    "wing_type": "rect", #This can either be "rect" or "crm" only
+    "symmetry": True, # True if the wing is symmetric, False if it is not, wings are typically symmetric
+    "span": 10.0, #This is the full span of the wing in meters
+    "root_chord": 10.0, #This is the root chord of the wing in meters
+    "span_cos_spacing": 0.0, #This is usually not edited
+    "chord_cos_spacing": 0.0, #This is usually not edited
 }
 
 # Generate VLM mesh for half-wing
-mesh = generate_mesh(mesh_dict)
+mesh = generate_mesh(mesh_dict)   # this creates a rectangular wing mesh, DO NOT EDIT THIS LINE
 
 # plot mesh
-plot_mesh(mesh)
+plot_mesh(mesh)  #this plots the rectangular wing mesh, DO NOT EDIT THIS LINE
 
 
 
@@ -146,11 +146,10 @@ prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_o
 #DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
 prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)   # varies
-prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0) #taper ratio
-prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, units='deg')  # Twist control points
-prob.model.add_design_var('wing.sweep', lower=0.0, upper=30.0, units='deg') #Sweep angle
-
-prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=0.5)   # impose CL = x
+prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Taper ratio
+prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, scaler=0.1)  # Twist control points
+prob.model.add_design_var('wing.sweep', lower=10.0, upper=30.0, units='deg')  # Sweep angle
+prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)   # impose CL = x
 prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)   # dummy objective to minimize CD.
 ############# THIS END OF THE PART TO EDIT ##########
 
@@ -163,7 +162,7 @@ prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 
 prob.setup()
-prob.run_driver() 
+prob.run_driver()
 
 #print results
 print("\nAngle of attack =", prob.get_val("alpha", units="deg")[0], "deg")

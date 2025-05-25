@@ -1,61 +1,62 @@
 \documentclass{article}
 \usepackage{graphicx}
 \usepackage{amsmath}
-
-\begin{document}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
 
 \title{Aerodynamic Optimization Report}
-\date{\today}
+\author{LLM Analysis}
+\date{2025-05-25}
+
+\begin{document}
 \maketitle
 
 \section{Executive Summary}
-This report details the results of an aerodynamic optimization performed to minimize drag on a wing with a fixed area of 400 $m^2$ and a span of 60 m, subject to a lift coefficient constraint of $C_L = 0.5$. The design variables included taper ratio, twist, and sweep angle. The optimization was carried out using the SLSQP algorithm. The optimized design achieved a drag coefficient of $C_D = 0.01096947$. The analysis and recommendations are discussed below.
+This report details the aerodynamic optimization performed to minimize drag on a wing while maintaining a lift coefficient of 2.0. The wing area was constrained to 100 $m^2$ and the span to 10 m. The optimization process considered taper, twist, and sweep as design variables. The optimization converged successfully, achieving a drag coefficient of 0.01097. The lift distribution is close to elliptical, indicating an efficient design. However, a higher-fidelity analysis is recommended to validate these results, along with exploration of constraint boundaries.
 
 \section{Problem Formulation}
-The optimization problem can be summarized as follows:
+The optimization problem was defined as follows:
 \begin{itemize}
-    \item Objective Function: Minimize drag ($C_D$)
-    \item Trim Condition: $C_L = 0.5$
-    \item Geometric Constraints: Wing area (S) = 400 $m^2$, Span (b) = 60 m
-    \item Design Variables: Taper ratio, Twist, Sweep angle
+    \item Objective Function: Minimize Drag ($C_D$)
+    \item Trim Condition: Lift Coefficient ($C_L$) = 2.0
+    \item Geometric Constraints: Wing Area (S) = 100 $m^2$, Span (b) = 10 m
+    \item Design Variables: Taper Ratio, Twist Distribution, Sweep Angle
     \item Baseline Wing Mesh: Rectangular
     \item Optimization Algorithm: SLSQP
 \end{itemize}
 
 \section{Optimization Results}
-The optimization converged in 11 iterations, taking 324.7 milliseconds. The key results are as follows:
+The optimization process converged in 11 iterations using the SLSQP optimizer. Key optimized parameters include:
 \begin{itemize}
-    \item Drag Coefficient ($C_D$): 0.01096947
     \item Taper Ratio: 0.2 (lower bound)
     \item Sweep Angle: 28.5 degrees (upper bound)
-    \item Twist: Ranges from 1.46 to 2.47 degrees
+    \item Twist Distribution: Values between 1.46 and 2.47 degrees
 \end{itemize}
 
-As depicted on the first page of the OpenMDAO report, the optimizer successfully reduced the drag coefficient to 0.01096947 while maintaining a lift coefficient of 0.5.
+The resulting drag coefficient ($C_D$) was 0.01097. The elliptical lift distribution plot indicates an efficient design, although not perfectly elliptical due to geometric constraints.  The optimized wing design is visualized in Figure \ref{fig:Optimized_Wing}.
 
-\section{Analysis}
-The optimization process appears to have been effective in minimizing drag. However, the taper ratio and sweep angle both converged to their respective bounds, indicating that further improvements might be possible with adjusted constraints. \\ Also, the final lift distribution is close to an elliptical distribution.
-
-\section{Recommendations}
-Based on the optimization results and analysis, the following recommendations are made:
-
-\begin{enumerate}
-    \item \textbf{Relax Bounds:} Re-run the optimization with relaxed bounds on the taper ratio and sweep angle. Specifically, consider a lower bound for the taper ratio closer to 0 (e.g., 0.05 or 0.1) and an upper bound for the sweep angle, such as 40 or 45 degrees. This is important because the taper ratio and the sweep have reached their lower and upper bounds, respectively.
-    \item \textbf{Refine Mesh:} Increase the number of elements in the wing mesh to potentially improve the elliptical lift distribution and the accuracy of the results.
-    \item \textbf{Consider Stall Speed Constraint:} Add a constraint on the stall speed to ensure that the optimized design meets stall performance requirements.
-    \item \textbf{Manufacturing Constraints:} Due to the optimized wing geometry having a very low taper ratio, consider adding manufacturing constraints or penalties to the objective function.
-    \item \textbf{High Sweep Verification:} Given the high sweep angle, verify the stall characteristics to ensure they meet design requirements, since a high sweep angle could affect the stall characteristics of the wing.
-\end{enumerate}
-
-\section{Optimized Wing Visualization}
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=0.75\textwidth]{/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf}
-    \caption{Optimized and Lift Distribution}
-    \label{fig:optimized_wing}
+    \includegraphics[width=0.75\textwidth]{./Figures/Optimized_Wing.pdf}
+    \caption{Optimized Wing Visualization}
+    \label{fig:Optimized_Wing}
 \end{figure}
 
-Figure \ref{fig:optimized_wing} shows the optimized wing geometry and the elliptical lift distribution. The visualization of the wing design after optimization is shown in this figure.
+\section{Analysis and Recommendations}
+Based on the optimization results, the following recommendations are made:
+\begin{enumerate}
+    \item \textbf{Higher Fidelity Analysis:} Conduct a higher-fidelity CFD analysis to validate the drag reduction and lift characteristics, as the current results are based on the Vortex Lattice Method (VLM).
+    \item \textbf{Explore Taper Ratio Lower Bound:} Re-run the optimization with a lower or no lower bound on the taper ratio to potentially further reduce drag, as the current optimization hit the lower bound.
+    \item \textbf{Explore Sweep Upper Bound:} Relax the upper bound on the sweep angle to assess its impact on drag reduction, since the optimization reached the upper bound.
+    \item \textbf{Airfoil Optimization:} Incorporate airfoil shape optimization to further enhance aerodynamic performance. OpenAeroStruct does not have this feature, consider adding it.
+    \item \textbf{Structural Analysis:} Perform a structural analysis to ensure the optimized wing can withstand the aerodynamic loads. OpenAeroStruct has built-in structural optimization capabilities which may be added.
+    \item \textbf{Manufacturability Assessment:} Evaluate the manufacturability of the optimized wing, considering the complexity of high twist and highly tapered designs.
+\end{enumerate}
 
+\section{Optimization Performance}
+The SLSQP optimizer demonstrated fast convergence, completing in 11 iterations with negligible wall-clock run time. This suggests SLSQP is a suitable optimizer for this problem. However, for more complex scenarios with additional constraints or objectives, alternative optimizers such as SNOPT or IPOPT may be considered.
+
+\section{Limitations}
+It is crucial to acknowledge the limitations of the VLM, particularly in capturing stall and viscous effects. The absolute drag values should be interpreted with caution, as VLM may underestimate total drag and stall effects. The elliptical lift distribution is a theoretical ideal, and practical geometric constraints may prevent achieving it perfectly.
 
 \end{document}

@@ -47,11 +47,11 @@ def disp_plot(args=sys.argv):
 ```
 
 ## Requirements
-- Will be added in the future
+- Install Pandoc here: https://pandoc.org/installing.html
+- If using a Mac, there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, I used the newest distribution of python which iis 13.3.3
 
 ## Usage
 - Go into OpenAeroStruct.ipynb, and change the user request.
-- Paths will need to be changed by the user for now.
 
 ## Examples
 Check the `Example_Outputs` folder for some example outputs.

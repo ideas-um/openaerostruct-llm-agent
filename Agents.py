@@ -126,7 +126,7 @@ class ResultsReaderAgent(GeneralAgent):
                 },
             },
 
-            PDFs= ["/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Opt_History.pdf","/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf"],
+            PDFs= ["./Figures/Opt_History.pdf","./Figures/Optimized_Wing.pdf"],
 
             name="Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics shown by them",
@@ -147,6 +147,8 @@ class ResultsReaderAgent(GeneralAgent):
             2) What are the key design variables and their values? Do they hit the limits? Do they make physical sense?
             3) Look at the graphical plots and see if they make sense. Are there any anomalies? Is an elliptical lift distribution achieved for drag minimization problems, how far away is it from perfectly elliptical?
             4) Report on the computational performance.
+
+            It is important to note that you are using OpenAeroStruct, which is a Vortex Lattice Method (VLM) based aerodynamic solver, you should analyze the results with that in mind.
             """
         )
 
@@ -162,7 +164,7 @@ class ReportWriter(GeneralAgent):
 
             name="Report Writer",
             role="Using Latex write a report on the optimization results",
-            PDFs= ["/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Opt_History.pdf","/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf"],
+            PDFs= ["./Figures/Opt_History.pdf","./Figures/Optimized_Wing.pdf"],
             prompt=f"""
             Your goal is to rewrite the LLM's output into a report format. And output using the schema provided which is an object. You will be given the textual analysis of another LLM.
 
@@ -175,7 +177,7 @@ class ReportWriter(GeneralAgent):
             Use all the information given to you to write a detailed analysis of the results and recommendations.
 
             Please add this figure to the report:
-            The filepath is "/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/Optimized_Wing.pdf", which is the optimized visualization of the wing. You are also given the figure so you can reference it in the analysis.
+            The filepath is "./Figures/Optimized_Wing.pdf", which is the optimized visualization of the wing. You are also given the figure so you can reference it in the analysis.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """
