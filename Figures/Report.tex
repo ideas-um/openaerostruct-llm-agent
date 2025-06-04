@@ -10,49 +10,41 @@
 \maketitle
 
 \section{Executive Summary}
-This report summarizes the optimization process performed to minimize the drag coefficient (CD) of a wing, subject to a lift coefficient (CL) constraint of 2.0, a wing area of 100 m$^2$, and a span of 10 m. The design variables included taper, twist, and sweep. The optimization was conducted using the SLSQP optimizer. While the optimization reduced the drag, it ended with a 'FAIL' status, indicating non-convergence. The final drag coefficient achieved was approximately 0.1184.
+This report summarizes the results of an optimization study conducted to minimize the drag coefficient (CD) of a wing while maintaining a lift coefficient (CL) of 2.0. The wing design was parameterized by taper, twist, and sweep, with constraints on the wing area (S = 100 m²) and span (b = 10 m). The optimization process, utilizing the SLSQP algorithm, exited with a "FAIL" status, indicating that it did not converge successfully.
 
 \section{Problem Formulation}
 The optimization problem was formulated as follows:
 \begin{itemize}
     \item Objective Function: Minimize drag (CD)
     \item Trim Condition: CL = 2.0
-    \item Geometric Constraint: Wing area (S) = 100 m$^2$, Span (b) = 10 m
+    \item Geometric Constraint: Wing area (S) = 100 m², Span (b) = 10 m
     \item Design Variables: Taper, Twist, Sweep
-    \item Optimization Algorithm: SLSQP
 \end{itemize}
 
-\section{Optimization Results}
-The optimization process ran for 18 iterations and terminated with a 'FAIL' status, suggesting that the solution did not fully converge within the specified tolerance and maximum iteration limit. The final drag coefficient (CD) achieved was approximately 0.1184. The figure \ref{fig:OptimizedWing} shows the optimized visualization of the wing.
+\section{Optimization Setup}
+The optimization was performed using the SLSQP algorithm. The optimization ran for 183 iterations and a wall clock time of approximately 3 seconds. The maximum number of iterations was set to 200.
+
+\section{Results and Analysis}
+The optimization process concluded with a "FAIL" status, failing to converge to an optimal solution. The final drag coefficient (CD) achieved was 0.1184. The lift distribution is very close to the elliptical lift distribution, suggesting the wing is operating efficiently from an induced drag perspective. However, the twist distribution is constant, which is not typical for an optimized wing and warrants further investigation. As observed in the OpenMDAO Optimization Report for Problem RunOAS, the final values of the optimization loop are shown (See figure 1).
 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.75\textwidth]{./Optimized_Wing.pdf}
     \caption{Optimized Visualization of the Wing}
-    \label{fig:OptimizedWing}
+    \label{fig:optimized_wing}
 \end{figure}
 
-\section{Analysis and Recommendations}
-\subsection{Convergence Issues}
-The 'FAIL' status indicates that the optimization did not fully converge. This could be due to several factors, including insufficient iterations or a tolerance level that is too strict. 
 
-\subsection{Recommendations}
-\begin{enumerate}
-    	\item \textbf{Increase Maximum Iterations:} Increase the `maxiter` parameter in the optimizer settings to allow the optimization to reach a more optimal solution.
-    	\item \textbf{Adjust Tolerance:} Experiment with the `tol` parameter. A smaller tolerance may lead to a more accurate solution, but it will also require more iterations and computational time.
-    	\item \textbf{Consider Gradient-Based Methods:} For problems with many design variables, gradient-based methods may be more efficient. Gradient free methods such as genetic algorithms or particle swarm optimizers should also be considered.
-    \item \textbf{Refine Design Variable Bounds:} The design variables hit the upper and lower bounds, so they should be made wider to see if a better optimum is possible.
-    \item \textbf{Mesh Refinement:} Since OpenAeroStruct uses VLM, ensure the mesh resolution is adequate. Increase the number of chordwise and spanwise panels to capture the flow accurately, especially twist. The lift distribution should also be checked with a higher fidelity solver.
-\end{enumerate}
+\section{Recommendations}
+Given the optimization's failure to converge, several strategies should be considered:
+\begin{itemize}
+    \item Examine Design Space: Ensure that the bounds of the design variables (taper, twist, and sweep) are not overly restrictive and that a feasible solution exists within the defined constraints.  It should be noted, however, that the design variables appear to be relatively unconstrained in the optimization report.
+    \item Explore Alternative Optimization Algorithms: Since SLSQP struggled to converge, consider using a different optimization algorithm, such as a genetic algorithm, which may be more robust for this particular problem.
+    \item Increase Maximum Iterations: The optimization was terminated prematurely with a max iteration number of 200. Increasing this value may improve convergence. Consider reducing the number to decrease simulation time if it appears the optimization will fail regardless.
+    \item Constrain Twist Distribution: Given the non-physical twist distribution, it is recommended that this be constrained or penalized in some way to ensure more realistic designs are considered.
+\end{itemize}
 
-\subsection{Optimization Performance}
-The optimization was performed using the SLSQP optimizer, which is a gradient-based method. While SLSQP is generally efficient, alternative optimizers such as genetic algorithms or particle swarm optimization might be beneficial for more complex problems or those with many local minima.  
-
-\subsection{Unrelated Observations}
-It is important to note that the OpenAeroStruct code assumes that the wing is symmetric. To gain further confidence in the solution, a higher fidelity code should be used to validate the results. Additionally, the optimizer uses SLSQP, which is a local optimizer, meaning that the solution obtained is only locally optimal. Factors such as manufacturability and structural integrity should also be considered during the design process, as these may impose additional constraints or influence the selection of design variables.
-
-\section{Concluding Remarks}
-Further investigation and refinement of the optimization settings are recommended to achieve full convergence and explore potentially better solutions. Validation with higher-fidelity codes and consideration of real-world constraints are essential for a practical wing design.
-
+\section{Conclusion}
+The optimization process did not converge successfully, indicating that the SLSQP algorithm may not be well-suited for this problem. Further investigation and adjustments to the optimization setup, including exploring alternative algorithms and constraints, are recommended to achieve a more optimal wing design.
 
 \end{document}
