@@ -177,7 +177,7 @@ class ReportWriter(GeneralAgent):
             Use all the information given to you to write a detailed analysis of the results and recommendations.
 
             Please add this figure to the report:
-            The filepath is "./Figures/Optimized_Wing.pdf", which is the optimized visualization of the wing. You are also given the figure so you can reference it in the analysis.
+            The filepath is "./Optimized_Wing.pdf", which is the optimized visualization of the wing. You are also given the figure so you can reference it in the analysis.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """
