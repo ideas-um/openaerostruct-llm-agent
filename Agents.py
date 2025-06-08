@@ -113,7 +113,34 @@ class ReformulatorAgent(GeneralAgent):
             """
         )
 
+class RetrievalAgent(GeneralAgent):
+    def __init__(self):
+        super().__init__(
+            schema = {
+                "type": "object",
+                "properties": {
+                    "Retrieved_Information": {"type": "string", "description": ""},
+                },
+            },
+
+            name="Information Retrieval Agent",
+            role="Provide a suitable query to retrieve information from a RAG system",
+            prompt="""Your goal is to provide a query to retrieve information from a RAG system. And output using the schema provided which is an object. 
+            You need to query information such that another agent can use it to understand the physical variables used in optimization.
+
+            This is your task:
+            1. Read the refined user input.
+            2. Identify the variables used.
+            3. Write a query that will be used to retrieve information from a RAG system. Only include wing geometry variables used in optimization. Ignore the variables that are not used in optimization.
+            4. Use the provided schema to structure your response.
+
+            Example output:
+            Please provide information for the following variables used in aerodynamic wing optimization: Taper ratio, Twist angle, Sweep angle, Lift Coefficient (CL), Wing Area (S), Wing Span (b), and Drag.
+            """
+        )
+
 class ResultsReaderAgent(GeneralAgent):
+
     def __init__(self):
         super().__init__(
             schema = {

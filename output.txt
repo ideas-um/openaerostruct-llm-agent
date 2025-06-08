@@ -1,13 +1,31 @@
-Positive directional derivative for linesearch    (Exit mode 8)
-            Current function value: 11.836269386857074
-            Iterations: 32
-            Function evaluations: 182
-            Gradient evaluations: 28
-Optimization FAILED.
-Positive directional derivative for linesearch
------------------------------------
-
-Angle of attack = 10.0 deg
-CL =  0.7964800823760337
-CD =  0.11836269386857073
-/Users/conan/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/openmdao/recorders/sqlite_recorder.py:231: UserWarning:The existing case recorder file, /Users/conan/Desktop/AI-Augmented-Design/LLM_OpenAeroStruct/RunOAS_out/aero.db, is being overwritten.
+Traceback (most recent call last):
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/LLM_OpenAeroStruct/RunOAS.py"[0m, line [35m49[0m, in [35m<module>[0m
+    [31mplot_mesh[0m[1;31m(mesh)[0m  #this plots the rectangular wing mesh, DO NOT EDIT THIS LINE
+    [31m~~~~~~~~~[0m[1;31m^^^^^^[0m
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/LLM_OpenAeroStruct/RunOAS.py"[0m, line [35m30[0m, in [35mplot_mesh[0m
+    [31mplt.savefig[0m[1;31m('/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/mesh.pdf', bbox_inches='tight')[0m
+    [31m~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/pyplot.py"[0m, line [35m1243[0m, in [35msavefig[0m
+    res = fig.savefig(*args, **kwargs)  # type: ignore[func-returns-value]
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/figure.py"[0m, line [35m3490[0m, in [35msavefig[0m
+    [31mself.canvas.print_figure[0m[1;31m(fname, **kwargs)[0m
+    [31m~~~~~~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/backend_bases.py"[0m, line [35m2184[0m, in [35mprint_figure[0m
+    result = print_method(
+        filename,
+    ...<3 lines>...
+        bbox_inches_restore=_bbox_inches_restore,
+        **kwargs)
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/backend_bases.py"[0m, line [35m2040[0m, in [35m<lambda>[0m
+    print_method = functools.wraps(meth)(lambda *args, **kwargs: [31mmeth[0m[1;31m([0m
+                                                                 [31m~~~~[0m[1;31m^[0m
+        [1;31m*args, **{k: v for k, v in kwargs.items() if k not in skip})[0m)
+        [1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/backends/backend_pdf.py"[0m, line [35m2779[0m, in [35mprint_pdf[0m
+    file = PdfFile(filename, metadata=metadata)
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/backends/backend_pdf.py"[0m, line [35m687[0m, in [35m__init__[0m
+    fh, opened = [31mcbook.to_filehandle[0m[1;31m(filename, "wb", return_opened=True)[0m
+                 [31m~~~~~~~~~~~~~~~~~~~[0m[1;31m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+  File [35m"/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/matplotlib/cbook.py"[0m, line [35m546[0m, in [35mto_filehandle[0m
+    fh = open(fname, flag, encoding=encoding)
+[1;35mFileNotFoundError[0m: [35m[Errno 2] No such file or directory: '/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/mesh.pdf'[0m
