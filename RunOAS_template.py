@@ -27,7 +27,7 @@ def plot_mesh(mesh):
     plt.axis('equal')
     plt.xlabel('span(m)')
     plt.ylabel('chord(m)')
-    plt.savefig('/Users/conan/Desktop/LLM_Aerospace_Research/LLM_OpenAeroStruct/Figures/mesh.pdf', bbox_inches='tight')
+    plt.savefig('./Figures/mesh.pdf', bbox_inches='tight')
 
 """Part 1: PUT THE BASELINE MESH OF THE WING HERE"""
 

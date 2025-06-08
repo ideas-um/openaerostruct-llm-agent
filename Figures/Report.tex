@@ -3,50 +3,70 @@
 \usepackage{geometry}
 \geometry{a4paper, margin=1in}
 
-\title{Optimized Wing Design Report}
-\author{LLM Assistant}
+\title{Wing Optimization Report}
 \date{2025-06-08}
 
 \begin{document}
+
 \maketitle
 
 \section{Executive Summary}
-This report summarizes the optimization process for a wing design with the objective of minimizing drag at a lift coefficient (CL) of 2.0, a wing area (S) of 100 m$^2$, and a span (b) of 10 m. The design variables included taper, twist, and sweep. The optimization was performed using the ScipyOptimizeDriver with the SLSQP algorithm. The optimization process concluded with a 'FAIL' status after 183 iterations, indicating a non-optimal solution. The resulting drag coefficient (CD) is 0.118, which is considered high.
+This report details the optimization of a wing design with a fixed area of 400 m$^2$ and a span of 60 m, targeting a lift coefficient (CL) of 0.5. The optimization aimed to minimize drag by adjusting taper, dihedral, twist, and sweep. The drag coefficient converged to approximately 0.010805206. While the optimization process appears successful, certain aspects of the final design suggest potential areas for further refinement. The optimization converged in 18 iterations using the SLSQP optimizer.
+
+\section{Problem Formulation}
+The optimization problem was formulated as follows:
+\begin{itemize}
+    \item Objective Function: Minimize drag
+    \item Trim Condition: CL = 0.5
+    \item Geometric Constraints: Wing area (S) = 400 m$^2$, Span (b) = 60 m
+    \item Design Variables: Taper, Dihedral, Twist, Sweep
+\end{itemize}
 
 \section{Analysis of Results}
 
-As indicated by the 'FAIL' status, the optimization did not converge to an optimal solution. The solver terminated prematurely, potentially due to getting stuck in local minima or the problem's complexity exceeding the algorithm's capabilities. The optimized wing geometry, visualized in Figure \ref{fig:optimized_wing}, shows the wing design at iteration 182. The lift distribution deviates significantly from the ideal elliptical lift distribution, which is known to minimize induced drag. Additionally, the twist distribution plot appears to have stalled at its upper bound, suggesting that the bounds may be overly restrictive.
+\subsection{Wing Geometry and Aerodynamic Performance}
+The final wing shape exhibits a low dihedral angle, a linear twist distribution, and a nearly elliptical lift distribution, as expected for drag minimization. However, deviations from a perfect ellipse suggest room for improvement.
 
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.7\textwidth]{./Optimized_Wing.pdf}
-    \caption{Optimized Wing Visualization at Iteration 182}
+    \caption{Optimized Wing Visualization}
     \label{fig:optimized_wing}
 \end{figure}
+Figure \ref{fig:optimized_wing} visualizes the optimized wing.  The linear twist is apparent in the figure, as well as the final optimized shape.
 
-The optimization process involved 183 model evaluations and 28 derivative evaluations, with a wall clock run time of approximately 3.4 seconds. The high drag coefficient and the 'FAIL' status suggest that the SLSQP algorithm struggled to efficiently handle the problem's complexity.
+\subsection{Optimization Performance}
+The optimization converged quickly using the SLSQP optimizer, indicating that the optimizer may be appropriate for the design problem. However, if the design space is made more complex, or if other constraints are added, then the number of iterations may need to be increased.
 
 \section{Recommendations}
 
-To improve the optimization process and achieve a more optimal wing design, the following recommendations are proposed:
+\subsection{Explore Dihedral}
+The dihedral angle is pinned at a low value. Consider either removing the design variable or broadening its bounds to investigate if a non-zero dihedral can further reduce induced drag. Ensure sufficient panels are used to resolve winglets if they are present, and consider optimizing winglet geometry.
 
-\begin{enumerate}
-    \item \textbf{Investigate the cause of the 'FAIL' status:} Analyze the optimization log and error messages to understand the reason for premature termination.
-    \item \textbf{Adjust optimization settings:} Increase the maximum number of iterations (\texttt{maxiter}) and consider reducing the tolerance to allow for finer convergence.
-    \item \textbf{Try different optimization algorithms:} Explore alternative gradient-based algorithms like BFGS or CG, or gradient-free algorithms such as genetic algorithms or simulated annealing.
-    \item \textbf{Rescale the design variables:} Ensure that the design variables have similar scales to prevent hindering the optimization process.
-    \item \textbf{Review the constraints:} Verify the accuracy of the lift constraint and consider relaxing the tolerance or reformulating the constraint if feasibility issues arise.
-    \item \textbf{Examine the design variable bounds:} Relax the bounds for twist and sweep, as the solver terminated with the maximum values for these variables, suggesting restrictive bounds.
-    \item \textbf{Verify the gradients:} Check the accuracy of the computed gradients using finite difference or complex-step verification, as incorrect gradients can negatively impact performance.
-    \item \textbf{Promote Elliptical Lift Distribution:} Add constraints or objectives that encourage an elliptical lift distribution, as this minimizes induced drag.
-    \item \textbf{Area and Span Constraints:} Add area and span constraints to the model.
-\end{enumerate}
+\subsection{Refine Twist Distribution}
+The linear twist distribution suggests a need for a more complex design space. Increase the number of control points for twist to allow for a more optimal distribution.
+
+\subsection{Explore Taper Ratio}
+Experiment with different taper ratios, as a well-chosen taper ratio can significantly improve span efficiency and better approximate an elliptical lift distribution.
+
+\subsection{Further Optimize Sweep}
+Ensure the sweep angle is physically reasonable for the aircraft's intended speed regime. Since it's a subsonic aircraft, sweep is expected to be low.
+
+\subsection{Investigate Constraints}
+Check for any active constraints that may be preventing further drag reduction. Relaxing constraints, if possible, could lead to a better optimum. The optimization converged near the bounds of some design variables; explore expanding those bounds if physically reasonable. Add a manufacturability constraint.
+
+\subsection{Aerodynamic Center Verification}
+Verify that the final wing configuration's aerodynamic center is within an acceptable range for stability purposes.
 
 \section{Additional Considerations}
 
-\begin{itemize}
-    \item \textbf{VLM Limitations:} Be aware that OpenAeroStruct uses VLM, a linear aerodynamic solver that may not accurately predict drag and lift characteristics in the presence of significant flow separation or stall.
-    \item \textbf{Manufacturability:} Assess the manufacturability of the optimized wing geometry, particularly the twist distribution, as large or complex twist distributions can be difficult or expensive to manufacture.
-\end{itemize}
+\subsection{Manufacturability}
+The optimized wing geometry should be assessed for manufacturability. Sharp changes in twist, dihedral, or sweep can increase manufacturing costs.
+
+\subsection{VLM Limitations}
+OpenAeroStruct uses a Vortex Lattice Method (VLM) for aerodynamic analysis, which has limitations in accurately capturing viscous effects, stall behavior, and complex flow phenomena. For a more detailed analysis, consider using a higher-fidelity CFD solver after initial optimization with OpenAeroStruct.
+
+\subsection{Reynolds Number}
+Ensure the Reynolds number used in the analysis is representative of the actual flight conditions. Since OpenAeroStruct is VLM, profile drag may be inaccurate due to viscous effects not being modeled properly.
 
 \end{document}

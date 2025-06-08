@@ -49,6 +49,7 @@ def disp_plot(args=sys.argv):
 ## Requirements
 - Install Pandoc here: https://pandoc.org/installing.html
 - If using a Mac, there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, I used the newest distribution of python which iis 13.3.3
+- I also suggest installing the Vscode extension LaTex Workshop such that the report can be generated into PDF format for viewing.
 
 ## Usage
 - Go into OpenAeroStruct.ipynb, and change the user request.

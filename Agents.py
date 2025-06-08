@@ -296,6 +296,8 @@ class GeometryAgent(BaseCoderAgent):
             4. Ensure that the response is well-formatted and easy to understand.
 
             This is an explained code sample for you to follow. Do not add new fields, directly edit the code and explain your changes in the calculations and explain field.
+            DO NOT ADD THINGS THAT ARE NOT PROVIDED IN THE EXAMPLE BELOW.
+
             ```python
             surface = {
                 # Wing definition, KEEP THE SAME UNLESS ASKED TO CHANGE
@@ -323,6 +325,7 @@ class GeometryAgent(BaseCoderAgent):
                 #"chord_cp": np.ones(3),  # if chord cp is allowed to be optimized, uncomment this line and change the value for how many points for the bspline to change the chord, default is 3
                 #"taper" : 0.4, # if the wing can be tapered, uncomment this line and change the initial value for how much taper, default is 0.4
                 #"sweep" : 28.0, # if the wing can be swept, uncomment this line and change the initial value for how much sweep, default is 28.0
+                #"dihedral": 3.0, # if the wing has dihedral, uncomment this line and change the initial value for how much dihedral, default is 3.0
                 #"twist_cp" : np.zeros(2),  # if the wing can be twisted, uncomment this line and change the value for how many points for the bspline to change the twist, default is 4
             }  # end of surface dictionary
             ,,,
@@ -413,14 +416,14 @@ class OptimizerAgent(BaseCoderAgent):
 
             ########## THIS IS THE PART TO EDIT ##########
             #If the variables are not specified, you can comment them out, you can also change the upper and lower bounds.
-            #You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep etc.
+            #You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep, dihedral etc.
             #The way to add them is wing."var_name" and the lower and upper bounds are in the form of lower=0.0, upper=1.0
-            #these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp
+            #these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp, dihedral = dihedral
             #remember to add alpha as a design variable if CL is a constraint. 
             #DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
             prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)   # varies
-            prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=0.5)   # impose CL = x
+            prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=x)   # impose CL = x, where x is a number
             prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)   # dummy objective to minimize CD.
             ############# THIS END OF THE PART TO EDIT ##########
 
