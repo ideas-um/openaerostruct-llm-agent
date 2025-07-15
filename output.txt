@@ -1,18 +1,12 @@
 Optimization terminated successfully    (Exit mode 0)
-            Current function value: 1.080520596632956
+            Current function value: 1.093784933447508
             Iterations: 15
-            Function evaluations: 17
+            Function evaluations: 16
             Gradient evaluations: 15
 Optimization Complete
 -----------------------------------
 
-Angle of attack = 4.09579301114438 deg
-CL =  0.49999997351937486
-CD =  0.01080520596632956
+Angle of attack = 3.939083590533077 deg
+CL =  0.49999999873647544
+CD =  0.01093784933447508
 /Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/openmdao/recorders/sqlite_recorder.py:231: UserWarning:The existing case recorder file, /Users/conanlee/Desktop/AI-Augmented-Design/LLM_OpenAeroStruct/RunOAS_out/aero.db, is being overwritten.
-/Users/conanlee/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/openmdao/core/driver.py:693: DriverWarning:The following design variable initial conditions are out of their specified bounds:
-  wing.sweep
-    val: [28.]
-    lower: -20.0
-    upper: 20.0
-Set the initial value of the design variable to a valid value or set the driver option['invalid_desvar_behavior'] to 'ignore'.

@@ -12,7 +12,7 @@ embeddings = TogetherEmbeddings(
 persist_directory = './Embeddings_Persist'
 vectordb = Chroma(persist_directory=persist_directory, embedding_function=embeddings)
 
-retriever = vectordb.as_retriever(search_type="mmr",
+retriever = vectordb.as_retriever(search_type="similarity",
     search_kwargs={'k': 5, 'fetch_k': 50})
 
 def run_retriever(query):
