@@ -4,7 +4,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_together import TogetherEmbeddings
 
-file = "./LLM_OpenAeroStruct/RAG_PDF/Martins--aircraft_design_metabook.pdf"
+file = "./LLM_OpenAeroStruct/RAG_PDF/Aircraft_Design_Metabook.pdf"
 path = os.path.abspath(file)
 
 loader = PyPDFLoader(path)
@@ -21,7 +21,7 @@ documents = all_splits
 
 # Import the embeddings
 embeddings = TogetherEmbeddings(
-    model="togethercomputer/m2-bert-80M-8k-retrieval",
+    model="togethercomputer/m2-bert-80M-32k-retrieval",
     api_key= os.environ.get('TOGETHER_AI_API_KEY')
 )
 
