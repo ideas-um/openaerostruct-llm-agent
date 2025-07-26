@@ -1,9 +1,11 @@
-# LLM_OpenAeroStruct
+# OpenAeroStruct LLM Agent
+Copyright 2025, IDEAS Lab at the University of Michigan and Conan Lee (HKUST).
+All rights reserved.
 
 #### Runs OpenAeroStruct Automatically based on text input, does all the plotting, optimizing, and meshing with LLMs.
 
 ## Introduction
-LLM_OpenAeroStruct is a tool that leverages Large Language Models (LLMs) to automate aircraft wing design and analysis using the OpenAeroStruct framework. It allows users to input design specifications in natural language, and the system automatically handles meshing, analysis, optimization, visualization, and reporting.
+OpenAeroStruct LLM Agent is a tool that leverages Large Language Models (LLMs) to automate aircraft wing design and analysis using the OpenAeroStruct framework. It allows users to input design specifications in natural language, and the system automatically handles meshing, analysis, optimization, visualization, and reporting.
 
 ## Features
 - Natural language processing for wing design specifications
@@ -56,6 +58,3 @@ def disp_plot(args=sys.argv):
 
 ## Examples
 Check the `Example_Outputs` folder for some example outputs.
-
-## License
-- Will be added in the future
