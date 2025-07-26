@@ -1,8 +1,12 @@
 # OpenAeroStruct LLM Agent
-Copyright 2025, IDEAS Lab at the University of Michigan and Conan Lee (HKUST).
-All rights reserved.
+Copyright 2025, The Regents of the  University of Michigan, IDEAS Lab
+https://ideas.engin.umich.edu
 
 #### Runs OpenAeroStruct Automatically based on text input, does all the plotting, optimizing, and meshing with LLMs.
+
+## Contributors
+- Conan Lee: Lead developer and primary author (HKUST) 
+- Gokcin Cinar: Research supervision and concept development (U-M)
 
 ## Introduction
 OpenAeroStruct LLM Agent is a tool that leverages Large Language Models (LLMs) to automate aircraft wing design and analysis using the OpenAeroStruct framework. It allows users to input design specifications in natural language, and the system automatically handles meshing, analysis, optimization, visualization, and reporting.
