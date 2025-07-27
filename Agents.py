@@ -90,25 +90,25 @@ class ReformulatorAgent(GeneralAgent):
 
             name="Prompt Reformulator",
             role="Changing the user prompt to a format that OpenAeroStruct can understand",
-            prompt="""Your goal is to rephrase the user's input into a format that OpenAeroStruct can understand. And output using the schema provided which is an object.
-            
-            This is your task:
+            prompt="""Your goal is to rephrase the user's input into a format that OpenAeroStruct can understand and output using the provided schema, which is an object.
+
+            Your tasks are:
             1. Read the user's input.
             2. Identify the key information and requirements.
             3. Use the provided schema to structure your response.
             4. Generate a response that clearly outlines the key requirements and constraints for the OpenAeroStruct optimization process.
             5. Ensure that the response is well-formatted and easy to understand.
             6. Use the format below to structure your response.
-    
-            These are suggested information you need to include in your response:
-            Objective Function:     : Maximize / Minimize objectives.
-            Trim Condition          : If any, for example, minimize drag at CL = 0.5 or alpha = 3.0 deg.
-            Geometric Constraint    : Wing area (S), root chord, tip chord, aspect ratio etc.
-            Design Variables:       : Sweep, Twist, Taper, Chord, etc.,
-            Baseline Wing Mesh      : Unless Specified, use rect, if common research model, use CRM.
-            Optimization Algorithm  : Unless Specified use SLSQP. 
-            Plotting Requirements   : If any, else none.
-            Errors                  : Any errors in the input. E.g. Missing key information like objective, or if number of constraints > number of design variables etc.
+
+            Include the following information in your response as applicable:
+            Objective Function:     Maximize or minimize objectives.
+            Trim Condition:         If applicable; for example, minimize drag at $C_L = 0.5$ or $\alpha = 3.0$ deg.
+            Geometric Constraints:  Wing area (S), root chord, tip chord, aspect ratio, etc.
+            Design Variables:       Sweep, twist, taper, chord, etc.
+            Baseline Wing Mesh:     Unless specified, use a rectangular mesh. If using a common research model, use CRM.
+            Optimization Algorithm: Unless specified, use SLSQP.
+            Plotting Requirements:  If any, otherwise state none.
+            Errors:             Note any errors in the input, such as missing key information (e.g., no objective specified), or if the number of constraints exceeds the number of design variables.
 
             """
         )
@@ -157,23 +157,24 @@ class ResultsReaderAgent(GeneralAgent):
 
             name="Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics shown by them",
-            prompt="""Your goal is to read the results of the OpenAeroStruct optimization and provide recommendations. And output using the schema provided which is an object. You are also given the initial problem, and two PDF reports of the results.
-            This is your task:
-            1. Read the pdfs of the OpenAeroStruct optimization.
+            prompt="""Your goal is to review the results of the OpenAeroStruct optimization and provide recommendations. Output should use the provided schema, which is an object. The initial problem statement and two PDF reports of the results will be provided.
+
+            Your tasks are:
+            1. Read the PDFs of the OpenAeroStruct optimization results.
             2. Identify the key information and results.
             3. Use the provided schema to structure your response.
 
-            Have four parts to the response:
-            1) Analysis: Talk about whether the optimization was successful or not, and what the results mean.
-            2) Recommendations: Provide recommendations for the next steps, such as further optimizations, changes to the design variables, or other considerations. Consider whether the results are reasonable and if not, explain why.
-            3) Optimization Performance: Talk about the computational performance of the optimization, number of iterations to converge, time, and if it is unconverged suggest another optimization algorithm that may work.
-            4) Unrelated Observations: Provide any other observations that are not related to the optimization, such as manufacturability and variables that are not the design variables.
+            Structure your response in four parts:
+            1) Analysis: Assess whether the optimization was successful, and explain what the results mean.
+            2) Recommendations: Suggest next steps, such as further optimizations, adjustments to design variables, or other considerations. Evaluate whether the results are reasonable; if not, explain why.
+            3) Optimization Performance: Discuss the computational performance, including the number of iterations, computation time, and, if unconverged, suggest an alternative optimization algorithm.
+            4) Unrelated Observations: Note any other observations not directly related to the optimization, such as manufacturability or non-design variables.
 
-            These are the details to capture:
-            1) Does the optimization meet the objectives? If not, why? What is the numerical values of the objective?
-            2) What are the key design variables and their values? Do they hit the limits? Do they make physical sense?
-            3) Look at the graphical plots and see if they make sense. Are there any anomalies? Is an elliptical lift distribution achieved for drag minimization problems, how far away is it from perfectly elliptical?
-            4) Report on the computational performance.
+            Include the following details:
+            1) Does the optimization achieve the objectives? If not, why? State numerical values of the objective.
+            2) List key design variables and their values: Do they reach their limits? Are they physically reasonable?
+            3) Analyze graphical plots: Do they make sense? Are there anomalies? For drag minimization, is lift distribution elliptical? How close is it to ideal?
+            4) Report computational performance.
 
             It is important to note that you are using OpenAeroStruct, which is a Vortex Lattice Method (VLM) based aerodynamic solver, you should analyze the results with that in mind.
             """
@@ -193,18 +194,18 @@ class ReportWriter(GeneralAgent):
             role="Using Latex write a report on the optimization results",
             PDFs= ["./Figures/Opt_History.pdf","./Figures/Optimized_Wing.pdf"],
             prompt=f"""
-            Your goal is to rewrite the LLM's output into a report format. And output using the schema provided which is an object. You will be given the textual analysis of another LLM.
+            Your goal is to rewrite the LLM output into a report format, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
-            This is your task:
+            Your tasks are:
             1. Read the analysis and recommendations.
             2. Identify the key information and requirements.
             3. Use the provided schema to structure your response.
-            4. Generate a response that answers the users question in paragraphs that are written in Latex and formatted correctly.
+            4. Generate a response that answers the user's question in paragraph form, formatted in properly written LaTeX.
 
-            Use all the information given to you to write a detailed analysis of the results and recommendations.
+            Use all the information given to write a detailed analysis of the results and recommendations.
 
-            Please add this figure to the report:
-            The filepath is "./Optimized_Wing.pdf", which is the optimized visualization of the wing. You are also given the figure so you can reference it in the analysis.
+            Please include this figure in the report:
+            The file path is "Figures/Optimized\_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis, as it will also be provided.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """
@@ -222,7 +223,7 @@ class BaseCoderAgent:
         return f"You are {self.name}, a coder specializing in {self.role}."
 
     def execute_task(self, task_description):
-        full_prompt = f"{self.prompt}\nTask: {task_description}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}"
+        full_prompt = f"{self.prompt}\nTask: {task_description}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}, for coding, do not import any packages yourself"
         response = self.model.generate_content(full_prompt)
         output = extract_json_between_markers(response.text)
         return output
@@ -240,17 +241,17 @@ class BaseMeshAgent(BaseCoderAgent):
             },
             name="Mesh Coder",
             role="Mesh generation",
-            prompt="""Your goal is to follow some instructions that I provide to you and write OpenAeroStruct mesh code, please follow the instructions and the code samples clearly. And output using the schema provided which is text.
-            
-            This is your task:
-            1. Read thezz inputs. You will be given the wing type, and the geometrical configuration. Your job is to change the span, root chord, and type of the wing if the user requirements invoke change and output the code.
+            prompt="""Your goal is to implement the instructions provided and write OpenAeroStruct mesh code. Follow the instructions and the code samples carefully, and output using the provided schema as text.
+
+            Your tasks are:
+            1. Read the inputs. You will be given the wing type and geometrical configuration. If the requirements call for a change, update the span, root chord, and wing type, then output the code.
             2. Identify the requirements.
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
 
-            You might also need to do basic math calculations to get the values for the mesh generation.
-            For a rectangular wing, if the span and area is given, you can calculate the root chord using the formula:
-            root_chord = area / span
+            You may need to perform basic math calculations for mesh generation. For a rectangular wing, if span and area are given, calculate the root chord as follows: root\_chord = area / span.
+
+            Follow the explained code sample provided. Do not add new fields—directly edit the code and explain any changes in the calculations and in the explanation field.
 
             This is an explained code sample for you to follow. Do not add new fields, directly edit the code and explain your changes in the calculations and explain field.
             ```python
@@ -287,16 +288,15 @@ class GeometryAgent(BaseCoderAgent):
             },
             name="Geometry Agent",
             role="Setup geometries allowed to be optimized",
-            prompt="""Your goal is to follow some instructions that I provide to you and write OpenAeroStruct mesh code, please follow the instructions and the code samples clearly. And output using the schema provided which is text.
-            
-            This is your task:
-            1. Read the inputs. You will be given the variables that cna be optimized. Your job is to change the geometry preparation code and uncomment variables that could be optimized.
+            prompt="""Your goal is to follow the instructions provided and write OpenAeroStruct geometry code. Carefully follow the instructions and code samples, and output using the provided schema as text.
+
+            Your tasks are:
+            1. Read the inputs. You will be given the variables that can be optimized. Update the geometry preparation code and uncomment variables that can be optimized.
             2. Identify the requirements.
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
 
-            This is an explained code sample for you to follow. Do not add new fields, directly edit the code and explain your changes in the calculations and explain field.
-            DO NOT ADD THINGS THAT ARE NOT PROVIDED IN THE EXAMPLE BELOW.
+            Follow the explained code sample provided. Do not add new fields—directly edit the code and explain your changes in the calculations and explanation field.
 
             ```python
             surface = {
@@ -344,16 +344,15 @@ class OptimizerAgent(BaseCoderAgent):
             },
             name="Optimization Agent",
             role="Setup optimization script to run OpenAeroStruct",
-            prompt="""Your goal is to follow some instructions that I provide to you and write OpenAeroStruct optimization code, please follow the instructions and the code samples clearly. And output using the schema provided which is text.
-            
-            This is your task:
-            1. Read the inputs. You will be given the variables that can be optimized. Your job is to change the optimization code to include the variables that can be optimized.
+            prompt="""Your goal is to follow the instructions provided and write OpenAeroStruct optimization code. Carefully follow the instructions and code samples, and output using the provided schema as text.
+
+            Your tasks are:
+            1. Read the inputs. You will be given the variables that can be optimized. Update the optimization code to include the variables for optimization.
             2. Identify the requirements.
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
 
-            MAKE SURE TO NOT CONSTRAINT THE AREA AND SPAN AS THEY DO NOT WORK YET.
-            DO NOT ADD ANYTHING LIKE THIS TO THE CODE
+            Do not add area and span constraints, therefore do not add these lines:
             prob.model.add_constraint('wing.S_ref', equals=400.0)
             prob.model.add_constraint('wing.b_half_w', equals=30.0) # Half span
 
@@ -417,11 +416,12 @@ class OptimizerAgent(BaseCoderAgent):
             ########## THIS IS THE PART TO EDIT ##########
             #If the variables are not specified, you can comment them out, you can also change the upper and lower bounds.
             #You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep, dihedral etc.
-            #The way to add them is wing."var_name" and the lower and upper bounds are in the form of lower=0.0, upper=1.0
+            #The way to add them is wing."var_name" (for example, wing.taper) and the lower and upper bounds are in the form of lower=0.0, upper=1.0
             #these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp, dihedral = dihedral
             #remember to add alpha as a design variable if CL is a constraint. 
             #DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
+            prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Varies the taper ratio
             prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)   # varies
             prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=x)   # impose CL = x, where x is a number
             prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)   # dummy objective to minimize CD.

@@ -1,67 +1,55 @@
 \documentclass{article}
 \usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
 \usepackage{geometry}
 \geometry{a4paper, margin=1in}
 
-\title{Wing Optimization Report}
-\author{AI Assistant}
+\title{Optimization Report}
+\author{AI Analysis}
 \date{2025-07-27}
 
 \begin{document}
 \maketitle
 
 \section{Executive Summary}
-This report details the results of an optimization study aimed at minimizing the drag of a wing while maintaining a lift coefficient of 2.0. The design variables included taper, twist, and sweep, with constraints on wing area (100 $m^2$) and span (10 m). The optimization process, utilizing the SLSQP algorithm, failed to converge to a feasible solution, primarily due to the inability to meet the lift coefficient constraint. The final lift coefficient achieved was 0.796, significantly below the target value. The drag coefficient at the end of the optimization was 11.836, which is considered high.
+This report summarizes the results of an optimization study aimed at minimizing the drag coefficient (CD) of a wing while maintaining a lift coefficient (CL) of 2.0. The design variables included taper, twist, and sweep. The optimization was performed using the SLSQP algorithm. However, the optimization failed to converge, resulting in a final CD value of 6.77573231 and an exit status of \texttt{FAIL}. Further investigation and adjustments are required to achieve a successful optimization.
 
-\section{Problem Definition and Setup}
+\section{Problem Definition}
 The optimization problem was defined as follows:
 \begin{itemize}
-    \item Objective Function: Minimize drag ($C_D$)
-    \item Trim Condition: Lift coefficient ($C_L$) = 2.0
-    \item Geometric Constraints: Wing area (S) = 100 $m^2$, Span (b) = 10 m
-    \item Design Variables: Taper ratio, Twist distribution, Sweep angle
+    \item Objective Function: Minimize drag (CD)
+    \item Trim Condition: CL = 2.0
+    \item Geometric Constraint: Wing area (S) = 100 m$^2$, Span (b) = 10 m
+    \item Design Variables: Taper, twist, and sweep
+    \item Baseline Wing Mesh: Rectangular mesh
     \item Optimization Algorithm: SLSQP
 \end{itemize}
 
 \section{Results and Analysis}
-The optimization process terminated after 474 iterations with an exit status of 'FAIL', indicating a lack of convergence. Key observations from the optimization run include:
-
-\begin{itemize}
-    \item \textbf{Lift Coefficient Constraint}: The target $C_L$ of 2.0 was not met, with the final value at 0.796.
-    \item \textbf{Drag Coefficient}: The final $C_D$ value was 11.836, indicating suboptimal drag performance.
-    \item \textbf{Lift Distribution}: The lift distribution plot indicates a non-elliptical distribution, contrary to the expected shape for drag minimization.
-    \item \textbf{Twist Distribution}: The twist distribution appears constant, which is not ideal for achieving the target $C_L$ while minimizing drag.  This is likely a result of how the twist was parameterized.  The twist is a single variable, so it cannot vary across the span.
-    \item \textbf{Taper Ratio}: The taper ratio is at its lower bound, which may be overly restrictive.
-    \item \textbf{Sweep Angle}: The sweep angle converged to 14.5 degrees.
-\end{itemize}
-
-
-\section{Wing Visualization}
+The optimization process ran for 30 iterations but failed to converge, as indicated by the \texttt{FAIL} exit status. The final drag coefficient (CD) value was 6.77573231, which is far from an optimized result. The plot of the lift distribution shows a high peak in the center, deviating significantly from the ideal elliptical lift distribution.  As shown in Figure \ref{fig:OptimizedWing}, the lift distribution has a high peak in the center, so the optimization isn't close to the ideal elliptic lift distribution.
 
 \begin{figure}[h!]
     \centering
-    \includegraphics[width=0.75\textwidth]{./Optimized_Wing.pdf}
+    \includegraphics[width=0.75\textwidth]{Figures/Optimized_Wing.pdf}
     \caption{Optimized Wing Visualization}
-    \label{fig:optimized_wing}
+    \label{fig:OptimizedWing}
 \end{figure}
 
-Figure \ref{fig:optimized_wing} shows a visualization of the optimized wing. The geometry reflects the constraints and design variable values at the termination of the optimization process.
-
+Furthermore, the report indicates that the area and semispan constraints were removed because they were not working, which contradicts the problem statement. This issue must be addressed by ensuring the wing area constraint is properly implemented and enforced during optimization.
 
 \section{Recommendations}
-Based on the analysis of the optimization results, the following recommendations are made:
-
+Based on the analysis, the following recommendations are made:
 \begin{enumerate}
-    \item \textbf{Increase Maximum Iterations}: Increase the \texttt{maxiter} parameter to allow the solver more iterations to converge.
-    \item \textbf{Constraint Scaling}: Ensure proper scaling of the constraints to avoid numerical issues. Improper scaling can lead to the solver failing to converge.
-    \item \textbf{Revise Bounds}: Review and revise the bounds for the design variables, particularly the taper ratio. A wider range for the twist distribution should also be considered. Also, consider parameterizing the twist as a distribution and not a single variable.
-    \item \textbf{Consider Different Optimization Algorithms}: The SLSQP algorithm may not be the most suitable for this problem. Explore other gradient-based or gradient-free algorithms, such as genetic algorithms.
-    \item \textbf{Refine Mesh}: Increase the number of spanwise and chordwise panels to improve the accuracy of the vortex lattice method, especially given that changes in chord length due to optimization may affect geometry.
-    \item \textbf{Chord as a Design Variable}: Consider making the chord a design variable to have more control over the wing geometry, as fixing both the wing area and span limits the optimization potential.
+    \item Investigate the cause of optimization failure: Review the optimization setup for potential issues such as conflicting constraints or poorly scaled design variables.
+    \item Adjust optimization parameters: Experiment with different values for tolerance (\texttt{tol}) and maximum iterations (\texttt{maxiter}) to promote convergence. Consider using a more robust optimization algorithm or a global optimization approach.
+    \item Refine design variable bounds: Review and adjust the bounds for taper, twist, and sweep to ensure they are physically reasonable and do not overly restrict the design space.
+    \item Check gradients and sensitivities: Verify that the sensitivities are well-calculated, as inaccurate sensitivities can lead to optimization failure.
+    \item Increase mesh fidelity: A denser mesh may provide more accurate aerodynamic results, potentially leading to a better-optimized design, although this will increase computational cost.
+    \item Validate VLM assumptions: Consider the limitations of VLM for complex geometries or high-Mach conditions. For higher fidelity, explore the use of higher fidelity solvers.
+    \item Implement wing area constraint: Re-implement and validate the wing area constraint to ensure it is correctly enforced during the optimization process.
+    \item Explore alternative optimization methods:  Consider using a gradient-free optimization method like a genetic algorithm or particle swarm optimization to explore the design space more effectively, especially if the gradient information is noisy or unreliable.
 \end{enumerate}
-
-\section{Additional Considerations}
-
-It is important to consider the manufacturability of the optimized wing. Large twist angles or very low taper ratios may lead to impractical designs. Furthermore, fixing both the wing area and span constrains the aspect ratio, which limits the optimization potential.
 
 \end{document}

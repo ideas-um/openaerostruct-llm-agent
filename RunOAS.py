@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import openmdao.api as om
 # import OpenAeroStruct modules
-from openaerostruct.geometry.utils import generate_mesh  # helper functions to generate mesh
+from openaerostruct.geometry.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 import niceplots  # Optional but recommended
@@ -141,22 +141,21 @@ prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_o
 ########## THIS IS THE PART TO EDIT ##########
 #If the variables are not specified, you can comment them out, you can also change the upper and lower bounds.
 #You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep, dihedral etc.
-#The way to add them is wing."var_name" and the lower and upper bounds are in the form of lower=0.0, upper=1.0
+#The way to add them is wing."var_name" (for example, wing.taper) and the lower and upper bounds are in the form of lower=0.0, upper=1.0
 #these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp, dihedral = dihedral
 #remember to add alpha as a design variable if CL is a constraint. 
 #DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
-prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)
-prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Example bounds for taper
-prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, units='deg')  # Example bounds for twist
-prob.model.add_design_var('wing.sweep', lower=0.0, upper=30.0, units='deg')  # Example bounds for sweep
-prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)  # Impose CL = 2.0
-prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)  # Minimize CD
+prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Varies the taper ratio
+prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, units='deg') # Varies the twist
+prob.model.add_design_var('wing.sweep', lower=10.0, upper=30.0, units='deg')  # Vary the sweep angle
+prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)   # varies
+prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)   # impose CL = 2.0, where x is a number
+prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)   # dummy objective to minimize CD.
 ############# THIS END OF THE PART TO EDIT ##########
 
 # use Scipy's SLSQP optimization
 prob.driver = om.ScipyOptimizeDriver()
-prob.driver.options['optimizer'] = 'SLSQP'
 
 # record optimization history
 recorder = om.SqliteRecorder("aero.db")

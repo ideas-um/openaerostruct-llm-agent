@@ -35,6 +35,7 @@ TOGETHER_AI_API_KEY = YOUR_API_KEY_HERE
 Please also add the TeX Live and LaTeX Workshop extension on vscode so the latex report can be generated and updated.
 
 For the report generation and saving the figure automatically, go into the OpenAeroStruct package and change the plot_wing code by replacing one function. The directory would be .venv/lib/openaerostruct/utils/plot_wing.py
+
 ```bash
 def disp_plot(args=sys.argv):
     disp = Display(args)

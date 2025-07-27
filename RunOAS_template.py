@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import openmdao.api as om
 # import OpenAeroStruct modules
-from openaerostruct.geometry.utils import generate_mesh  # helper functions to generate mesh
+from openaerostruct.geometry.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 import niceplots  # Optional but recommended
