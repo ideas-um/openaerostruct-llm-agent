@@ -30,7 +30,6 @@ def plot_mesh(mesh):
     plt.savefig('./Figures/mesh.pdf', bbox_inches='tight')
 
 """Part 1: PUT THE BASELINE MESH OF THE WING HERE"""
-# This is a sample code to generate a mesh for a rectangular wing
 mesh_dict = {
     "num_y": 19, #number of panels in the y direction, 19 is a good starting number
     "num_x": 3, #number of panels in the x direction, 3 is a good starting number
@@ -148,11 +147,11 @@ prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_o
 #DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
 prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)
-prob.model.add_design_var('wing.taper', lower=0.1, upper=1.0)
-prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, units='deg')
-prob.model.add_design_var('wing.sweep', lower=0.0, upper=30.0, units='deg')
-prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)
-prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)
+prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Example bounds for taper
+prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, units='deg')  # Example bounds for twist
+prob.model.add_design_var('wing.sweep', lower=0.0, upper=30.0, units='deg')  # Example bounds for sweep
+prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)  # Impose CL = 2.0
+prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)  # Minimize CD
 ############# THIS END OF THE PART TO EDIT ##########
 
 # use Scipy's SLSQP optimization

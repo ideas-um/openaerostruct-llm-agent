@@ -2,53 +2,66 @@
 \usepackage{graphicx}
 \usepackage{geometry}
 \geometry{a4paper, margin=1in}
-\title{OpenMDAO Optimization Report}
+
+\title{Wing Optimization Report}
+\author{AI Assistant}
 \date{2025-07-27}
+
 \begin{document}
 \maketitle
 
 \section{Executive Summary}
-This report summarizes the optimization of a wing design to minimize drag ($C_D$) under the constraint of a lift coefficient ($C_L$) of 2.0, with a fixed wing area of 100 $m^2$ and a span of 10 m. Design variables included taper, twist, and sweep. The optimization process, utilizing the SLSQP algorithm, concluded with a 'FAIL' status after 73 iterations, indicating a non-convergent solution.
+This report details the results of an optimization study aimed at minimizing the drag of a wing while maintaining a lift coefficient of 2.0. The design variables included taper, twist, and sweep, with constraints on wing area (100 $m^2$) and span (10 m). The optimization process, utilizing the SLSQP algorithm, failed to converge to a feasible solution, primarily due to the inability to meet the lift coefficient constraint. The final lift coefficient achieved was 0.796, significantly below the target value. The drag coefficient at the end of the optimization was 11.836, which is considered high.
 
-\section{Problem Definition}
-The optimization problem was defined as:
+\section{Problem Definition and Setup}
+The optimization problem was defined as follows:
 \begin{itemize}
     \item Objective Function: Minimize drag ($C_D$)
-    \item Trim Condition: $C_L = 2.0$
+    \item Trim Condition: Lift coefficient ($C_L$) = 2.0
     \item Geometric Constraints: Wing area (S) = 100 $m^2$, Span (b) = 10 m
-    \item Design Variables: Taper, Twist, Sweep
-    \item Baseline Wing Mesh: rect
+    \item Design Variables: Taper ratio, Twist distribution, Sweep angle
     \item Optimization Algorithm: SLSQP
-    \item Plotting Requirements: Plot elliptical lift distribution
 \end{itemize}
 
-\section{Optimization Results}
-The optimization process terminated prematurely after 73 iterations with a 'FAIL' status. The final drag coefficient ($C_D$) was 12.3145, and the achieved lift coefficient ($C_L$) was 0.85, deviating significantly from the target value of 2.0. The optimization process took 1.1992 seconds. Examination of the design variables revealed that alpha was hitting the upper bound, taper was hitting the lower bound, and sweep was near the lower bound. The final values can be seen in the attached image.
+\section{Results and Analysis}
+The optimization process terminated after 474 iterations with an exit status of 'FAIL', indicating a lack of convergence. Key observations from the optimization run include:
 
-\section{Analysis of Results}
-The lift distribution plot reveals a significant deviation from the ideal elliptical distribution, particularly towards the wing tips. This indicates suboptimal minimization of induced drag. The relatively coarse mesh and low-fidelity VLM solver likely contribute to these inaccuracies. Flow separation at the wing tips, induced by the high lift coefficient, is a plausible factor affecting the results. Given the current configuration and results, the VLM solver and mesh fidelity are not sufficient to accurately capture the flow physics.
+\begin{itemize}
+    \item \textbf{Lift Coefficient Constraint}: The target $C_L$ of 2.0 was not met, with the final value at 0.796.
+    \item \textbf{Drag Coefficient}: The final $C_D$ value was 11.836, indicating suboptimal drag performance.
+    \item \textbf{Lift Distribution}: The lift distribution plot indicates a non-elliptical distribution, contrary to the expected shape for drag minimization.
+    \item \textbf{Twist Distribution}: The twist distribution appears constant, which is not ideal for achieving the target $C_L$ while minimizing drag.  This is likely a result of how the twist was parameterized.  The twist is a single variable, so it cannot vary across the span.
+    \item \textbf{Taper Ratio}: The taper ratio is at its lower bound, which may be overly restrictive.
+    \item \textbf{Sweep Angle}: The sweep angle converged to 14.5 degrees.
+\end{itemize}
 
-\section{Recommendations}
-Based on the analysis of the results, the following recommendations are made to improve the optimization process:
 
-\begin{enumerate}
-    \item \textbf{Increase the Number of Iterations:} The current limit of 73 iterations may be insufficient for convergence. Increasing the maximum number of iterations could allow the optimizer to find a better solution.
-    \item \textbf{Review Design Variable Bounds:} The fact that alpha and taper hit their bounds suggests that the bounds may be too restrictive. Increase the upper bound of alpha and consider a lower bound for the taper ratio.
-    \item \textbf{Consider a Different Optimization Algorithm:} While SLSQP is a good general-purpose optimizer, other algorithms like COBYLA or a gradient-free optimizer might perform better for this problem.
-    \item \textbf{Finer Mesh:} Increase the number of grid points in the OpenAeroStruct mesh to improve the accuracy of the VLM solution. A finer mesh can better capture the aerodynamic characteristics, especially near the wing tips.
-    \item \textbf{Higher Fidelity Solver:} VLM is a low-fidelity method. Consider using a higher-fidelity solver such as a panel method or RANS solver for more accurate drag prediction. However, this would significantly increase computational cost.
-\end{enumerate}
+\section{Wing Visualization}
 
-\section{Optimized Wing Visualization}
 \begin{figure}[h!]
     \centering
     \includegraphics[width=0.75\textwidth]{./Optimized_Wing.pdf}
     \caption{Optimized Wing Visualization}
     \label{fig:optimized_wing}
 \end{figure}
-Figure \ref{fig:optimized_wing} displays the optimized wing design. The suboptimal lift distribution and the constraints on the design variables, as discussed previously, have an impact on the design.
+
+Figure \ref{fig:optimized_wing} shows a visualization of the optimized wing. The geometry reflects the constraints and design variable values at the termination of the optimization process.
+
+
+\section{Recommendations}
+Based on the analysis of the optimization results, the following recommendations are made:
+
+\begin{enumerate}
+    \item \textbf{Increase Maximum Iterations}: Increase the \texttt{maxiter} parameter to allow the solver more iterations to converge.
+    \item \textbf{Constraint Scaling}: Ensure proper scaling of the constraints to avoid numerical issues. Improper scaling can lead to the solver failing to converge.
+    \item \textbf{Revise Bounds}: Review and revise the bounds for the design variables, particularly the taper ratio. A wider range for the twist distribution should also be considered. Also, consider parameterizing the twist as a distribution and not a single variable.
+    \item \textbf{Consider Different Optimization Algorithms}: The SLSQP algorithm may not be the most suitable for this problem. Explore other gradient-based or gradient-free algorithms, such as genetic algorithms.
+    \item \textbf{Refine Mesh}: Increase the number of spanwise and chordwise panels to improve the accuracy of the vortex lattice method, especially given that changes in chord length due to optimization may affect geometry.
+    \item \textbf{Chord as a Design Variable}: Consider making the chord a design variable to have more control over the wing geometry, as fixing both the wing area and span limits the optimization potential.
+\end{enumerate}
 
 \section{Additional Considerations}
-While not directly part of the optimization, factors such as structural weight, fuel volume, Reynolds number, and manufacturability should be considered in conjunction with the optimization results. A very high twist, for instance, can be difficult to manufacture and should be noted. These factors are outlined in the aircraft design manual.
+
+It is important to consider the manufacturability of the optimized wing. Large twist angles or very low taper ratios may lead to impractical designs. Furthermore, fixing both the wing area and span constrains the aspect ratio, which limits the optimization potential.
 
 \end{document}
