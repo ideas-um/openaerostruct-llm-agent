@@ -9,4 +9,3 @@ Optimization Complete
 Angle of attack = 3.939085273083919 deg
 CL =  0.4999999987364677
 CD =  0.010937868071577313
-/Users/conan/Desktop/AI-Augmented-Design/.venv/lib/python3.13/site-packages/openmdao/recorders/sqlite_recorder.py:231: UserWarning:The existing case recorder file, /Users/conan/Desktop/AI-Augmented-Design/LLM_OpenAeroStruct/RunOAS_out/aero.db, is being overwritten.

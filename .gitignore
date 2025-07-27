@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv_OAS
+.DS_Store
+.output.txt
 
 # C extensions
 *.so

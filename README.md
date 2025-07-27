@@ -28,11 +28,13 @@ uv pip install -r pyproject.toml #Install all required dependencies
 ```
 
 The user will also need to setup a .env file that contains the line
-GEMINI_API_KEY = YOUR_API_KEY_HERE
+GEMINI_API_KEY = YOUR_API_KEY_HERE 
+TOGETHER_AI_API_KEY = YOUR_API_KEY_HERE
+
 
 Please also add the TeX Live and LaTeX Workshop extension on vscode so the latex report can be generated and updated.
 
-For the report generation and saving the figure automatically, go into the OpenAeroStruct package and change the plot_wing code by replacing one function.
+For the report generation and saving the figure automatically, go into the OpenAeroStruct package and change the plot_wing code by replacing one function. The directory would be .venv/lib/openaerostruct/utils/plot_wing.py
 ```bash
 def disp_plot(args=sys.argv):
     disp = Display(args)
@@ -54,11 +56,11 @@ def disp_plot(args=sys.argv):
 
 ## Requirements
 - Install Pandoc here: https://pandoc.org/installing.html
-- If using a Mac, there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, I used the newest distribution of python which iis 13.3.3
-- I also suggest installing the Vscode extension LaTex Workshop such that the report can be generated into PDF format for viewing.
+- If using an Apple device (Mac / Macbook), there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, we suggest using the newest distribution of python which is 13.3.3
+- We also suggest installing the Vscode extension LaTex Workshop such that the report can be generated into PDF format for viewing.
 
 ## Usage
 - Go into OpenAeroStruct.ipynb, and change the user request.
 
 ## Examples
-Check the `Example_Outputs` folder for some example outputs.
+Check the `Example_Outputs` folder for example outputs used in the published paper.

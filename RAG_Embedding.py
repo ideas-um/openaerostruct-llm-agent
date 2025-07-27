@@ -4,7 +4,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_together import TogetherEmbeddings
 
-file = "./LLM_OpenAeroStruct/RAG_PDF/Aircraft_Design_Metabook.pdf"
+file = "./RAG_PDF/Aircraft_Design_Metabook.pdf"
 path = os.path.abspath(file)
 
 loader = PyPDFLoader(path)
@@ -28,7 +28,7 @@ embeddings = TogetherEmbeddings(
 # Chroma is the vector database
 vector_store = Chroma(
     embedding_function=embeddings,
-    persist_directory='./LLM_OpenAeroStruct/Embeddings_Persist'
+    persist_directory='./Embeddings_Persist'
 )
 
 vector_store.add_documents(documents=documents)
