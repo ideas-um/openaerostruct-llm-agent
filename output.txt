@@ -1,11 +1,14 @@
-Optimization terminated successfully    (Exit mode 0)
-            Current function value: 1.0937868071577312
-            Iterations: 15
-            Function evaluations: 16
-            Gradient evaluations: 15
-Optimization Complete
+Positive directional derivative for linesearch    (Exit mode 8)
+            Current function value: 12.314526629398612
+            Iterations: 18
+            Function evaluations: 72
+            Gradient evaluations: 14
+Optimization FAILED.
+Positive directional derivative for linesearch
 -----------------------------------
 
-Angle of attack = 3.939085273083919 deg
-CL =  0.4999999987364677
-CD =  0.010937868071577313
+Angle of attack = 9.99999999999996 deg
+CL =  0.8499749827957304
+CD =  0.12314526629398613
+/Users/conan/Desktop/openaerostruct-llm-agent/.venv/lib/python3.13/site-packages/openaerostruct/geometry/utils.py:953: OMDeprecationWarning:generate_mesh has been moved to mesh_generator.py. Importing from utils.py is deprecated and will be removed in a future release.
+/Users/conan/Desktop/openaerostruct-llm-agent/.venv/lib/python3.13/site-packages/openmdao/recorders/sqlite_recorder.py:231: UserWarning:The existing case recorder file, /Users/conan/Desktop/openaerostruct-llm-agent/RunOAS_out/aero.db, is being overwritten.

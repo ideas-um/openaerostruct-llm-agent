@@ -54,6 +54,15 @@ def disp_plot(args=sys.argv):
     Tk.mainloop()
 ```
 
+and the save_image function
+
+```bash
+def save_image(self):
+        fname = "Figures/Optimized_Wing.pdf"
+        plt.savefig(fname)
+```
+
+
 ## Requirements
 - Install Pandoc here: https://pandoc.org/installing.html
 - If using an Apple device (Mac / Macbook), there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, we suggest using the newest distribution of python which is 13.3.3

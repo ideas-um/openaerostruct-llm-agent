@@ -46,7 +46,7 @@ class GeneralAgent:
 
     def execute_task(self, task_description):
         # Setup the prompt text
-        full_prompt = f"{self.prompt}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}"
+        full_prompt = f"{self.prompt}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}. Do NOT include any 'type', 'properties', or structure definitions. Only return the dictionary."
         
         # Check if PDFs are provided
         if hasattr(self, 'PDFs') and self.PDFs:
