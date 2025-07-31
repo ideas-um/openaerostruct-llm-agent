@@ -68,6 +68,7 @@ def save_image(self):
 - Install Pandoc here: https://pandoc.org/installing.html
 - If using an Apple device (Mac / Macbook), there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, we suggest using the newest distribution of python which is 13.3.3
 - We also suggest installing the Vscode extension LaTex Workshop such that the report can be generated into PDF format for viewing.
+- We currently do not provide the document used for RAG for enhanced variable understanding for the LLM, it is suggested that the user uploads a document for wing design or equivalents and run the RAG_Embeddings.py file in order to create your own simple persisted embeddings.
 
 ## Usage
 - Go into OpenAeroStruct.ipynb, and change the user request.
