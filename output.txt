@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File [35m"/Users/conan/Desktop/openaerostruct-llm-agent/RunOAS.py"[0m, line [35m8[0m, in [35m<module>[0m
-    from openaerostruct.geometry.mesh_generator import generate_mesh
-[1;35mModuleNotFoundError[0m: [35mNo module named 'openaerostruct.geometry.mesh_generator'[0m
