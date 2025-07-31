@@ -9,12 +9,12 @@ https://ideas.engin.umich.edu
 - Gokcin Cinar: Research supervision and concept development (U-M)
 
 ## Introduction
-OpenAeroStruct LLM Agent is a tool that leverages Large Language Models (LLMs) to automate aircraft wing design and analysis using the OpenAeroStruct framework. It allows users to input design specifications in natural language, and the system automatically handles meshing, analysis, optimization, visualization, and reporting.
+OpenAeroStruct LLM Agent is a tool that leverages Large Language Models (LLMs) to automate aircraft wing design and analysis using the OpenAeroStruct framework. It allows users to input design specifications in natural language, and the system automatically handles meshing, analysis, optimization, visualization, and reporting It currently supports main aerodynamic objectives of lift and drag, and geometric design variables of taper, sweep, dihedral, chord, and twist.
 
 ## Features
 - Natural language processing for wing design specifications
 - Automated mesh generation and refinement
-- Wing optimization based on specified objectives (drag, weight, etc.)
+- Wing optimization based on specified objectives (drag, lift, etc.)
 - Automated visualization of results
 - Detailed report output
 
