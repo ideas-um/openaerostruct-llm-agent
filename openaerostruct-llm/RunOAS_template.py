@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import openmdao.api as om
 # import OpenAeroStruct modules
-from openaerostruct.geometry.mesh_generator import generate_mesh
+from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 import niceplots  # Optional but recommended
@@ -27,7 +27,7 @@ def plot_mesh(mesh):
     plt.axis('equal')
     plt.xlabel('span(m)')
     plt.ylabel('chord(m)')
-    plt.savefig('./Figures/mesh.pdf', bbox_inches='tight')
+    plt.savefig('./figures/mesh.pdf', bbox_inches='tight')
 
 """Part 1: PUT THE BASELINE MESH OF THE WING HERE"""
 

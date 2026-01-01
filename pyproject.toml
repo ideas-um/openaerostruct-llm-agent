@@ -1,24 +1,27 @@
 [project]
-name = "llm-aerospace-research"
+name = "agentic-openaerostruct"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13.2"
+requires-python = ">=3.12.1"
 dependencies = [
+    "beautifulsoup4>=4.13.4",
     "cffi>=1.17.1",
     "cssselect2>=0.8.0",
     "fonttools>=4.56.0",
-    "google-generativeai>=0.8.4",
+    "google-genai>=1.56.0",
     "ipykernel>=6.29.5",
     "jupyter>=1.1.1",
     "langchain-chroma>=0.2.5",
     "langchain-community>=0.3.27",
     "langchain-text-splitters>=0.3.9",
     "langchain-together>=0.3.0",
+    "lxml>=6.0.2",
     "matplotlib>=3.10.1",
     "niceplots>=2.6.0",
     "numpy>=2.2.4",
-    "openaerostruct>=2.10.0",
+    "ollama>=0.6.1",
+    "openaerostruct",
     "openmdao>=3.38.0",
     "pandas>=2.2.3",
     "pandoc>=2.4",
@@ -27,9 +30,15 @@ dependencies = [
     "pillow>=11.1.0",
     "plotly>=6.0.1",
     "pydyf>=0.11.0",
+    "pylatex>=1.4.2",
     "pyphen>=0.17.2",
+    "python-dotenv>=1.1.1",
+    "reportlab>=4.4.7",
     "tinycss2>=1.4.0",
     "tinyhtml5>=2.0.0",
     "weasyprint>=65.1",
     "wkhtmltopdf>=0.2",
 ]
+
+[tool.uv.sources]
+openaerostruct = { git = "https://github.com/ConanLee918/OpenAeroStruct.git", branch = "auto-plot-save" }

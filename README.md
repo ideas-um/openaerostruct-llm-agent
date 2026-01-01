@@ -1,16 +1,25 @@
 # OpenAeroStruct LLM Agent
-Copyright 2025, The Regents of the  University of Michigan, IDEAS Lab, MDO Lab
-https://ideas.engin.umich.edu
+**Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab**  
+[https://ideas.engin.umich.edu](https://ideas.engin.umich.edu)
 
-#### Runs OpenAeroStruct Automatically based on text input, does all the plotting, optimizing, and meshing with LLMs.
+A multi-agent tool designed to write, execute, and analyze OpenAeroStruct optimization code from high-level natural language inputs.
 
 ## Contributors
-- Conan Lee: Lead developer and primary author (HKUST) 
-- Gokcin Cinar: Research supervision and concept development (U-M)
-- Joaquim R.R.A. Martins: Research supervision and concept development (U-M)
+- **Conan Lee**: Lead developer and primary author (HKUST) 
+- **Gokcin Cinar**: Research supervision and concept development (U-M)
+- **Joaquim R.R.A. Martins**: Research supervision and concept development (U-M)
 
 ## Introduction
-OpenAeroStruct LLM Agent is a tool that leverages Large Language Models (LLMs) to automate aircraft wing design and analysis using the OpenAeroStruct framework. It allows users to input design specifications in natural language, and the system automatically handles meshing, analysis, optimization, visualization, and reporting It currently supports main aerodynamic objectives of lift and drag, and geometric design variables of taper, sweep, dihedral, chord, and twist.
+The OpenAeroStruct LLM Agent leverages a coordinated team of Large Language Models (LLMs) to automate the entire aircraft wing design and optimization workflow. By providing a simple text prompt (e.g., *"Minimize drag for a wing with an area of 100m²"*), the agent pipeline handles mesh generation, geometry definition, optimization setup in OpenMDAO, results interpretation, and report generation for further iteration.
+
+## Multi-Agent Architecture
+The system utilizes a specialized 6-agent pipeline:
+1.  **ReformulatorAgent**: Translates raw user requests into structured optimization specifications (objectives, constraints, and variables).
+2.  **BaseMeshAgent**: Writes the baseline wing mesh script required for initialization.
+3.  **GeometryAgent**: Writes the `surface` dictionary script, managing optimization parameters like taper, sweep, and twist.
+4.  **OptimizerAgent**: Writes the OpenMDAO optimization scripts, including design variables (`alpha`, `twist_cp`, etc.) and constraints (`CL`).
+5.  **ResultsReaderAgent**: Parses both graphical and numiercal outputs, identifies optimization failures (e.g., infeasible design spaces), and provides engineering recommendations.
+6.  **ReportWriter**: Compiles the entire process, including analysis and plot references, into a professionally formatted LaTeX report.
 
 ## Features
 - Natural language processing for wing design specifications
@@ -20,59 +29,45 @@ OpenAeroStruct LLM Agent is a tool that leverages Large Language Models (LLMs) t
 - Detailed report output
 
 ## Installation
-```bash
-# Install dependencies, use uv to build the venv
-uv init
-uv venv
-source .venv/bin/activate
-uv pip install -r pyproject.toml #Install all required dependencies
-```
-
-The user will also need to setup a .env file that contains the line
-GEMINI_API_KEY = YOUR_API_KEY_HERE 
-TOGETHER_AI_API_KEY = YOUR_API_KEY_HERE
-
-
-Please also add the TeX Live and LaTeX Workshop extension on vscode so the latex report can be generated and updated.
-
-For the report generation and saving the figure automatically, go into the OpenAeroStruct package and change the plot_wing code by replacing one function. The directory would be .venv/lib/openaerostruct/utils/plot_wing.py
+### 1. Environment Setup
+We recommend using `uv` for fast dependency management:
 
 ```bash
-def disp_plot(args=sys.argv):
-    disp = Display(args)
-    disp.draw_GUI()
-    plt.tight_layout()
-    disp.root.protocol("WM_DELETE_WINDOW", disp.quit)
-    
-    # Schedule image saving and program exit after a short delay
-    # to ensure GUI is fully rendered before capture
-    def save_and_quit():
-        disp.save_image()
-        disp.quit()
-    
-    # Wait 1000ms to ensure the GUI is fully rendered before saving
-    disp.root.after(1000, save_and_quit)
-    
-    Tk.mainloop()
+uv sync
 ```
 
-and the save_image function
+### 2. API Configuration
+Create a .env file in the root directory to store your LLM credentials:
 
 ```bash
-def save_image(self):
-        fname = "Figures/Optimized_Wing.pdf"
-        plt.savefig(fname)
+GEMINI_API_KEY = "YOUR_GOOGLE_GEMINI_KEY"
 ```
 
+### 3. System Requirements
 
-## Requirements
-- Install Pandoc here: https://pandoc.org/installing.html
-- If using an Apple device (Mac / Macbook), there might be issues with the Tkinter package for Matplotlib GUI for generating wing plots, to fix this issue, we suggest using the newest distribution of python which is 13.3.3
-- We also suggest installing the Vscode extension LaTex Workshop such that the report can be generated into PDF format for viewing.
-- We currently do not provide the document used for RAG for enhanced variable understanding for the LLM, it is suggested that the user uploads a document for wing design or equivalents and run the RAG_Embeddings.py file in order to create your own simple persisted embeddings.
+To generate the final reports and plots, the following are required:
+
+Pandoc: Required for document conversion https://pandoc.org/installing.html
+
+XeLaTeX: Required for PDF generation. Install via MiKTeX (Windows) or BasicTeX (macOS).
+
+Python Version: For Mac users, Python 3.13.1+ is recommended to avoid Matplotlib/Tkinter GUI issues.
 
 ## Usage
-- Go into OpenAeroStruct.ipynb, and change the user request.
+
+Open the OpenAeroStruct.ipynb notebook.
+
+Edit the User_Request variable with your design goals:
+
+```bash
+User_Request = "Minimize drag for a wing with S = 100 m2 and b = 10 m. Optimize for Taper, Twist, and Sweep."
+```
+
+Run the notebook cells. The system will:
+- Generate RunOAS.py
+- Execute the optimization
+- Create a report in openaerostruct-llm/report_outputs (e.g., 26010121_Report.tex)
 
 ## Examples
+
 Check the `Example_Outputs` folder for example outputs used in the published paper.

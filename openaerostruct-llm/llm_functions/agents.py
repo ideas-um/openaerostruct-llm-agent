@@ -1,8 +1,18 @@
-# In Agents.py
-from geminiconfig import get_model
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))  # Add current folder to path
+
 import json
 import re
 import time
+
+# Updated imports to match your new gemini_config and the new SDK
+from gemini_config import get_client
+from ollama_config import get_model as get_ollama_model
+from google.genai import types
+
+gemini_model = "gemma-3-27b-it"
+advanced_gemini_model = "gemini-2.5-flash"
 
 def extract_json_between_markers(llm_output):
     # Regular expression pattern to find JSON content between ```json and ```
@@ -33,41 +43,56 @@ def extract_json_between_markers(llm_output):
 
 
 class GeneralAgent:
-    def __init__(self, name, role, prompt, schema=None, PDFs = None):
+    def __init__(self, name, role, prompt, schema=None, PDFs=None, backend="gemini"):
         self.name = name
         self.role = role
         self.prompt = prompt
         self.schema = schema
         self.PDFs = PDFs
-        self.model = get_model()
+        self.backend = backend
+        
+        # New SDK initialization
+        if backend == "gemini":
+            self.client = get_client()
+            self.model_id = gemini_model
+        else:
+            self.model = get_ollama_model()
 
     def role_description(self):
         return f"You are {self.name}, specializing in {self.role}."
 
     def execute_task(self, task_description):
-        # Setup the prompt text
-        full_prompt = f"{self.prompt}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}. Do NOT include any 'type', 'properties', or structure definitions. Only return the dictionary."
-        
-        # Check if PDFs are provided
-        if hasattr(self, 'PDFs') and self.PDFs:
-            # Create a list of image files to be passed to the model
-            pdf_images = []
-            for pdf_path in self.PDFs:
-                try:
-                    with open(pdf_path, "rb") as f:
-                        pdf_images.append({"mime_type": "application/pdf", "data": f.read()})
-                except Exception as e:
-                    print(f"Error loading PDF {pdf_path}: {e}")
+        full_prompt = (
+            f"{self.prompt}\nYou should respond with schema: {json.dumps(self.schema)}\n"
+            f"Task: {task_description}. Do NOT include any 'type', 'properties', "
+            f"or structure definitions. Only return the dictionary."
+        )
+
+        if self.backend == "gemini":
+            # New SDK format for content (text + media parts)
+            contents = [full_prompt]
+            if self.PDFs:
+                for pdf_path in self.PDFs:
+                    try:
+                        with open(pdf_path, "rb") as f:
+                            # Create a Part object for the PDF
+                            pdf_part = types.Part.from_bytes(
+                                data=f.read(),
+                                mime_type="application/pdf"
+                            )
+                            contents.append(pdf_part)
+                    except Exception as e:
+                        print(f"Error loading PDF {pdf_path}: {e}")
             
-            # Generate content with both text and PDF images
-            response = self.model.generate_content([full_prompt] + pdf_images)
+            # Use client.models.generate_content for the new SDK
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=contents
+            )
         else:
-            # Generate content with just text
             response = self.model.generate_content(full_prompt)
 
-        # Extract JSON from the response
         output = extract_json_between_markers(response.text)
-        
         return output
 
 
@@ -110,33 +135,8 @@ class ReformulatorAgent(GeneralAgent):
             Plotting Requirements:  If any, otherwise state none.
             Errors:             Note any errors in the input, such as missing key information (e.g., no objective specified), or if the number of constraints exceeds the number of design variables.
 
-            """
-        )
-
-class RetrievalAgent(GeneralAgent):
-    def __init__(self):
-        super().__init__(
-            schema = {
-                "type": "object",
-                "properties": {
-                    "Retrieved_Information": {"type": "string", "description": ""},
-                },
-            },
-
-            name="Information Retrieval Agent",
-            role="Provide a suitable query to retrieve information from a RAG system",
-            prompt="""Your goal is to provide a query to retrieve information from a RAG system. And output using the schema provided which is an object. 
-            You need to query information such that another agent can use it to understand the physical variables used in optimization.
-
-            This is your task:
-            1. Read the refined user input.
-            2. Identify the variables used.
-            3. Write a query that will be used to retrieve information from a RAG system. Only include wing geometry variables used in optimization. Ignore the variables that are not used in optimization.
-            4. Use the provided schema to structure your response.
-
-            Example output:
-            Please provide information for the following variables used in aerodynamic wing optimization: Taper ratio, Twist angle, Sweep angle, Lift Coefficient (CL), Wing Area (S), Wing Span (b), and Drag.
-            """
+            """,
+            backend="gemini",
         )
 
 class ResultsReaderAgent(GeneralAgent):
@@ -153,7 +153,7 @@ class ResultsReaderAgent(GeneralAgent):
                 },
             },
 
-            PDFs= ["./Figures/Opt_History.pdf","./Figures/Optimized_Wing.pdf"],
+            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
 
             name="Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics shown by them",
@@ -177,7 +177,8 @@ class ResultsReaderAgent(GeneralAgent):
             4) Report computational performance.
 
             It is important to note that you are using OpenAeroStruct, which is a Vortex Lattice Method (VLM) based aerodynamic solver, you should analyze the results with that in mind.
-            """
+            """,
+            backend="gemini",
         )
 
 class ReportWriter(GeneralAgent):
@@ -192,7 +193,7 @@ class ReportWriter(GeneralAgent):
 
             name="Report Writer",
             role="Using Latex write a report on the optimization results",
-            PDFs= ["./Figures/Opt_History.pdf","./Figures/Optimized_Wing.pdf"],
+            PDFs= ["./figures/Opt_History.pdf","./figures/Optimized_Wing.pdf"],
             prompt=f"""
             Your goal is to rewrite the LLM output into a report format, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
@@ -205,10 +206,11 @@ class ReportWriter(GeneralAgent):
             Use all the information given to write a detailed analysis of the results and recommendations.
 
             Please include this figure in the report:
-            The file path is "Figures/Optimized\_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis, as it will also be provided.
+            The file path is "./Optimized_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis, as it will also be provided.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
-            """
+            """,
+            backend="gemini",
         )
 
 class BaseCoderAgent:
@@ -216,15 +218,42 @@ class BaseCoderAgent:
         self.name = name
         self.role = role
         self.prompt = prompt
-        self.model = get_model()
         self.schema = schema
+        self.client = get_client()
+        self.model_id = gemini_model
 
     def role_description(self):
         return f"You are {self.name}, a coder specializing in {self.role}."
 
     def execute_task(self, task_description):
         full_prompt = f"{self.prompt}\nTask: {task_description}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}, for coding, do not import any packages yourself"
-        response = self.model.generate_content(full_prompt)
+        
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=full_prompt
+        )
+        output = extract_json_between_markers(response.text)
+        return output
+    
+class AdvancedCoderAgent:
+    def __init__(self, name, role, prompt, schema = None):
+        self.name = name
+        self.role = role
+        self.prompt = prompt
+        self.schema = schema
+        self.client = get_client()
+        self.model_id = advanced_gemini_model
+
+    def role_description(self):
+        return f"You are {self.name}, a coder specializing in {self.role}."
+
+    def execute_task(self, task_description):
+        full_prompt = f"{self.prompt}\nTask: {task_description}\nYou should respond with schema: {json.dumps(self.schema)}\nTask: {task_description}, for coding, do not import any packages yourself"
+        
+        response = self.client.models.generate_content(
+            model=self.model_id,
+            contents=full_prompt
+        )
         output = extract_json_between_markers(response.text)
         return output
 
@@ -258,7 +287,7 @@ class BaseMeshAgent(BaseCoderAgent):
             # This is a sample code to generate a mesh for a rectangular wing
             mesh_dict = {
                 "num_y": 19, #number of panels in the y direction, 19 is a good starting number
-                "num_x": 3, #number of panels in the x direction, 3 is a good starting number
+                "num_x": 3, #number of panels in the x direction, 3 is a number
                 "wing_type": "rect", #This can either be "rect" or "crm" only
                 "symmetry": True, # True if the wing is symmetric, False if it is not, wings are typically symmetric
                 "span": 2.0, #This is the full span of the wing in meters
@@ -332,7 +361,7 @@ class GeometryAgent(BaseCoderAgent):
             """
         )
 
-class OptimizerAgent(BaseCoderAgent):
+class OptimizerAgent(AdvancedCoderAgent):
     def __init__(self):
         super().__init__(
             schema = {
@@ -344,19 +373,21 @@ class OptimizerAgent(BaseCoderAgent):
             },
             name="Optimization Agent",
             role="Setup optimization script to run OpenAeroStruct",
-            prompt="""Your goal is to follow the instructions provided and write OpenAeroStruct optimization code. Carefully follow the instructions and code samples, and output using the provided schema as text.
+            prompt="""
+            Your goal is to follow the instructions provided and write OpenAeroStruct optimization code. Carefully follow the instructions and code samples, and output using the provided schema as text. Do not add package imports and do not do the parts that are not assigned to you.
 
             Your tasks are:
             1. Read the inputs. You will be given the variables that can be optimized. Update the optimization code to include the variables for optimization.
             2. Identify the requirements.
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
+            5. DO NOT ADD ANYTHING THAT IS NOT ASKED FOR AND NOT IN THE SAMPLE CODE.
 
-            Do not add area and span constraints, therefore do not add these lines:
+            Do not add these lines as they are not avaliable:
             prob.model.add_constraint('wing.S_ref', equals=400.0)
             prob.model.add_constraint('wing.b_half_w', equals=30.0) # Half span
 
-            This is an explained code sample for you to follow. Ddirectly edit the code and explain your changes in the calculations and explain field. I will tell you where you can edit.
+            This is an explained code sample for you to follow. Directly edit the code and explain your changes in the calculations and explain field. I will tell you where you can edit.
             ```python
             # Instantiate the problem and the model group
             prob = om.Problem()
@@ -434,6 +465,7 @@ class OptimizerAgent(BaseCoderAgent):
             recorder = om.SqliteRecorder("aero.db")
             prob.driver.add_recorder(recorder)
             prob.driver.recording_options["includes"] = ["*"]
+            prob.options['work_dir'] = './openaerostruct_out'
 
             prob.setup()
             prob.run_driver() 
