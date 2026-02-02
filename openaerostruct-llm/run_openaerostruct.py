@@ -336,6 +336,7 @@ Task: Check these code sections for any errors, inconsistencies, or formatting i
 
     print("✓ Created RunOAS.py file with all generated code sections")
 
+    # Note: Need to check code before running (need better fix)
     # Step 5.5: Check code executability using Python's compile
     print("\n[5.5/7] Checking code executability...")
     try:

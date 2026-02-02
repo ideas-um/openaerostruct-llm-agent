@@ -12,7 +12,7 @@ from ollama_config import get_model as get_ollama_model
 from google.genai import types
 
 gemini_model = "gemma-3-27b-it"
-advanced_gemini_model = "gemini-2.5-flash"
+advanced_gemini_model = "gemma-3-27b-it" #"gemini-2.5-flash" #temporarily changed back to 27b due to limit issues
 
 def extract_json_between_markers(llm_output):
     # Regular expression pattern to find JSON content between ```json and ```
@@ -153,7 +153,7 @@ class ResultsReaderAgent(GeneralAgent):
                 },
             },
 
-            PDFs= ["../figures/Opt_History.pdf","../figures/Optimized_Wing.pdf"],
+            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
 
             name="Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics shown by them",
@@ -193,7 +193,7 @@ class ReportWriter(GeneralAgent):
 
             name="Report Writer",
             role="Using Latex write a report on the optimization results",
-            PDFs= ["../figures/Opt_History.pdf","../figures/Optimized_Wing.pdf"],
+            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
             prompt=f"""
             Your goal is to rewrite the LLM output into a report format, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
