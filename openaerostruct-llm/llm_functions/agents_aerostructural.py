@@ -155,7 +155,7 @@ class ResultsReaderAgentAerostructural(GeneralAgent):
                 },
             },
 
-            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
+            PDFs= ["../figures/Opt_History.pdf","../figures/Optimized_Wing.pdf"],
 
             name="Aerostructural Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics of aerostructural optimization",
@@ -196,7 +196,7 @@ class ReportWriterAerostructural(GeneralAgent):
 
             name="Aerostructural Report Writer",
             role="Using Latex write a report on the aerostructural optimization results",
-            PDFs= ["./figures/Opt_History.pdf","./figures/Optimized_Wing.pdf"],
+            PDFs= ["../figures/Opt_History.pdf","../figures/Optimized_Wing.pdf"],
             prompt=f"""
             Your goal is to rewrite the LLM output into a report format for AEROSTRUCTURAL optimization, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
@@ -210,7 +210,7 @@ class ReportWriterAerostructural(GeneralAgent):
             Emphasize the coupling between aerodynamics and structures, and how design decisions affect both domains.
 
             Please include this figure in the report:
-            The file path is "./Optimized_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis.
+            The file path is "../figures/Optimized_Wing.pd", which contains the optimized wing visualization. Reference this figure in your analysis.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """,

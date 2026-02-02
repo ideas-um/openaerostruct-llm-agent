@@ -126,7 +126,7 @@ def detect_optimization_mode(user_request):
     aerostructural_keywords = [
         "aerostructural", "aero-structural", "aerostruct", "structural",
         "fuel burn", "fuelburn", "weight", "stress", "failure", 
-        "thickness", "structural mass", "structural weight"
+        "structural mass", "structural weight"
     ]
     
     user_request_lower = user_request.lower()

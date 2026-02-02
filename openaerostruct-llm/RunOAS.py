@@ -31,53 +31,53 @@ def plot_mesh(mesh):
 
 """Part 1: PUT THE BASELINE MESH OF THE WING HERE"""
 mesh_dict = {
-    "num_y": 19, # number of panels in the y direction
-    "num_x": 3, # number of panels in the x direction
-    "wing_type": "rect", # This can either be "rect" or "crm" only
-    "symmetry": True, # True if the wing is symmetric
-    "span": 10.0, # Full span of the wing in meters
-    "root_chord": 10.0, # Root chord of the wing in meters
-    "span_cos_spacing": 0.0,
-    "chord_cos_spacing": 0.0,
+    "num_y": 19,  # number of panels in the y direction, 19 is a good starting number
+    "num_x": 3,  # number of panels in the x direction, 3 is a number
+    "wing_type": "rect",  # This can either be "rect" or "crm" only
+    "symmetry": True,  # True if the wing is symmetric, False if it is not, wings are typically symmetric
+    "span": 10.0,  # This is the full span of the wing in meters
+    "root_chord": 10.0,  # This is the root chord of the wing in meters
+    "span_cos_spacing": 0.0,  # This is usually not edited
+    "chord_cos_spacing": 0.0,  # This is usually not edited
 }
 
 # Generate VLM mesh for half-wing
-mesh = generate_mesh(mesh_dict)
+mesh = generate_mesh(mesh_dict)  # this creates a rectangular wing mesh, DO NOT EDIT THIS LINE
 
-# Plot mesh
-plot_mesh(mesh)
+# plot mesh
+plot_mesh(mesh)  # this plots the rectangular wing mesh, DO NOT EDIT THIS LINE
 
 
 
 """Part 2:  DO THE GEOMETRY SETUP HERE"""
 surface = {
-    # Wing definition
-    "name": "wing",  # Name of the surface
-    "symmetry": True,  # Model one half of wing reflected across y = 0
-    "S_ref_type": "wetted",  # How wing area is computed ('wetted' or 'projected')
+    # Wing definition, KEEP THE SAME UNLESS ASKED TO CHANGE
+    "name": "wing",  # name of the surface, keep as wing
+    "symmetry": True,  # if true, model one half of wing reflected across the plane y = 0
+    "S_ref_type": "wetted",  # how we compute the wing area, can be 'wetted' or 'projected'
     "mesh": mesh,
 
-    # Aerodynamic performance at angle of attack = 0
-    # These CL0 and CD0 values are added to the CL and CD from aerodynamic analysis.
-    # They do not vary with alpha.
-    "CL0": 0.0,
-    "CD0": 0.0,
+    # Aerodynamic performance of the lifting surface at an angle of attack of 0 (alpha=0).
+    # These CL0 and CD0 values are added to the CL and CD obtained from aerodynamic analysis of the surface to get the total CL and CD.
+    # These CL0 and CD0 values do not vary wrt alpha. DO NOT EDIT THEM UNLESS ASKED TO.
+    "CL0": 0.0,  # CL of the surface at alpha=0
+    "CD0": 0.0,  # CD of the surface at alpha=0
 
-    # Airfoil properties for viscous drag calculation
-    "k_lam": 0.05,  # Percentage of chord with laminar flow
-    "c_max_t": 0.303,  # Chordwise location of maximum thickness (NACA0015)
-    "t_over_c_cp": np.array([0.12]),  # Thickness-to-chord ratio
+    # Airfoil properties for viscous drag calculation, DO NOT CHANGE UNLESS ASKED TO
+    "k_lam": 0.05,  # percentage of chord with laminar flow, used for viscous drag
+    "c_max_t": 0.303,  # chordwise location of maximum (NACA0015)
+    "t_over_c_cp": np.array([0.12]),  # thickness-to-chord ratio
 
-    # Type of analysis
-    "with_viscous": True,  # If true, compute viscous drag
+    # DO NOT CHANGE UNLESS ASKED TO, type of analysis, wave for high mach number, viscous to model viscous drag
+    "with_viscous": True,  # if true, compute viscous drag,
     "with_wave": False,
 
-    # Options for changing the wing geometry
-    "chord_cp": np.ones(3),
-    "taper": 0.4,
-    "sweep": 28.0,
-    "dihedral": 3.0,
-    "twist_cp": np.zeros(2),
+    # Useful options for changing the wing geometry, CHANGE THESE
+    "chord_cp": np.ones(3),  # if chord cp is allowed to be optimized, change the value for how many points for the bspline to change the chord, default is 3
+    "taper": 0.4,  # if the wing can be tapered, change the initial value for how much taper, default is 0.4
+    "sweep": 28.0,  # if the wing can be swept, change the initial value for how much sweep, default is 28.0
+    "dihedral": 3.0,  # if the wing has dihedral, change the initial value for how much dihedral, default is 3.0
+    "twist_cp": np.zeros(2),  # if the wing can be twisted, change the value for how many points for the bspline to change the twist, default is 4
 }
 
 
@@ -88,25 +88,25 @@ prob = om.Problem()
 # Define flight conditions
 Mach_number = 0.5
 rho = 1.225
-v = Mach_number * 340  # Freestream speed, m/s
+v = Mach_number * 340  # freestream speed, m/s
 Re_c = rho * v / 1.81e-5  # Reynolds number / characteristic length, 1/m
 
 indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("v", val=v, units="m/s")
+indep_var_comp.add_output("v", val=v, units="m/s")  # Freestream Velocity
 indep_var_comp.add_output(
     "alpha", val=0.0, units="deg"
 )
-indep_var_comp.add_output("Mach_number", val=Mach_number)
-indep_var_comp.add_output("re", val=Re_c, units="1/m")
-indep_var_comp.add_output("rho", val=rho, units="kg/m**3")
-indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
+indep_var_comp.add_output("Mach_number", val=Mach_number)  # Freestream Mach number
+indep_var_comp.add_output("re", val=Re_c, units="1/m")  # Freestream Reynolds number times chord length
+indep_var_comp.add_output("rho", val=rho, units="kg/m**3")  # Freestream air density
+indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")  # Aircraft center of gravity
 prob.model.add_subsystem("flight_vars", indep_var_comp, promotes=["*"])
 
 # Setup OpenAeroStruct model
 name = surface["name"]
 
-# Add geometry group to the problem and add wing surface as a sub group.
-# These groups manipulate the geometry of the mesh, e.g., spanwise twist.
+# Add geometry group to the problem and add wing suface as a sub group.
+# These groups are responsible for manipulating the geometry of the mesh, in this case spanwise twist.
 geom_group = Geometry(surface=surface)
 prob.model.add_subsystem(name, geom_group)
 
@@ -137,17 +137,17 @@ prob.model.connect(name + ".mesh", point_name + ".aero_states." + name + "_def_m
 # Connect the parameters within the model for each aero point
 prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_over_c")
 
-prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Varies the taper ratio
-prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0) # Varies twist control points
-prob.model.add_design_var('wing.sweep', lower=5.0, upper=45.0, units='deg') # Varies sweep
-prob.model.add_design_var('alpha', units='deg', lower=-5.0, upper=10.0)   # Varies angle of attack
-prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)   # Impose CL = 2.0
-prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)   # Minimize CD.
+prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)
+prob.model.add_design_var('wing.twist_cp', lower=-10.0, upper=10.0, units='deg')
+prob.model.add_design_var('wing.sweep', lower=5.0, upper=45.0, units='deg')
+prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)
+prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=2.0)
+prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)
 
-# Use Scipy's SLSQP optimization
+# use Scipy's SLSQP optimization
 prob.driver = om.ScipyOptimizeDriver()
 
-# Record optimization history
+# record optimization history
 recorder = om.SqliteRecorder("aero.db")
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
@@ -156,7 +156,6 @@ prob.options['work_dir'] = './openaerostruct_out'
 prob.setup()
 prob.run_driver()
 
-# Print results
 print("Angle of attack =", prob.get_val("alpha", units="deg")[0], "deg")
 print("CL = ", prob.get_val("flight_condition_0.wing_perf.CL")[0])
 print("CD = ", prob.get_val("flight_condition_0.wing_perf.CD")[0])

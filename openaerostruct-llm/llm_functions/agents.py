@@ -153,7 +153,7 @@ class ResultsReaderAgent(GeneralAgent):
                 },
             },
 
-            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
+            PDFs= ["../figures/Opt_History.pdf","../figures/Optimized_Wing.pdf"],
 
             name="Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics shown by them",
@@ -193,7 +193,7 @@ class ReportWriter(GeneralAgent):
 
             name="Report Writer",
             role="Using Latex write a report on the optimization results",
-            PDFs= ["./figures/Opt_History.pdf","./figures/Optimized_Wing.pdf"],
+            PDFs= ["../figures/Opt_History.pdf","../figures/Optimized_Wing.pdf"],
             prompt=f"""
             Your goal is to rewrite the LLM output into a report format, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
@@ -206,7 +206,7 @@ class ReportWriter(GeneralAgent):
             Use all the information given to write a detailed analysis of the results and recommendations.
 
             Please include this figure in the report:
-            The file path is "./Optimized_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis, as it will also be provided.
+            The file path is "../figures/Optimized_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis, as it will also be provided.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """,
