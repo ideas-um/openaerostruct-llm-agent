@@ -55,18 +55,30 @@ Python Version: For Mac users, Python 3.13.1+ is recommended to avoid Matplotlib
 
 ## Usage
 
-Open the OpenAeroStruct.ipynb notebook.
+### Python Script (Recommended)
 
-Edit the User_Request variable with your design goals:
+Navigate to the openaerostruct-llm directory and run the script:
 
 ```bash
-User_Request = "Minimize drag for a wing with S = 100 m2 and b = 10 m. Optimize for Taper, Twist, and Sweep."
+cd openaerostruct-llm
+python3 run_openaerostruct.py
 ```
 
-Run the notebook cells. The system will:
+The script will prompt you to enter your wing design request interactively:
+
+```
+Aerodynamic Optimization: Minimize drag for a wing with S = 100 m2 and b = 10 m. Optimize for Taper, Twist, and Sweep. CL = 2.0
+
+Aerostructural optimization: Minimize fuel burn for aerostructural optimization. Wing with structural constraints Optimize twist. b = 10m, S = 100m2.
+```
+
+The system will execute the complete pipeline:
 - Generate RunOAS.py
+- Validate the generated code for syntax errors
 - Execute the optimization
 - Create a report in openaerostruct-llm/report_outputs (e.g., 26010121_Report.tex)
+
+**Note:** The Jupyter notebook (OpenAeroStruct.ipynb) is no longer the primary interface. Please use the Python script for all interactions.
 
 ## Examples
 

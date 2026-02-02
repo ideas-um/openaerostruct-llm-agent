@@ -1,0 +1,5 @@
+#ignore all files under figures/ , openaerostruct_out/ and, report_outputs/
+*/openaerostruct_out/
+*/figures/
+*/report_outputs/
+

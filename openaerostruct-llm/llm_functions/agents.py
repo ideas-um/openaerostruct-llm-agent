@@ -278,7 +278,7 @@ class BaseMeshAgent(BaseCoderAgent):
             3. Use the provided code sample to structure your code.
             4. Ensure that the response is well-formatted and easy to understand.
 
-            You may need to perform basic math calculations for mesh generation. For a rectangular wing, if span and area are given, calculate the root chord as follows: root\_chord = area / span.
+            You may need to perform basic math calculations for mesh generation. For a rectangular wing, if span and area are given, calculate the root chord as follows: root_chord = area / span.
 
             Follow the explained code sample provided. Do not add new fields—directly edit the code and explain any changes in the calculations and in the explanation field.
 
@@ -475,5 +475,47 @@ class OptimizerAgent(AdvancedCoderAgent):
             print("CL = ", prob.get_val("flight_condition_0.wing_perf.CL")[0])
             print("CD = ", prob.get_val("flight_condition_0.wing_perf.CD")[0])
             ,,,
+            """
+        )
+
+
+class FinalCoderAgent(AdvancedCoderAgent):
+    def __init__(self):
+        super().__init__(
+            schema = {
+                "type": "object",
+                "properties": {
+                    "mesh_code": {"type": "string", "description": "The tidied mesh code"},
+                    "geometry_code": {"type": "string", "description": "The tidied geometry code"},
+                    "optimizer_code": {"type": "string", "description": "The tidied optimizer code"},
+                    "issues_found": {"type": "string", "description": "Any issues or corrections made"},
+                },
+            },
+            name="Final Coder and Checker",
+            role="Review and tidy up combined code sections to ensure no errors",
+            prompt="""
+            Your goal is to review the combined code sections from multiple agents, tidy them up, and ensure there are no errors.
+
+            Your tasks are:
+            1. Review all three code sections (mesh, geometry, optimizer)
+            2. Check for:
+               - Proper indentation and formatting
+               - Consistent variable naming across sections
+               - No duplicate or conflicting code
+               - Syntax errors
+               - Logic errors
+               - Missing imports (note: imports are handled elsewhere, don't add them)
+            3. Fix any issues found
+            4. Return tidied versions of all three code sections
+            5. Document any issues found and corrections made
+
+            Important notes:
+            - Do NOT add import statements
+            - Do NOT modify the core logic unless there's an error
+            - Ensure proper Python indentation (4 spaces)
+            - Make sure variable names are consistent (e.g., 'mesh', 'surface', 'prob')
+            - Remove any unnecessary whitespace or comments that don't add value
+            
+            Output the tidied code sections in the schema provided.
             """
         )
