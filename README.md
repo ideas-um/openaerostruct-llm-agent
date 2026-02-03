@@ -1,4 +1,3 @@
-<img width="4297" height="2444" alt="Towards LLM Enabled Aircraft Design" src="https://github.com/user-attachments/assets/dcaab27f-5d2e-4591-afd9-1d21d77561fd" /># OpenAeroStruct LLM Agent
 **Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab**  
 [https://ideas.engin.umich.edu](https://ideas.engin.umich.edu)
 
@@ -14,6 +13,14 @@ The OpenAeroStruct LLM Agent leverages a coordinated team of Large Language Mode
 
 ## Multi-Agent Architecture
 
+The system utilizes a specialized 6-agent pipeline:
+1.  **ReformulatorAgent**: Translates raw user requests into structured optimization specifications (objectives, constraints, and variables).
+2.  **BaseMeshAgent**: Writes the baseline wing mesh script required for initialization.
+3.  **GeometryAgent**: Writes the `surface` dictionary script, managing optimization parameters like taper, sweep, and twist.
+4.  **OptimizerAgent**: Writes the OpenMDAO optimization scripts, including design variables (`alpha`, `twist_cp`, etc.) and constraints (`CL`).
+5.  **ResultsReaderAgent**: Parses both graphical and numiercal outputs, identifies optimization failures (e.g., infeasible design spaces), and provides engineering recommendations.
+6.  **ReportWriter**: Compiles the entire process, including analysis and plot references, into a professionally formatted LaTeX report.
+
 <p align="center">
   <img
     width="4297"
@@ -22,14 +29,6 @@ The OpenAeroStruct LLM Agent leverages a coordinated team of Large Language Mode
     src="https://github.com/user-attachments/assets/d5281c19-1be1-4bc0-836b-9173744ab0c8"
   />
 </p>
-
-The system utilizes a specialized 6-agent pipeline:
-1.  **ReformulatorAgent**: Translates raw user requests into structured optimization specifications (objectives, constraints, and variables).
-2.  **BaseMeshAgent**: Writes the baseline wing mesh script required for initialization.
-3.  **GeometryAgent**: Writes the `surface` dictionary script, managing optimization parameters like taper, sweep, and twist.
-4.  **OptimizerAgent**: Writes the OpenMDAO optimization scripts, including design variables (`alpha`, `twist_cp`, etc.) and constraints (`CL`).
-5.  **ResultsReaderAgent**: Parses both graphical and numiercal outputs, identifies optimization failures (e.g., infeasible design spaces), and provides engineering recommendations.
-6.  **ReportWriter**: Compiles the entire process, including analysis and plot references, into a professionally formatted LaTeX report.
 
 ## Features
 - Natural language processing for wing design specifications
