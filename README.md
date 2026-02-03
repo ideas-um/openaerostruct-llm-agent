@@ -1,4 +1,4 @@
-# OpenAeroStruct LLM Agent
+<img width="4297" height="2444" alt="Towards LLM Enabled Aircraft Design" src="https://github.com/user-attachments/assets/dcaab27f-5d2e-4591-afd9-1d21d77561fd" /># OpenAeroStruct LLM Agent
 **Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab**  
 [https://ideas.engin.umich.edu](https://ideas.engin.umich.edu)
 
@@ -13,6 +13,16 @@ A multi-agent tool designed to code, optimize, and analyze wing designs from hig
 The OpenAeroStruct LLM Agent leverages a coordinated team of Large Language Models (LLMs) to automate the entire aircraft wing design and optimization workflow. By providing a simple text prompt (e.g., *"Minimize drag for a wing with an area of 100m²"*), the agent pipeline handles mesh generation, geometry definition, optimization setup in OpenMDAO, results interpretation, and report generation for further iteration.
 
 ## Multi-Agent Architecture
+
+<p align="center">
+  <img
+    width="4297"
+    height="2444"
+    alt="Towards LLM Enabled Aircraft Design"
+    src="https://github.com/user-attachments/assets/d5281c19-1be1-4bc0-836b-9173744ab0c8"
+  />
+</p>
+
 The system utilizes a specialized 6-agent pipeline:
 1.  **ReformulatorAgent**: Translates raw user requests into structured optimization specifications (objectives, constraints, and variables).
 2.  **BaseMeshAgent**: Writes the baseline wing mesh script required for initialization.
