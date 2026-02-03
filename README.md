@@ -33,7 +33,7 @@ The system utilizes a specialized 6-agent pipeline:
 We recommend using `uv` for fast dependency management:
 
 ```bash
-uv sync
+uv sync --python-preference only-managed
 ```
 
 ### 2. API Configuration

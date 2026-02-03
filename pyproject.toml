@@ -3,7 +3,8 @@ name = "agentic-openaerostruct"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12.1"
+requires-python = "==3.12.*"
+
 dependencies = [
     "beautifulsoup4>=4.13.4",
     "cffi>=1.17.1",

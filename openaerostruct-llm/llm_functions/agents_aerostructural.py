@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))  # Add current folder to path
 
 import json
@@ -144,6 +145,16 @@ class ReformulatorAgentAerostructural(GeneralAgent):
 class ResultsReaderAgentAerostructural(GeneralAgent):
 
     def __init__(self):
+        # Get absolute path to 'figures' folder
+        # Goes up 2 levels from this script: llm_functions/ -> Root/ -> figures/
+        base_dir = Path(__file__).resolve().parent.parent
+        figures_dir = base_dir / "figures"
+        
+        pdf_list = [
+            str(figures_dir / "Opt_History.pdf"),
+            str(figures_dir / "Optimized_Wing.pdf")
+        ]
+
         super().__init__(
             schema = {
                 "type": "object",
@@ -155,7 +166,7 @@ class ResultsReaderAgentAerostructural(GeneralAgent):
                 },
             },
 
-            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
+            PDFs=pdf_list,
 
             name="Aerostructural Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics of aerostructural optimization",
@@ -186,6 +197,14 @@ class ResultsReaderAgentAerostructural(GeneralAgent):
 
 class ReportWriterAerostructural(GeneralAgent):
     def __init__(self):
+        base_dir = Path(__file__).resolve().parent.parent
+        figures_dir = base_dir / "figures"
+        
+        pdf_list = [
+            str(figures_dir / "Opt_History.pdf"),
+            str(figures_dir / "Optimized_Wing.pdf")
+        ]
+
         super().__init__(
             schema = {
                 "type": "object",
@@ -196,7 +215,7 @@ class ReportWriterAerostructural(GeneralAgent):
 
             name="Aerostructural Report Writer",
             role="Using Latex write a report on the aerostructural optimization results",
-            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
+            PDFs=pdf_list, # <--- Updated variable here
             prompt=f"""
             Your goal is to rewrite the LLM output into a report format for AEROSTRUCTURAL optimization, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
@@ -210,7 +229,7 @@ class ReportWriterAerostructural(GeneralAgent):
             Emphasize the coupling between aerodynamics and structures, and how design decisions affect both domains.
 
             Please include this figure in the report:
-            The file path is "../figures/Optimized_Wing.pd", which contains the optimized wing visualization. Reference this figure in your analysis.
+            The file path is "../figures/Optimized_Wing.pdf", which contains the optimized wing visualization. Reference this figure in your analysis.
 
             Today's date is {time.strftime("%Y-%m-%d")}. Please include the date in the report.
             """,
