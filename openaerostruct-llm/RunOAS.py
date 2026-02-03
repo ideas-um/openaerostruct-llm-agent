@@ -31,21 +31,21 @@ def plot_mesh(mesh):
 
 """Part 1: PUT THE BASELINE MESH OF THE WING HERE"""
 mesh_dict = {
-    "num_y": 19,  # number of panels in the y direction, 19 is a good starting number
-    "num_x": 3,  # number of panels in the x direction, 3 is a number
-    "wing_type": "rect",  # This can either be "rect" or "crm" only
-    "symmetry": True,  # True if the wing is symmetric, False if it is not, wings are typically symmetric
-    "span": 60.0,  # This is the full span of the wing in meters
-    "root_chord": 6.67,  # This is the root chord of the wing in meters
-    "span_cos_spacing": 0.0,  # This is usually not edited
-    "chord_cos_spacing": 0.0,  # This is usually not edited
+    "num_y": 19, #number of panels in the y direction, 19 is a good starting number
+    "num_x": 3, #number of panels in the x direction, 3 is a number
+    "wing_type": "rect", #This can either be "rect" or "crm" only
+    "symmetry": True, # True if the wing is symmetric, False if it is not, wings are typically symmetric
+    "span": 60.0, #This is the full span of the wing in meters
+    "root_chord": 6.67, #This is the root chord of the wing in meters
+    "span_cos_spacing": 0.0, #This is usually not edited
+    "chord_cos_spacing": 0.0, #This is usually not edited
 }
 
 # Generate VLM mesh for half-wing
-mesh = generate_mesh(mesh_dict)  # this creates a rectangular wing mesh, DO NOT EDIT THIS LINE
+mesh = generate_mesh(mesh_dict)   # this creates a rectangular wing mesh, DO NOT EDIT THIS LINE
 
 # plot mesh
-plot_mesh(mesh)  # this plots the rectangular wing mesh, DO NOT EDIT THIS LINE
+plot_mesh(mesh)  #this plots the rectangular wing mesh, DO NOT EDIT THIS LINE
 
 
 
@@ -74,20 +74,18 @@ surface = {
 
     # Useful options for changing the wing geometry, CHANGE THESE
     "chord_cp": np.ones(3),  # if chord cp is allowed to be optimized, uncomment this line and change the value for how many points for the bspline to change the chord, default is 3
-    "taper": 0.4,  # if the wing can be tapered, uncomment this line and change the initial value for how much taper, default is 0.4
-    "sweep": 28.0,  # if the wing can be swept, uncomment this line and change the initial value for how much sweep, default is 28.0
-    "dihedral": 3.0,  # if the wing has dihedral, uncomment this line and change the initial value for how much dihedral, default is 3.0
-    "twist_cp": np.zeros(2),  # if the wing can be twisted, uncomment this line and change the value for how many points for the bspline to change the twist, default is 4
+    "taper" : 0.4, # if the wing can be tapered, uncomment this line and change the initial value for how much taper, default is 0.4
+    "sweep" : 28.0, # if the wing can be swept, uncomment this line and change the initial value for how much sweep, default is 28.0
+    "dihedral": 3.0, # if the wing has dihedral, uncomment this line and change the initial value for how much dihedral, default is 3.0
+    "twist_cp" : np.zeros(2),  # if the wing can be twisted, uncomment this line and change the value for how many points for the bspline to change the twist, default is 4
 }
-# end of surface dictionary
-
-
 
 """Part 3: PUT THE OPTIMIZER HERE """
+# Instantiate the problem and the model group
 prob = om.Problem()
 
 # Define flight conditions
-Mach_number = 0.5  # You can change this if the user specifies a different Mach number
+Mach_number = 0.5 # You can change this if the user specifies a different Mach number
 rho = 1.225
 v = Mach_number * 340  # freestream speed, m/s
 Re_c = rho * v / 1.81e-5  # Reynolds number / characteristic length, 1/m
@@ -97,7 +95,7 @@ indep_var_comp.add_output("v", val=v, units="m/s")  # Freestream Velocity
 indep_var_comp.add_output(
     "alpha", val=0.0, units="deg"
 )
-indep_var_comp.add_output("Mach_number", val=Mach_number)
+indep_var_comp.add_output("Mach_number", val=Mach_number)  # Freestream Mach number
 indep_var_comp.add_output("re", val=Re_c, units="1/m")  # Freestream Reynolds number times chord length
 indep_var_comp.add_output("rho", val=rho, units="kg/m**3")  # Freestream air density
 indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")  # Aircraft center of gravity
@@ -117,8 +115,7 @@ point_name = "flight_condition_0"
 prob.model.add_subsystem(
     point_name,
     aero_group,
-    promotes_inputs=
-    [
+    promotes_inputs=[
         "v",
         "alpha",
         "beta",
@@ -140,18 +137,18 @@ prob.model.connect(name + ".mesh", point_name + ".aero_states." + name + "_def_m
 prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_over_c")
 
 ########## THIS IS THE PART TO EDIT ##########
-# If the variables are not specified, you can comment them out, you can also change the upper and lower bounds.
-# You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep, dihedral etc.
-# The way to add them is wing."var_name" (for example, wing.taper) and the lower and upper bounds are in the form of lower=0.0, upper=1.0
-# these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp, dihedral = dihedral
-# remember to add alpha as a design variable if CL is a constraint.
-# DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
+#If the variables are not specified, you can comment them out, you can also change the upper and lower bounds.
+#You are also allowed to add the design varaibles, constraints, and objectives here like chord_cp, twist_cp, taper, sweep, dihedral etc.
+#The way to add them is wing."var_name" (for example, wing.taper) and the lower and upper bounds are in the form of lower=0.0, upper=1.0
+#these are the var names that you can use taper = taper, sweep = sweep, chord_cp = chord_cp, twist_cp = twist_cp, dihedral = dihedral
+#remember to add alpha as a design variable if CL is a constraint.
+#DO NOT ADD THE AREA AND SPAN CONSTRAINTS HERE AS THEY DO NOT WORK YET.
 
-prob.model.add_design_var("wing.taper", lower=0.2, upper=1.0)  # Varies the taper ratio
-prob.model.add_design_var("wing.sweep", lower=0.0, upper=20.0)  # Varies the sweep angle
-prob.model.add_design_var("alpha", units='deg', lower=0., upper=10.)   # varies
-prob.model.add_constraint("flight_condition_0.wing_perf.CL", equals=0.5)  # impose CL = 0.5
-prob.model.add_objective("flight_condition_0.wing_perf.CD", ref=0.01)  # dummy objective to minimize CD.
+prob.model.add_design_var('wing.taper', lower=0.2, upper=1.0)  # Varies the taper ratio
+prob.model.add_design_var('wing.sweep', lower=-30.0, upper=30.0) # Varies the sweep angle
+prob.model.add_design_var('alpha', units='deg', lower=0., upper=10.)   # varies alpha for CL constraint
+prob.model.add_constraint('flight_condition_0.wing_perf.CL', equals=0.5)   # impose CL = 0.5
+prob.model.add_objective('flight_condition_0.wing_perf.CD', ref=0.01)   # Minimize CD.
 ############# THIS END OF THE PART TO EDIT ##########
 
 # use Scipy's SLSQP optimization
@@ -166,8 +163,8 @@ prob.options['work_dir'] = './openaerostruct_out'
 prob.setup()
 prob.run_driver()
 
-# print results
-print("Angle of attack =", prob.get_val("alpha", units="deg") [0], "deg")
-print("CL = ", prob.get_val("flight_condition_0.wing_perf.CL") [0])
-print("CD = ", prob.get_val("flight_condition_0.wing_perf.CD") [0])
+#print results
+print("\nAngle of attack =", prob.get_val("alpha", units="deg")[0], "deg")
+print("CL = ", prob.get_val("flight_condition_0.wing_perf.CL")[0])
+print("CD = ", prob.get_val("flight_condition_0.wing_perf.CD")[0])
 

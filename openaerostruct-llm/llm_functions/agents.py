@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))  # Add current folder to path
 
 import json
@@ -142,6 +143,16 @@ class ReformulatorAgent(GeneralAgent):
 class ResultsReaderAgent(GeneralAgent):
 
     def __init__(self):
+        # Get absolute path to 'figures' folder regardless of OS or execution dir
+        # agents.py is in 'llm_functions', so we go up 2 levels
+        base_dir = Path(__file__).resolve().parent.parent
+        figures_dir = base_dir / "figures"
+        
+        pdf_list = [
+            str(figures_dir / "Opt_History.pdf"),
+            str(figures_dir / "Optimized_Wing.pdf")
+        ]
+
         super().__init__(
             schema = {
                 "type": "object",
@@ -153,7 +164,7 @@ class ResultsReaderAgent(GeneralAgent):
                 },
             },
 
-            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
+            PDFs=pdf_list,
 
             name="Results Reader and Recommender",
             role="Read the visual results and report on the key characteristics shown by them",
@@ -183,6 +194,14 @@ class ResultsReaderAgent(GeneralAgent):
 
 class ReportWriter(GeneralAgent):
     def __init__(self):
+        base_dir = Path(__file__).resolve().parent.parent
+        figures_dir = base_dir / "figures"
+        
+        pdf_list = [
+            str(figures_dir / "Opt_History.pdf"),
+            str(figures_dir / "Optimized_Wing.pdf")
+        ]
+
         super().__init__(
             schema = {
                 "type": "object",
@@ -193,7 +212,7 @@ class ReportWriter(GeneralAgent):
 
             name="Report Writer",
             role="Using Latex write a report on the optimization results",
-            PDFs= ["././figures/Opt_History.pdf","././figures/Optimized_Wing.pdf"],
+            PDFs=pdf_list,
             prompt=f"""
             Your goal is to rewrite the LLM output into a report format, using the schema provided (which is an object). You will be given the textual analysis from another LLM.
 
