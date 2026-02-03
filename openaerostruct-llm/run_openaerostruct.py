@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 OpenAeroStruct LLM Agent - Main Execution Script
 Converted from OpenAeroStruct.ipynb for standalone execution

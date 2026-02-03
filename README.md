@@ -80,6 +80,7 @@ The system will execute the complete pipeline:
 
 **Note:** The Jupyter notebook (OpenAeroStruct.ipynb) is no longer the primary interface. Please use the Python script for all interactions.
 
-## Examples
+## Examples 
+Check the `Example_Outputs` folder for example outputs used in the preprint paper. The preprint can be accessed at https://www.gokcincinar.com/publication/pp-2025-agenticframework/pp-2025-AgenticFramework.pdf
 
-Check the `Example_Outputs` folder for example outputs used in the published paper.
+
