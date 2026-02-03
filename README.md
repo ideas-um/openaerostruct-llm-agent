@@ -2,7 +2,7 @@
 **Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab**  
 [https://ideas.engin.umich.edu](https://ideas.engin.umich.edu)
 
-A multi-agent tool designed to write, execute, and analyze OpenAeroStruct optimization code from high-level natural language inputs.
+A multi-agent tool designed to code, optimize, and analyze wing designs from high-level natural language inputs using OpenAeroStruct.
 
 ## Contributors
 - **Conan Lee**: Lead developer and primary author (HKUST) 
@@ -37,7 +37,9 @@ uv sync --python-preference only-managed
 ```
 
 ### 2. API Configuration
-Create a .env file in the root directory to store your LLM credentials:
+Create a .env file in the root directory to store your LLM API keys, gemma-3-27b-it and gemini-2.5-flash are the chosen models for the agents in the current script. LLMs are also reconfigurable to use ollama API for local on-device computation or other Gemini models, this feature will be rolled out in the next few weeks. 
+
+An API Key can be attained here: https://aistudio.google.com/api-keys
 
 ```bash
 GEMINI_API_KEY = "YOUR_GOOGLE_GEMINI_KEY"
