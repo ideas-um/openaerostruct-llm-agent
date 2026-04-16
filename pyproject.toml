@@ -35,6 +35,7 @@ dependencies = [
     "pyphen>=0.17.2",
     "python-dotenv>=1.1.1",
     "reportlab>=4.4.7",
+    "streamlit>=1.56.0",
     "tinycss2>=1.4.0",
     "tinyhtml5>=2.0.0",
     "weasyprint>=65.1",

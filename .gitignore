@@ -182,3 +182,9 @@ cython_debug/
 
 todo.txt
 .env.txt
+
+agent_plots/
+generated_run_out/
+openaerostruct_out/
+
+usage_stats.csv

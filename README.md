@@ -9,33 +9,27 @@ A multi-agent tool designed to code, optimize, and analyze wing designs from hig
 - **Joaquim R.R.A. Martins**: Research supervision and concept development (U-M)
 
 ## Introduction
-The OpenAeroStruct LLM Agent leverages a coordinated team of Large Language Models (LLMs) to automate the entire aircraft wing design and optimization workflow. By providing a simple text prompt (e.g., *"Minimize drag for a wing with an area of 100m²"*), the agent pipeline handles mesh generation, geometry definition, optimization setup in OpenMDAO, results interpretation, and report generation for further iteration.
+The OpenAeroStruct LLM Agent leverages a coordinated team of Large Language Models (LLMs) to automate the entire aircraft wing design and optimization workflow. By providing a simple text prompt (e.g., *"Minimize drag for a wing with an area of 100m²"*), the agent pipeline handles mesh generation, geometry definition, optimization setup in OpenMDAO, results interpretation, and visualization.
 
-## Multi-Agent Architecture
+## Architecture & Workflow
 
-The system utilizes a specialized 6-agent pipeline:
-1.  **ReformulatorAgent**: Translates raw user requests into structured optimization specifications (objectives, constraints, and variables).
-2.  **BaseMeshAgent**: Writes the baseline wing mesh script required for initialization.
-3.  **GeometryAgent**: Writes the `surface` dictionary script, managing optimization parameters like taper, sweep, and twist.
-4.  **OptimizerAgent**: Writes the OpenMDAO optimization scripts, including design variables (`alpha`, `twist_cp`, etc.) and constraints (`CL`).
-5.  **ResultsReaderAgent**: Parses both graphical and numiercal outputs, identifies optimization failures (e.g., infeasible design spaces), and provides engineering recommendations.
-6.  **ReportWriter**: Compiles the entire process, including analysis and plot references, into a professionally formatted LaTeX report.
+The system utilizes a specialized agent pipeline and a blueprint-based approach:
+1.  **Blueprint Selection**: The agent identifies the most relevant baseline script (e.g., `aero_crm.py`, `aerostruct_wingbox.py`) based on the logic defined in `src/blueprints/skills.md`.
+2.  **Code Synthesis**: Validated blueprints are modified to match the user's specific geometric and optimization requirements.
+3.  **Execution**: The generated script is executed, saving logs and data.
+4.  **Plotting & Analysis**: Results are saved to a unified output directory. The agent can automatically generate and display plots like lift distributions and 3D wing geometries.
 
-<p align="center">
-  <img
-    width="4297"
-    height="2444"
-    alt="Towards LLM Enabled Aircraft Design"
-    src="https://github.com/user-attachments/assets/d5281c19-1be1-4bc0-836b-9173744ab0c8"
-  />
-</p>
+### Unified Output Structure
+All agent-generated data is now consolidated under:
+- `openaerostruct_out/`: Contains SQLite databases (`aero.db`, `aerostruct.db`) and optimization logs.
+- `openaerostruct_out/agent_plots/`: All generated figures, polars, and lift distributions.
 
 ## Features
-- Natural language processing for wing design specifications
-- Automated mesh generation and refinement
-- Wing optimization based on specified objectives (drag, lift, etc.)
-- Automated visualization of results
-- Detailed report output
+- **Natural Language Intent**: Maps high-level goals ("reduce weight", "analyze stability") to complex optimization scripts.
+- **LLM-Friendly Blueprints**: All templates in `src/blueprints/` include detailed comments to guide the agent in parameter adjustment.
+- **Unified Plotting**: Automatic visualization of wing geometry and aerodynamic polars.
+- **Support for Multi-Section Wings**: Specialized blueprints for complex planforms with multiple chord/twist segments.
+- **Stability Analysis**: Direct support for calculating CL_alpha, CM_alpha, and Static Margin.
 
 ## Installation
 ### 1. Environment Setup
@@ -46,52 +40,51 @@ uv sync --python-preference only-managed
 ```
 
 ### 2. API Configuration
-Create a .env file in the root directory to store your LLM API keys, gemma-3-27b-it and gemini-2.5-flash are the chosen models for the agents in the current script. LLMs are also reconfigurable to use ollama API for local on-device computation or other Gemini models, this feature will be rolled out in the next few weeks. 
-
-An API Key can be attained here: https://aistudio.google.com/api-keys
+Create a `.env` file in the root directory:
 
 ```bash
 GEMINI_API_KEY = "YOUR_GOOGLE_GEMINI_KEY"
 ```
 
 ### 3. System Requirements
-
-To generate the final reports and plots, the following are required:
-
-Pandoc: Required for document conversion https://pandoc.org/installing.html
-
-XeLaTeX: Required for PDF generation. Install via MiKTeX (Windows) or BasicTeX (macOS).
-
-Python Version: For Mac users, Python 3.13.1+ is recommended to avoid Matplotlib/Tkinter GUI issues.
+- **Python 3.10+**: Python 3.13+ recommended for Mac users.
+- **OpenAeroStruct**: Installed via dependencies.
+- **Matplotlib/Tkinter**: Required for GUI plotting (though the agent defaults to headless `.png` generation).
 
 ## Usage
 
-### Python Script (Recommended)
-
-Navigate to the openaerostruct-llm directory and run the script:
+### Running the Agent
 
 ```bash
-cd openaerostruct-llm
-python3 run_openaerostruct.py
+uv run streamlit run src/app.py
 ```
 
-The script will prompt you to enter your wing design request interactively:
+### Example Prompts
+- *"Optimize a rectangular wing to minimize drag at Mach 0.85, keeping CL constant at 0.5."*
+- *"Perform an aerostructural optimization for a rectangular wing with a tubular spar. Minimize fuel burn for a 2000km range."*
+- *"Check the stability derivatives and static margin for a swept wing with 25 degrees of sweep."*
 
+## Output
+After a run, you can find your results in:
+- `openaerostruct_out/aero.db`: Optimization data.
+- `openaerostruct_out/agent_plots/`: Generated visualizations (e.g., `wing_3d.png`, `lift_dist.png`).
+
+The agent will also display relevant plots directly in the conversation interface.
+
+## Development & Testing
+
+### Benchmarking Suite
+To ensure the agent is performing correctly across all blueprints, you can run the automated benchmark test suite:
+
+```bash
+uv run python src/tools/benchmark.py
 ```
-Aerodynamic Optimization: Minimize drag for a wing with S = 100 m2 and b = 10 m. Optimize for Taper, Twist, and Sweep. CL = 2.0
 
-Aerostructural optimization: Minimize fuel burn for aerostructural optimization. Wing with structural constraints Optimize twist. b = 10m, S = 100m2.
-```
+This will:
+1. Load test queries from `src/blueprints/test_queries.csv`.
+2. Test intent routing, code generation, and execution for each case.
+3. Save detailed results and error logs to `openaerostruct_out/benchmark_results.csv`.
 
-The system will execute the complete pipeline:
-- Generate RunOAS.py
-- Validate the generated code for syntax errors
-- Execute the optimization
-- Create a report in openaerostruct-llm/report_outputs (e.g., 26010121_Report.tex)
-
-**Note:** The Jupyter notebook (OpenAeroStruct.ipynb) is no longer the primary interface. Please use the Python script for all interactions.
 
 ## Examples 
 Check the `Example_Outputs` folder for example outputs used in the preprint paper. The preprint can be accessed at https://www.gokcincinar.com/publication/pp-2025-agenticframework/pp-2025-AgenticFramework.pdf
-
-

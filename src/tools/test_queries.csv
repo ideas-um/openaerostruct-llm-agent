@@ -1,0 +1,2 @@
+id,category,query,expected_blueprints
+1,aero_analysis,Analyze the aerodynamic polar for a rectangular wing (10m span, 2m chord) for alpha from -2 to 12 degrees.,
