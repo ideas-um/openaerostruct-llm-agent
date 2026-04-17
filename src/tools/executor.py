@@ -157,8 +157,8 @@ def _build_seccomp_preexec():
         # Layout: [0]=LD  [1..n]=JEQ  [n+1]=ALLOW  [n+2]=ERRNO
         # The instruction after JEQ[i] is at index i+2; ERRNO is at n+2.
         # Forward jump distance = (n+2) - (i+2) = n - i.
-        jt = n - i
-        instructions.append(_bpf_jump(BPF_JMP | BPF_JEQ | BPF_K, nr, jt, 0))
+        jump_to_errno = n - i
+        instructions.append(_bpf_jump(BPF_JMP | BPF_JEQ | BPF_K, nr, jump_to_errno, 0))
     instructions.append(_bpf_stmt(BPF_RET | BPF_K, _SECCOMP_RET_ALLOW))
     instructions.append(_bpf_stmt(BPF_RET | BPF_K, _SECCOMP_RET_ERRNO))
 
