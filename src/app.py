@@ -187,9 +187,12 @@ if user_prompt:
                     st.success("Execution Completed Successfully")
                     
                     possible_paths = [
+                        os.path.join(_GEN_RUN_DIR, "aero.db"),
+                        os.path.join(_GEN_RUN_DIR, "aerostruct.db"),
+                        os.path.join(_GEN_RUN_DIR, "struct.db"),
                         os.path.join(_OUT_DIR, "aero.db"),
                         os.path.join(_OUT_DIR, "aerostruct.db"),
-                        os.path.join(_OUT_DIR, "generated_run_out", "aero.db")
+                        os.path.join(_OUT_DIR, "struct.db"),
                     ]
                     db_summary = "Error: No database found."
                     for path in possible_paths:

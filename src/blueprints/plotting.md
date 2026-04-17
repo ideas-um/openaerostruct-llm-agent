@@ -2,7 +2,7 @@
 
 ## Overview
 All plotting should be directed to the unified output directory: `src/openaerostruct_out/agent_plots/`.
-Database recorders should save to `src/openaerostruct_out/`.
+Database recorders should save to `src/openaerostruct_out/generated_run_out`.
 
 ## Key Plotting Scripts
 1.  **`src/blueprints/agent_plotting.py`**: The primary automated plotting tool. Use this after running an optimization.
@@ -72,4 +72,4 @@ except Exception as e:
 ## Best Practices
 - **Always Display Plots**: after a successful run, search `src/openaerostruct_out/agent_plots/` for new images and display them in the chat using Markdown syntax: `![plot description](path/to/plot.png)`.
 - **Headless Mode**: Ensure all plotting scripts use `plt.switch_backend('Agg')` or `matplotlib.use('Agg')`.
-- **Verification**: If a plot fails to generate, check if the `.db` file exists in `src/openaerostruct_out/`.
+- **Verification**: If a plot fails to generate, check if the `.db` file exists in `src/openaerostruct_out/generated_run_out`.
