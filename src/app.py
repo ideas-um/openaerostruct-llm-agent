@@ -19,8 +19,13 @@ _LOG_FILE    = os.path.join(_SRC_DIR, "agent_backend.log")
 _GEN_SCRIPT  = os.path.join(_SRC_DIR, "generated_run.py")
 
 # ---------------------------------------------------------------------------
-# Stderr sanitiser – strip ANSI codes and prompt-injection patterns
+# Feedback sanitiser – strip ANSI codes and prompt-injection patterns
 # ---------------------------------------------------------------------------
+# Malicious code printed to stdout/stderr during execution could craft output
+# that, when fed back to the LLM as error feedback, overrides the system
+# prompt ("indirect prompt injection"). The regex below matches the most
+# common injection preambles so those lines are silently dropped before the
+# text reaches the LLM.
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
 _INJECTION_PATTERN = re.compile(
     r"(?i)("
@@ -35,10 +40,14 @@ _INJECTION_PATTERN = re.compile(
 )
 
 
-def sanitize_stderr(text: str, max_chars: int = 1000) -> str:
+def sanitize_feedback(text: str, max_chars: int = 1000) -> str:
     """
-    Remove ANSI escape sequences and lines that contain known prompt-injection
-    patterns before the text is fed back to the LLM as error feedback.
+    Sanitise process output before it is fed back to the LLM as feedback.
+
+    Removes ANSI escape sequences and strips any line that matches common
+    prompt-injection patterns (e.g. "ignore previous instructions", "act as …").
+    This prevents a maliciously crafted print statement inside a generated
+    script from hijacking the LLM's next generation cycle via indirect injection.
     """
     text = _ANSI_ESCAPE.sub("", text)
     lines = [line for line in text.splitlines() if not _INJECTION_PATTERN.search(line)]
@@ -208,7 +217,7 @@ if user_prompt:
                             break
                         else:
                             st.warning("Executed but optimization did not finish or converge properly.")
-                            feedback = f"Optimization failed to converge. Results so far:\n{db_summary}\n\nStdout tail:\n{sanitize_stderr(result.stdout, max_chars=400)}"
+                            feedback = f"Optimization failed to converge. Results so far:\n{db_summary}\n\nStdout tail:\n{sanitize_feedback(result.stdout, max_chars=400)}"
                     else:
                         # For analysis, exit_code 0 is enough
                         st.write("Analysis Completed!")
@@ -217,7 +226,7 @@ if user_prompt:
                 else:
                     st.error("Python Error Occurred")
                     st.code(result.stderr[-500:], language='text')
-                    feedback = f"Python Execution Error:\n{sanitize_stderr(result.stderr, max_chars=1000)}"
+                    feedback = f"Python Execution Error:\n{sanitize_feedback(result.stderr, max_chars=1000)}"
                 
                 attempt += 1
 

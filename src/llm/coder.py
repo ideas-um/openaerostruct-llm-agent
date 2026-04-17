@@ -21,8 +21,12 @@ def generate_code(user_prompt: str, blueprint_names: list[str], feedback: str, m
         # ── Path-traversal guard ──────────────────────────────────────────
         # Resolve to an absolute, normalised path and confirm it stays inside
         # _BLUEPRINTS_DIR so a crafted name like "../../.env" is rejected.
+        # os.path.realpath() guarantees no trailing separator, so appending
+        # os.sep produces a clean prefix that avoids matching sibling paths
+        # (e.g. /blueprints_evil would not be matched by /blueprints/).
         candidate = os.path.realpath(os.path.join(_BLUEPRINTS_DIR, name))
-        if not candidate.startswith(_BLUEPRINTS_DIR + os.sep):
+        blueprints_prefix = _BLUEPRINTS_DIR.rstrip(os.sep) + os.sep
+        if not candidate.startswith(blueprints_prefix):
             blueprints_context += f"\nWarning: Blueprint '{name}' rejected (path traversal).\n"
             continue
 

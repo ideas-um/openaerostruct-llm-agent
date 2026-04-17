@@ -22,7 +22,8 @@ ALLOWED_TOP_LEVEL_IMPORTS: frozenset = frozenset({
     "numpy", "scipy",
     # Simulation frameworks
     "openaerostruct", "openmdao",
-    # Plotting
+    # Plotting – niceplots is a project dependency used by several blueprints
+    # for styled matplotlib figures; plotly is used by the analysis blueprint
     "matplotlib", "plotly", "niceplots",
     # Data handling
     "pandas",
@@ -153,8 +154,9 @@ def _build_seccomp_preexec():
     n = len(blocked)
     instructions = [_bpf_stmt(BPF_LD | BPF_W | BPF_ABS, 0)]
     for i, nr in enumerate(blocked):
-        # jt = forward jump distance to the ERRNO instruction at index n+2
-        # Next instruction after this JEQ is at i+2; ERRNO is at n+2.
+        # Layout: [0]=LD  [1..n]=JEQ  [n+1]=ALLOW  [n+2]=ERRNO
+        # The instruction after JEQ[i] is at index i+2; ERRNO is at n+2.
+        # Forward jump distance = (n+2) - (i+2) = n - i.
         jt = n - i
         instructions.append(_bpf_jump(BPF_JMP | BPF_JEQ | BPF_K, nr, jt, 0))
     instructions.append(_bpf_stmt(BPF_RET | BPF_K, _SECCOMP_RET_ALLOW))
