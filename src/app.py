@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import re
 import shutil
 
 from llm.router import route_intent
@@ -7,16 +8,48 @@ from llm.coder import generate_code
 from tools.executor import execute_run
 from tools.db_reader import summarize_optimization
 
+# ---------------------------------------------------------------------------
+# __file__-relative base paths
+# ---------------------------------------------------------------------------
+_SRC_DIR     = os.path.dirname(os.path.abspath(__file__))
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_GEN_RUN_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+_LOG_FILE    = os.path.join(_SRC_DIR, "agent_backend.log")
+_GEN_SCRIPT  = os.path.join(_SRC_DIR, "generated_run.py")
+
+# ---------------------------------------------------------------------------
+# Stderr sanitiser – strip ANSI codes and prompt-injection patterns
+# ---------------------------------------------------------------------------
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
+_INJECTION_PATTERN = re.compile(
+    r"(?i)("
+    r"ignore\s+(previous|all|prior)\s+(instructions?|prompts?|context)"
+    r"|act\s+as\s+(a|an)\s+"
+    r"|forget\s+(everything|all)"
+    r"|you\s+are\s+now\s"
+    r"|disregard\s+(all|previous|prior)"
+    r"|new\s+instruction"
+    r"|\bsystem\s*:"
+    r")"
+)
+
+
+def sanitize_stderr(text: str, max_chars: int = 1000) -> str:
+    """
+    Remove ANSI escape sequences and lines that contain known prompt-injection
+    patterns before the text is fed back to the LLM as error feedback.
+    """
+    text = _ANSI_ESCAPE.sub("", text)
+    lines = [line for line in text.splitlines() if not _INJECTION_PATTERN.search(line)]
+    text = "\n".join(lines)
+    return text[-max_chars:] if len(text) > max_chars else text
+
 st.set_page_config(page_title="OpenAeroStruct Agent V3", layout="wide")
 
 # Helper to clean up old results
 def cleanup_artifacts():
-    paths = [
-        os.path.join("src", "openaerostruct_out", "agent_plots"),
-        os.path.join("src", "openaerostruct_out", "generated_run_out"),
-        os.path.join("openaerostruct_out", "agent_plots"),
-        os.path.join("openaerostruct_out", "generated_run_out")
-    ]
+    paths = [_PLOTS_DIR, _GEN_RUN_DIR]
     for p in paths:
         if os.path.exists(p):
             for filename in os.listdir(p):
@@ -33,12 +66,11 @@ def cleanup_artifacts():
 
 # Helper to find plots
 def get_generated_plots():
-    plot_dir = os.path.join("src", "openaerostruct_out", "agent_plots")
     plots = []
-    if os.path.exists(plot_dir):
-        for f in os.listdir(plot_dir):
+    if os.path.exists(_PLOTS_DIR):
+        for f in os.listdir(_PLOTS_DIR):
             if f.lower().endswith((".png", ".jpg", ".jpeg")):
-                plots.append(os.path.join(plot_dir, f))
+                plots.append(os.path.join(_PLOTS_DIR, f))
     return sorted(plots)
 
 # Persistent State Initialization
@@ -88,8 +120,7 @@ if user_prompt:
         st.markdown(user_prompt)
 
     # Clear backend log for new run
-    log_path = os.path.join("src", "agent_backend.log")
-    with open(log_path, "w") as f:
+    with open(_LOG_FILE, "w") as f:
         f.write("")
 
     st.session_state['stop_run'] = False
@@ -133,7 +164,7 @@ if user_prompt:
                 final_code = code
                 st.info(f"**Coder's Reasoning:** {reasoning}")
 
-                run_script_path = os.path.join("src", "generated_run.py")
+                run_script_path = _GEN_SCRIPT
                 with open(run_script_path, "w") as f:
                     f.write(code)
                     
@@ -147,9 +178,9 @@ if user_prompt:
                     st.success("Execution Completed Successfully")
                     
                     possible_paths = [
-                        os.path.join("src", "openaerostruct_out", "aero.db"),
-                        os.path.join("src", "openaerostruct_out", "aerostruct.db"),
-                        os.path.join("src", "openaerostruct_out", "generated_run_out", "aero.db")
+                        os.path.join(_OUT_DIR, "aero.db"),
+                        os.path.join(_OUT_DIR, "aerostruct.db"),
+                        os.path.join(_OUT_DIR, "generated_run_out", "aero.db")
                     ]
                     db_summary = "Error: No database found."
                     for path in possible_paths:
@@ -177,7 +208,7 @@ if user_prompt:
                             break
                         else:
                             st.warning("Executed but optimization did not finish or converge properly.")
-                            feedback = f"Optimization failed to converge. Results so far:\n{db_summary}\n\nStdout tail:\n{result.stdout[-400:]}"
+                            feedback = f"Optimization failed to converge. Results so far:\n{db_summary}\n\nStdout tail:\n{sanitize_stderr(result.stdout, max_chars=400)}"
                     else:
                         # For analysis, exit_code 0 is enough
                         st.write("Analysis Completed!")
@@ -186,7 +217,7 @@ if user_prompt:
                 else:
                     st.error("Python Error Occurred")
                     st.code(result.stderr[-500:], language='text')
-                    feedback = f"Python Execution Error:\n{result.stderr[-1000:]}"
+                    feedback = f"Python Execution Error:\n{sanitize_stderr(result.stderr, max_chars=1000)}"
                 
                 attempt += 1
 

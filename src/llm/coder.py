@@ -2,6 +2,14 @@ import os
 import json
 from .config import get_llm_response
 
+# ---------------------------------------------------------------------------
+# __file__-relative blueprint directory
+# ---------------------------------------------------------------------------
+_LLM_DIR       = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR       = os.path.dirname(_LLM_DIR)
+_BLUEPRINTS_DIR = os.path.realpath(os.path.join(_SRC_DIR, "blueprints"))
+
+
 def generate_code(user_prompt: str, blueprint_names: list[str], feedback: str, model_name: str = "gemini-2.5-flash", provider: str = "Gemini API") -> tuple[str, str]:
     """
     Takes one or more base blueprints and modifies them to fulfill the user's request.
@@ -10,7 +18,15 @@ def generate_code(user_prompt: str, blueprint_names: list[str], feedback: str, m
     """
     blueprints_context = ""
     for name in blueprint_names:
-        blueprint_path = os.path.join("src", "blueprints", name)
+        # ── Path-traversal guard ──────────────────────────────────────────
+        # Resolve to an absolute, normalised path and confirm it stays inside
+        # _BLUEPRINTS_DIR so a crafted name like "../../.env" is rejected.
+        candidate = os.path.realpath(os.path.join(_BLUEPRINTS_DIR, name))
+        if not candidate.startswith(_BLUEPRINTS_DIR + os.sep):
+            blueprints_context += f"\nWarning: Blueprint '{name}' rejected (path traversal).\n"
+            continue
+
+        blueprint_path = candidate
         if os.path.exists(blueprint_path):
             with open(blueprint_path, "r") as f:
                 content = f.read()

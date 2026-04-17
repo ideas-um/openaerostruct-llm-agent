@@ -1,4 +1,5 @@
 import os
+import csv
 import logging
 from google import genai
 from google.genai import types
@@ -7,8 +8,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ---------------------------------------------------------------------------
+# __file__-relative paths
+# ---------------------------------------------------------------------------
+_LLM_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR  = os.path.dirname(_LLM_DIR)
+_LOG_FILE   = os.path.join(_SRC_DIR, "agent_backend.log")
+_STATS_FILE = os.path.join(_SRC_DIR, "usage_stats.csv")
+
 logging.basicConfig(
-    filename=os.path.join('src', 'agent_backend.log'),
+    filename=_LOG_FILE,
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
@@ -17,16 +26,17 @@ logger = logging.getLogger("LLM_Backend")
 def log_token_usage(provider, model, input_tokens, output_tokens):
     """
     Log usage statistics to a permanent CSV file.
+    Uses csv.writer to ensure values are properly escaped (prevents CSV injection).
     """
-    stats_file = os.path.join("src", "usage_stats.csv")
-    exists = os.path.isfile(stats_file)
-    with open(stats_file, "a") as f:
+    from datetime import datetime
+    exists = os.path.isfile(_STATS_FILE)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total = input_tokens + output_tokens
+    with open(_STATS_FILE, "a", newline="") as f:
+        writer = csv.writer(f)
         if not exists:
-            f.write("Timestamp,Provider,Model,InputTokens,OutputTokens,TotalTokens\n")
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        total = input_tokens + output_tokens
-        f.write(f"{timestamp},{provider},{model},{input_tokens},{output_tokens},{total}\n")
+            writer.writerow(["Timestamp", "Provider", "Model", "InputTokens", "OutputTokens", "TotalTokens"])
+        writer.writerow([timestamp, provider, model, input_tokens, output_tokens, total])
 
 def get_llm_response(prompt: str, model_name: str, system_prompt: str = None, provider: str = "Gemini API") -> str:
     """
@@ -40,6 +50,11 @@ def get_llm_response(prompt: str, model_name: str, system_prompt: str = None, pr
     if "Gemini" in provider:
         import time
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise EnvironmentError(
+                "No Gemini API key found. Set the GOOGLE_API_KEY or GEMINI_API_KEY "
+                "environment variable (or add it to a .env file)."
+            )
         client = genai.Client(api_key=api_key)
         
         config = types.GenerateContentConfig(

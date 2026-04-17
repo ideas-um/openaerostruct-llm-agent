@@ -11,12 +11,20 @@ from llm.router import route_intent
 from llm.coder import generate_code
 from tools.executor import execute_run
 
+# ---------------------------------------------------------------------------
+# __file__-relative paths
+# ---------------------------------------------------------------------------
+_TOOLS_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR    = os.path.dirname(_TOOLS_DIR)
+_INPUT_FILE  = os.path.join(_TOOLS_DIR, "test_queries.csv")
+_OUTPUT_DIR  = os.path.join(_SRC_DIR, "openaerostruct_out")
+_BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
+
 def run_benchmark(limit=None, model="gemma-4-26b-a4b-it", provider="Gemini API"):
     """
     Sequentially tests all queries in test_queries.csv and logs results.
     """
-    input_file = os.path.join("src", "tools", "test_queries.csv")
-    output_dir = os.path.join("src", "openaerostruct_out")
+    output_dir  = _OUTPUT_DIR
     history_dir = os.path.join(output_dir, "benchmark_history")
     
     # Clear and recreate benchmark folder
@@ -28,7 +36,7 @@ def run_benchmark(limit=None, model="gemma-4-26b-a4b-it", provider="Gemini API")
     results_file = os.path.join(output_dir, "benchmark_results.csv")
     
     queries = []
-    with open(input_file, "r") as f:
+    with open(_INPUT_FILE, "r") as f:
         reader = csv.DictReader(f)
         for row in reader:
             queries.append(row)
@@ -75,7 +83,7 @@ def run_benchmark(limit=None, model="gemma-4-26b-a4b-it", provider="Gemini API")
                     f.write(code)
 
                 # Save to a temporary file for benchmarking
-                bench_script = os.path.join("src", "benchmark_run.py")
+                bench_script = _BENCH_SCRIPT
                 with open(bench_script, "w") as f:
                     f.write(code)
                 
@@ -89,7 +97,7 @@ def run_benchmark(limit=None, model="gemma-4-26b-a4b-it", provider="Gemini API")
                     f.write(f"--- STDOUT ---\n{exec_res.stdout}\n\n--- STDERR ---\n{exec_res.stderr}")
 
                 # Copy plots to history
-                plot_dir = os.path.join("src", "openaerostruct_out", "agent_plots")
+                plot_dir = os.path.join(_OUTPUT_DIR, "agent_plots")
                 if os.path.exists(plot_dir):
                     import shutil
                     for f in os.listdir(plot_dir):
