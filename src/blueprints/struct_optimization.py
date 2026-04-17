@@ -1,6 +1,8 @@
 import numpy as np
 import os
 import openmdao.api as om
+import matplotlib
+matplotlib.use('Agg')
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.structures.struct_groups import SpatialBeamAlone
 
@@ -8,13 +10,16 @@ from openaerostruct.structures.struct_groups import SpatialBeamAlone
 # 1. MESH GENERATION (STRUCTURAL ONLY)
 # =============================================================================
 # The agent should modify these parameters to change the wing's baseline shape.
+# === AGENT EDITABLE SECTION START ===
 mesh_dict = {"num_y": 7, "wing_type": "CRM", "symmetry": True, "num_twist_cp": 5}
+# === AGENT EDITABLE SECTION END ===
 mesh, twist_cp = generate_mesh(mesh_dict)
 
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
 # Structural only analysis.
+# === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
     "symmetry": True,
@@ -33,6 +38,7 @@ surf_dict = {
     "distributed_fuel_weight": False,
     "exact_failure_constraint": False,
 }
+# === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
 # 3. PROBLEM SETUP
@@ -55,11 +61,14 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["disp"] = True
 prob.driver.options["tol"] = 1e-9
 
-os.makedirs("src/openaerostruct_out/generated_run_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/generated_run_out/aero.db")
+output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
+os.makedirs(output_dir, exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
+prob.options['work_dir'] = output_dir
 
+# === AGENT EDITABLE SECTION START ===
 # Design Variables
 prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, ref=1e-1)
 
@@ -67,6 +76,7 @@ prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, ref=1e-1)
 prob.model.add_constraint("wing.failure", upper=0.0)
 prob.model.add_constraint("wing.thickness_intersects", upper=0.0)
 prob.model.add_objective("wing.structural_mass", scaler=1e-5)
+# === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
 # 5. EXECUTION

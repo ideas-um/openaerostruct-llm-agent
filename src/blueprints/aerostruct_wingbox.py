@@ -1,6 +1,8 @@
 import numpy as np
 import os
 import openmdao.api as om
+import matplotlib
+matplotlib.use('Agg')
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.integration.aerostruct_groups import AerostructGeometry, AerostructPoint
 from openaerostruct.structures.wingbox_fuel_vol_delta import WingboxFuelVolDelta
@@ -16,6 +18,7 @@ lower_x = np.array([0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0
 upper_y = np.array([ 0.0447,  0.046,  0.0472,  0.0484,  0.0495,  0.0505,  0.0514,  0.0523,  0.0531,  0.0538, 0.0545,  0.0551,  0.0557, 0.0563,  0.0568, 0.0573,  0.0577,  0.0581,  0.0585,  0.0588,  0.0591,  0.0593,  0.0595,  0.0597,  0.0599,  0.06,    0.0601,  0.0602,  0.0602,  0.0602,  0.0602,  0.0602,  0.0601,  0.06,    0.0599,  0.0598,  0.0596,  0.0594,  0.0592,  0.0589,  0.0586,  0.0583,  0.058,   0.0576,  0.0572,  0.0568,  0.0563,  0.0558,  0.0553,  0.0547,  0.0541], dtype="complex128")
 lower_y = np.array([-0.0447, -0.046, -0.0473, -0.0485, -0.0496, -0.0506, -0.0515, -0.0524, -0.0532, -0.054, -0.0547, -0.0554, -0.056, -0.0565, -0.057, -0.0575, -0.0579, -0.0583, -0.0586, -0.0589, -0.0592, -0.0594, -0.0595, -0.0596, -0.0597, -0.0598, -0.0598, -0.0598, -0.0598, -0.0597, -0.0596, -0.0594, -0.0592, -0.0589, -0.0586, -0.0582, -0.0578, -0.0573, -0.0567, -0.0561, -0.0554, -0.0546, -0.0538, -0.0529, -0.0519, -0.0509, -0.0497, -0.0485, -0.0472, -0.0458, -0.0444], dtype="complex128")
 
+# === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 15,
     "num_x": 3,
@@ -25,6 +28,7 @@ mesh_dict = {
     "span_cos_spacing": 0,
     "num_twist_cp": 4,
 }
+# === AGENT EDITABLE SECTION END ===
 
 mesh, twist_cp = generate_mesh(mesh_dict)
 
@@ -32,6 +36,7 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # 2. SURFACE DEFINITION
 # =============================================================================
 # Using "wingbox" for high-fidelity structural representation.
+# === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
     "symmetry": True,
@@ -67,6 +72,7 @@ surf_dict = {
     "fuel_density": 803.0,
     "Wf_reserve": 15000.0,
 }
+# === AGENT EDITABLE SECTION END ===
 
 surfaces = [surf_dict]
 
@@ -174,11 +180,14 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["optimizer"] = "SLSQP"
 prob.driver.options["tol"] = 1e-2
 
-os.makedirs("src/openaerostruct_out/generated_run_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/generated_run_out/aero.db")
+output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
+os.makedirs(output_dir, exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
+prob.options['work_dir'] = output_dir
 
+# === AGENT EDITABLE SECTION START ===
 prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 prob.model.add_design_var("wing.twist_cp", lower=-15.0, upper=15.0, scaler=0.1)
 prob.model.add_design_var("wing.spar_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
@@ -192,6 +201,7 @@ prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)
 prob.model.add_constraint("AS_point_1.wing_perf.failure", upper=0.0)
 prob.model.add_constraint("fuel_vol_delta.fuel_vol_delta", lower=0.0)
 prob.model.add_constraint("fuel_diff", equals=0.0)
+# === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
 # 5. EXECUTION

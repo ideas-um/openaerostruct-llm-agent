@@ -1,5 +1,8 @@
 import numpy as np
 import openmdao.api as om
+import os
+import matplotlib
+matplotlib.use('Agg')
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
@@ -8,6 +11,7 @@ from openaerostruct.aerodynamics.aero_groups import AeroPoint
 # 1. MESH GENERATION
 # =============================================================================
 # The agent should modify these parameters to change the wing's baseline shape.
+# === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 19,            # Number of spanwise panels
     "num_x": 3,             # Number of chordwise panels
@@ -18,6 +22,7 @@ mesh_dict = {
     "span_cos_spacing": 0.0,
     "chord_cos_spacing": 0.0,
 }
+# === AGENT EDITABLE SECTION END ===
 
 # Generate the actual coordinate array (mesh)
 mesh = generate_mesh(mesh_dict)
@@ -26,6 +31,7 @@ mesh = generate_mesh(mesh_dict)
 # 2. SURFACE DEFINITION
 # =============================================================================
 # This dictionary defines the aerodynamic and geometric properties of the wing.
+# === AGENT EDITABLE SECTION START ===
 surface = {
     "name": "wing",
     "symmetry": True,
@@ -50,6 +56,7 @@ surface = {
     #"dihedral": 0.0,             # Initial dihedral angle
     #"chord_cp": np.ones(3),      # B-spline control points for chord scaling
 }
+# === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
 # 3. PROBLEM SETUP
@@ -110,12 +117,14 @@ prob.model.connect(f"{surface['name']}.t_over_c", f"{point_name}.{surface['name'
 prob.driver = om.ScipyOptimizeDriver()
 
 # record optimization history
-os.makedirs("src/openaerostruct_out/generated_run_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/generated_run_out/aero.db")
+output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
+os.makedirs(output_dir, exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = './src/openaerostruct_out/generated_run_out'
+prob.options['work_dir'] = output_dir
 
+# === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
 #You can change the upper and lower bounds.
 #You are also allowed to add the design variables, constraints, and objectives here like chord_cp, twist_cp, taper, sweep, dihedral etc.
@@ -135,6 +144,7 @@ prob.model.add_constraint(f"{point_name}.wing_perf.CL", equals=0.5)
 # --- Objective ---
 # Example: Minimize Drag Coefficient
 prob.model.add_objective(f"{point_name}.wing_perf.CD", ref=0.01)
+# === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
 # 5. EXECUTION

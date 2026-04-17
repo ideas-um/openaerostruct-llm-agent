@@ -7,7 +7,7 @@ from .config import get_llm_response
 # ---------------------------------------------------------------------------
 _LLM_DIR    = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR    = os.path.dirname(_LLM_DIR)
-_SKILLS_PATH = os.path.join(_SRC_DIR, "blueprints", "skills.md")
+_SKILLS_PATH = os.path.join(_SRC_DIR, "llm", "skills.md")
 
 # ---------------------------------------------------------------------------
 # Blueprint allowlist
@@ -35,7 +35,7 @@ VALID_BLUEPRINTS: frozenset = frozenset({
 def route_intent(user_prompt: str, model_name: str = "gemini-2.5-flash", provider: str = "Gemini API") -> dict:
     """
     Identifies the appropriate blueprint(s) based on user prompt.
-    All selection logic is managed in src/blueprints/skills.md.
+    All selection logic is managed in src/llm/skills.md.
     """
     if os.path.exists(_SKILLS_PATH):
         with open(_SKILLS_PATH, "r") as f:

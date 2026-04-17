@@ -38,14 +38,13 @@ def generate_code(user_prompt: str, blueprint_names: list[str], feedback: str, m
         else:
             blueprints_context += f"\nWarning: Blueprint {name} not found.\n"
         
-    system_prompt = (
-        "You are an OpenAeroStruct Expert developer. You synthesize Python scripts based on working Blueprints.\n"
-        "REQUIRED FORMAT:\n"
-        "1. Start your response with 'REASONING: ' followed by your logic.\n"
-        "2. End your reasoning with the EXACT STRING: ##### REASONING ENDS #####\n"
-        "3. Provide ONLY the full Python code immediately after that tag (No markdown fencing).\n\n"
-        "CRITICAL: The '##### REASONING ENDS #####' tag is MANDATORY. Do not omit it."
-    )
+    system_prompt_path = os.path.join(_LLM_DIR, "coder.md")
+    if os.path.exists(system_prompt_path):
+        with open(system_prompt_path, "r", encoding="utf-8") as f:
+            system_prompt = f.read()
+    else:
+        system_prompt = "You are an OpenAeroStruct Expert developer. You synthesize Python scripts based on working Blueprints."
+
     
     prompt = (
         f"User Prompt: {user_prompt}\n\n"

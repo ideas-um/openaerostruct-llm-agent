@@ -1,13 +1,14 @@
 import warnings
 warnings.filterwarnings("ignore")
-
 import os
 import numpy as np
+import pandas as pd
+import openmdao.api as om
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
-import pandas as pd
-import openmdao.api as om
 
 # import OpenAeroStruct modules
 from openaerostruct.geometry.utils import generate_mesh
@@ -19,7 +20,7 @@ import niceplots
 plt.style.use(niceplots.get_style("james-light"))
 
 # Ensure unified directory for saving results exists
-output_dir = "src/openaerostruct_out/agent_plots"
+output_dir = "src/openaerostruct_out/"
 os.makedirs(output_dir, exist_ok=True)
 
 # =============================================================================
@@ -48,6 +49,7 @@ if __name__ == "__main__":
     # 2. MESH GENERATION
     # =============================================================================
     # The agent should modify these parameters to change the wing's baseline shape.
+    # === AGENT EDITABLE SECTION START ===
     mesh_dict = {
         "num_y": 19,            # Number of spanwise panels, must be an odd number
         "num_x": 3,             # Number of chordwise panels
@@ -58,6 +60,7 @@ if __name__ == "__main__":
         "span_cos_spacing": 0.0,
         "chord_cos_spacing": 0.0,
     }
+    # === AGENT EDITABLE SECTION END ===
 
     mesh = generate_mesh(mesh_dict)
 
@@ -65,6 +68,7 @@ if __name__ == "__main__":
     # 3. SURFACE DEFINITION (Using Existing Parameters)
     # =============================================================================
     # This dictionary defines the wing properties. Agent can adjust for "what-if" analysis.
+    # === AGENT EDITABLE SECTION START ===
     surface = {
         "name": "wing",
         "symmetry": True,
@@ -83,6 +87,7 @@ if __name__ == "__main__":
         "with_viscous": True,
         "with_wave": True,          
     }
+    # === AGENT EDITABLE SECTION END ===
 
     # =============================================================================
     # 4. PROBLEM SETUP

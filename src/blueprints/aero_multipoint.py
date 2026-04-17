@@ -1,6 +1,8 @@
 import numpy as np
 import openmdao.api as om
 import os
+import matplotlib
+matplotlib.use('Agg')
 
 # =============================================================================
 # 1. MESH GENERATION
@@ -11,6 +13,7 @@ from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 from openaerostruct.integration.multipoint_comps import MultiCD
 
+# === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 5,
     "num_x": 3,
@@ -19,6 +22,7 @@ mesh_dict = {
     "num_twist_cp": 5,
     "span_cos_spacing": 0.0,
 }
+# === AGENT EDITABLE SECTION END ===
 
 mesh, twist_cp = generate_mesh(mesh_dict)
 
@@ -26,6 +30,7 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # 2. SURFACE DEFINITION
 # =============================================================================
 # This dictionary defines the wing properties for optimization.
+# === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
     "symmetry": True,
@@ -41,6 +46,7 @@ surf_dict = {
     "with_viscous": True,
     "with_wave": False,
 }
+# === AGENT EDITABLE SECTION END ===
 
 surfaces = [surf_dict]
 n_points = 2
@@ -92,12 +98,14 @@ prob.model.add_subsystem("multi_CD", MultiCD(n_points=n_points), promotes_output
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["tol"] = 1e-9
 # record optimization history
-os.makedirs("src/openaerostruct_out/generated_run_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/generated_run_out/aero.db")
+output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
+os.makedirs(output_dir, exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = './src/openaerostruct_out/generated_run_out'
+prob.options['work_dir'] = output_dir
 
+# === AGENT EDITABLE SECTION START ===
 # Design Variables
 prob.model.add_design_var("alpha", lower=-15, upper=15)
 prob.model.add_design_var("wing_geom.twist_cp", lower=-5, upper=8)
@@ -108,6 +116,7 @@ prob.model.add_constraint("aero_point_1.wing_perf.CL", equals=0.5)
 
 # Objective
 prob.model.add_objective("CD", scaler=1e4)
+# === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
 # 5. EXECUTION
