@@ -86,8 +86,8 @@ for surface in surfaces:
 # For analysis only. Add a driver if optimization is needed.
 prob.driver = om.ScipyOptimizeDriver() # Placeholder if needed
 
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/aero.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aero.db"))
 prob.driver.add_recorder(recorder)
 
 # =============================================================================

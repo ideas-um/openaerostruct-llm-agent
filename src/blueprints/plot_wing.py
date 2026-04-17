@@ -652,7 +652,7 @@ class Display(object):
 
     def save_image(self):
         import os
-        output_dir = "src/openaerostruct_out/agent_plots"
+        output_dir = os.path.join("src", "openaerostruct_out", "agent_plots")
         os.makedirs(output_dir, exist_ok=True)
         fname = os.path.join(output_dir, "Optimized_Wing.png")
         plt.savefig(fname)

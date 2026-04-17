@@ -166,8 +166,8 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["optimizer"] = "SLSQP"
 prob.driver.options["tol"] = 1e-4
 
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/aerostruct.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aerostruct.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["alpha", "rho", "v", "cg", "AS_point_1.cg", "AS_point_0.cg", 
                                              "AS_point_0.coupled.wing_loads.loads", "AS_point_1.coupled.wing_loads.loads",

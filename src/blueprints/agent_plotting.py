@@ -9,7 +9,7 @@ from matplotlib import cm
 import matplotlib
 matplotlib.use("Agg")
 
-def generate_plots(db_path="src/openaerostruct_out/aero.db", output_dir="src/openaerostruct_out/agent_plots"):
+def generate_plots(db_path=os.path.join("src", "openaerostruct_out", "aero.db"), output_dir=os.path.join("src", "openaerostruct_out", "agent_plots")):
     if not os.path.exists(db_path):
         print(f"Error: Database {db_path} not found.")
         return
@@ -109,6 +109,6 @@ def generate_plots(db_path="src/openaerostruct_out/aero.db", output_dir="src/ope
         print(f"Plotting failed: {e}")
 
 if __name__ == "__main__":
-    db = sys.argv[1] if len(sys.argv) > 1 else "src/openaerostruct_out/aero.db"
-    out = sys.argv[2] if len(sys.argv) > 2 else "src/openaerostruct_out/agent_plots"
+    db = sys.argv[1] if len(sys.argv) > 1 else os.path.join("src", "openaerostruct_out", "aero.db")
+    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join("src", "openaerostruct_out", "agent_plots")
     generate_plots(db, out)

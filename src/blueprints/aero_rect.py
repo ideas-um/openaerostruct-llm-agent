@@ -110,10 +110,10 @@ prob.model.connect(f"{surface['name']}.t_over_c", f"{point_name}.{surface['name'
 prob.driver = om.ScipyOptimizeDriver()
 
 # record optimization history
-recorder = om.SqliteRecorder("src/openaerostruct_out/aero.db")
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = './src/openaerostruct_out'
+prob.options['work_dir'] = os.path.join('src', 'openaerostruct_out')
 
 # --- Design Variables ---
 #You can change the upper and lower bounds.

@@ -17,9 +17,27 @@ def generate_code(user_prompt: str, blueprint_names: list[str], feedback: str, m
                 blueprints_context += f"\n--- BLUEPRINT: {name} ---\n```python\n{content}\n```\n"
         else:
             blueprints_context += f"\nWarning: Blueprint {name} not found.\n"
+
+    plotting_guidance = ""
+    plotting_md_path = os.path.join("src", "blueprints", "plotting.md")
+    if os.path.exists(plotting_md_path):
+        with open(plotting_md_path, "r") as f:
+            plotting_guidance = f"\n--- PLOTTING GUIDANCE (plotting.md) ---\n{f.read()}\n"
         
     system_prompt = (
-        "You are an OpenAeroStruct Expert developer. You synthesize Python scripts based on working Blueprints.\n"
+        "You are an OpenAeroStruct Expert developer. You synthesize Python scripts based on working Blueprints.\n\n"
+        "CRITICAL RULES:\n"
+        "1. PATHS: Always use os.path.join() for all file paths — never hardcode forward-slash strings like "
+        "'src/openaerostruct_out/...'. This ensures cross-platform compatibility on both Windows and macOS/Linux.\n"
+        "   Example: os.path.join('src', 'openaerostruct_out', 'aero.db')  NOT 'src/openaerostruct_out/aero.db'\n"
+        "2. PLOTTING: Do NOT add plotting code inside the main analysis/optimisation script unless the user explicitly "
+        "requests a plot. When plotting IS requested, follow the patterns in src/blueprints/plotting.md exactly. "
+        "Always use matplotlib.use('Agg') before importing pyplot, and save to "
+        "os.path.join('src', 'openaerostruct_out', 'agent_plots', 'filename.png').\n"
+        "3. IMPORTS: Only import packages that are already present in the provided blueprint. Do not add new "
+        "dependencies (e.g. niceplots, plotly) unless they are already imported in the blueprint.\n"
+        "4. SCHEMA: Do not change the OpenMDAO problem structure — keep surface dict keys and connection patterns "
+        "exactly as shown in the blueprint.\n\n"
         "REQUIRED FORMAT:\n"
         "1. Start your response with 'REASONING: ' followed by your logic.\n"
         "2. End your reasoning with the EXACT STRING: ##### REASONING ENDS #####\n"
@@ -30,6 +48,7 @@ def generate_code(user_prompt: str, blueprint_names: list[str], feedback: str, m
     prompt = (
         f"User Prompt: {user_prompt}\n\n"
         f"Base Blueprints provided for reference:\n{blueprints_context}\n"
+        f"{plotting_guidance}"
     )
     
     if feedback and feedback != "Initial generation":

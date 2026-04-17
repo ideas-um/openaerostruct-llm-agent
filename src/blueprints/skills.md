@@ -23,10 +23,11 @@ If the user's prompt is missing essential information to setup an optimization p
 If you cannot reasonably guess these based on common aerospace practices, set `is_vague` to `true`.
 
 ## SKILL: AD-HOC VISUALIZATION & DATA EXPLORATION
-**You are empowered to plot anything the user requests.** 
-- If a user asks for a specific plot, do not rely solely on `agent_plotting.py`.
-- **Write custom plotting code** at the end of your optimization scripts.
-- Always save plots to `src/openaerostruct_out/agent_plots/`.
+**You are empowered to plot anything the user requests.**
+- Blueprint scripts do NOT contain plotting code. All plotting must be added at the end of the generated script.
+- When generating a script that includes plotting, follow the patterns in `src/blueprints/plotting.md` exactly.
+- Always save plots to `os.path.join("src", "openaerostruct_out", "agent_plots")`.
+- Do NOT use inline plotly or niceplots — use only matplotlib with `matplotlib.use('Agg')`.
 
 ## AVAILABLE BLUEPRINTS
 - `aero_analysis.py`: Aerodynamic sweep (alpha/Mach) for an existing wing. Use for "check", "evaluate", or "plot polars".
@@ -55,8 +56,8 @@ Return a JSON object:
 If `is_vague` is true, provide a polite question in `missing_info` to ask the user for the specific missing parameters.
 
 # BEST PRACTICES
-- Use `src/openaerostruct_out/` for all database (.db) and plot (.png) outputs.
+- Use `os.path.join("src", "openaerostruct_out", ...)` for all database (.db) and plot (.png) output paths — never hardcode forward-slash paths like `"src/openaerostruct_out/..."`. This is required for Windows compatibility.
 - CRITICAL: Never create files in the project root. Always use the `src/openaerostruct_out/` prefix for all recorders and file saves.
-- Maintain `matplotlib.use('Agg')` for headless plotting.
+- Maintain `matplotlib.use('Agg')` before `import matplotlib.pyplot` for headless plotting.
 - Symmetry: Default to `True` for aircraft studies unless asymmetric loading/geom is specified.
 - Do not import packages that are not initially in the script which is not allowed and most likely will mess up the schema.

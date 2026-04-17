@@ -4,7 +4,6 @@ import openmdao.api as om
 from openaerostruct.geometry.geometry_group import MultiSecGeometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 from openaerostruct.geometry.utils import build_section_dicts, unify_mesh, build_multi_spline, connect_multi_spline
-import matplotlib.pyplot as plt
 
 # =============================================================================
 # 1. MULTI-SECTION GEOMETRY DEFINITION
@@ -79,8 +78,8 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["optimizer"] = "SLSQP"
 prob.driver.options["tol"] = 1e-7
 
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/aero.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 
@@ -101,22 +100,3 @@ prob.run_driver()
 print("\n--- Multi-Section Optimization Results ---")
 print(f"Final CL: {prob.get_val(point_name + '.wing_perf.CL')[0]:.4f}")
 print(f"Final CD: {prob.get_val(point_name + '.wing_perf.CD')[0]:.6f}")
-
-# Plotting optimized planform
-meshUni = prob.get_val(name + "." + unification_name + "." + name + "_uni_mesh")
-output_dir = "src/openaerostruct_out/agent_plots"
-os.makedirs(output_dir, exist_ok=True)
-
-plt.figure(figsize=(8, 4))
-mesh_x = meshUni[:, :, 0]
-mesh_y = meshUni[:, :, 1]
-for i in range(mesh_x.shape[0]):
-    plt.plot(mesh_y[i, :], mesh_x[i, :], 'k', lw=1)
-    plt.plot(-mesh_y[i, :], mesh_x[i, :], 'k', lw=1)
-for j in range(mesh_x.shape[1]):
-    plt.plot(mesh_y[:, j], mesh_x[:, j], 'k', lw=1)
-    plt.plot(-mesh_y[:, j], mesh_x[:, j], 'k', lw=1)
-plt.axis("equal")
-plt.title("Optimized Multi-Section Planform")
-plt.savefig(os.path.join(output_dir, "multi_section_planform.png"))
-plt.close()

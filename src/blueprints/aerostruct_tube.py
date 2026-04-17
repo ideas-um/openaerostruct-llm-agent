@@ -88,8 +88,8 @@ prob.model.connect(name + ".t_over_c", com_name + ".t_over_c")
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["tol"] = 1e-9
 
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/aerostruct.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aerostruct.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 

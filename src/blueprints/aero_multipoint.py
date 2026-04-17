@@ -92,8 +92,8 @@ prob.model.add_subsystem("multi_CD", MultiCD(n_points=n_points), promotes_output
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["tol"] = 1e-9
 
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/aero.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 

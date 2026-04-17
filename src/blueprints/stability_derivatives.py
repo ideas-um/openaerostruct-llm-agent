@@ -98,8 +98,8 @@ prob.model.connect("CM_alpha", "static_margin.CM_alpha", src_indices=1)
 # =============================================================================
 # 4. EXECUTION SETTINGS
 # =============================================================================
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/aero.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "aero.db"))
 prob.driver.add_recorder(recorder)
 
 # =============================================================================

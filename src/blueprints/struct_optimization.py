@@ -55,8 +55,8 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["disp"] = True
 prob.driver.options["tol"] = 1e-9
 
-os.makedirs("src/openaerostruct_out", exist_ok=True)
-recorder = om.SqliteRecorder("src/openaerostruct_out/struct.db")
+os.makedirs(os.path.join("src", "openaerostruct_out"), exist_ok=True)
+recorder = om.SqliteRecorder(os.path.join("src", "openaerostruct_out", "struct.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 
