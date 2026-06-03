@@ -62,7 +62,6 @@ uv run streamlit run src/app.py
 ### Example Prompts
 - *"Optimize a rectangular wing to minimize drag at Mach 0.85, keeping CL constant at 0.5."*
 - *"Perform an aerostructural optimization for a rectangular wing with a tubular spar. Minimize fuel burn for a 2000km range."*
-- *"Check the stability derivatives and static margin for a swept wing with 25 degrees of sweep."*
 
 ## Output
 After a run, you can find your results in:

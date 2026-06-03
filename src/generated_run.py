@@ -1,177 +1,199 @@
-import numpy as np
-import openmdao.api as om
+import warnings
+warnings.filterwarnings("ignore")
 import os
+import numpy as np
+import pandas as pd
+import openmdao.api as om
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import plotly.express as px
 
-from openaerostruct.meshing.mesh_generator import generate_mesh
+# import OpenAeroStruct modules
+from openaerostruct.geometry.utils import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
-from openaerostruct.integration.multipoint_comps import MultiCD
+
+# Ensure unified directory for saving results exists
+output_dir = "src/openaerostruct_out/"
+os.makedirs(output_dir, exist_ok=True)
 
 # =============================================================================
-# 1. MESH GENERATION
+# 1. UTILITY FUNCTIONS
 # =============================================================================
-# High Aspect Ratio UAV: Large span, small chord
-mesh_dict = {
-    "num_y": 7,
-    "num_x": 5,
-    "wing_type": "CRM",
-    "symmetry": True,
-    "span": 15.0,
-    "root_chord": 0.8,
-    "num_twist_cp": 5,
-    "span_cos_spacing": 1.0,
-}
 
-mesh, twist_cp = generate_mesh(mesh_dict)
+def plot_mesh(mesh, filename=os.path.join(output_dir, "mesh_analyzed.png")):
+    """Function to plot the VLM mesh"""
+    mesh_x = mesh[:, :, 0]
+    mesh_y = mesh[:, :, 1]
+    plt.figure(figsize=(6, 3))
+    for i in range(mesh_x.shape[0]):
+        plt.plot(mesh_y[i, :], mesh_x[i, :], color="C0", lw=1)
+    for j in range(mesh_x.shape[1]):
+        plt.plot(mesh_y[:, j], mesh_x[:, j], color="C0", lw=1)
+    plt.axis("equal")
+    plt.xlabel("Span (m)")
+    plt.ylabel("Chord (m)")
+    plt.savefig(filename, bbox_inches="tight")
+    plt.close()
 
-# =============================================================================
-# 2. SURFACE DEFINITION
-# =============================================================================
-surf_dict = {
-    "name": "wing",
-    "symmetry": True,
-    "S_ref_type": "wetted",
-    "fem_model_type": "tube",
-    "mesh": mesh,
-    "twist_cp": twist_cp,
-    "CL0": 0.0,
-    "CD0": 0.01,
-    "k_lam": 0.03,
-    "t_over_c_cp": np.array([0.12]), # Initial guess
-    "c_max_t": 0.3,
-    "with_viscous": True,
-    "with_wave": False,
-}
+if __name__ == "__main__":
+    # =============================================================================
+    # 2. MESH GENERATION
+    # =============================================================================
+    # Modify these parameters to set the wing's baseline geometry.
+    # For "rect" wings: span and root_chord are required.
+    # For "CRM" wings: span and root_chord are not used — CRM geometry is built-in.
+    # num_y must be an odd number.
+    # === AGENT EDITABLE SECTION START ===
+    mesh_dict = {
+        "num_y": 19,            # Number of spanwise panels (must be odd)
+        "num_x": 3,             # Number of chordwise panels
+        "wing_type": "rect",    # "rect" or "CRM"
+        "symmetry": True,
+        "span": 25.52,          # Full wingspan [m]
+        "root_chord": 2.83,     # Root chord [m] — only used for "rect" wing_type
+        "span_cos_spacing": 0.0,
+        "chord_cos_spacing": 0.0,
+    }
+    # === AGENT EDITABLE SECTION END ===
 
-surfaces = [surf_dict]
-n_points = 2
+    mesh = generate_mesh(mesh_dict)
 
-# =============================================================================
-# 3. PROBLEM SETUP
-# =============================================================================
-prob = om.Problem()
+    # =============================================================================
+    # 3. SURFACE DEFINITION
+    # =============================================================================
+    # Modify aerodynamic and geometric properties here.
+    # IMPORTANT: twist_cp, chord_cp, taper, sweep, dihedral are geometry modifiers.
+    # Include them here if you want them reflected in the analysis.
+    # === AGENT EDITABLE SECTION START ===
+    surface = {
+        "name": "wing",
+        "symmetry": True,
+        "S_ref_type": "wetted",
+        "twist_cp": np.array([0.0, 0.0]),       # Spanwise twist [deg], 2 control points
+        "t_over_c_cp": np.array([0.12]),         # Thickness-to-chord ratio
+        "taper": 1.0,                            # Taper ratio (1.0 = rectangular)
+        "sweep": 0.0,                            # Sweep angle [deg]
+        "dihedral": 0.0,                         # Dihedral angle [deg]
+        "mesh": mesh,
+        "CL0": 0.0,
+        "CD0": 0.005,
+        "k_lam": 0.05,
+        "c_max_t": 0.303,
+        "with_viscous": True,
+        "with_wave": False,
+    }
+    # === AGENT EDITABLE SECTION END ===
 
-# To avoid the shape mismatch error, flight condition parameters (v, Mach, re, rho)
-# must be scalars when connected to AeroPoint in this architecture.
-# We use the Loiter condition as the primary flight environment.
-indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("v", val=51.45, units="m/s")
-indep_var_comp.add_output("alpha", val=np.array([5.0, 2.0]), units="deg")
-indep_var_comp.add_output("Mach_number", val=0.15)
-indep_var_comp.add_output("re", val=1.0e6, units="1/m")
-indep_var_comp.add_output("rho", val=1.006, units="kg/m**3")
-indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
+    # =============================================================================
+    # 4. PROBLEM SETUP
+    # =============================================================================
+    prob = om.Problem()
 
-prob.model.add_subsystem("prob_vars", indep_var_comp, promotes=["*"])
+    indep_var_comp = om.IndepVarComp()
+    # These are initial/placeholder values — they are overridden in the sweep loop below.
+    # DO NOT compute re using surface["root_chord"] — that key does not exist in surface.
+    # Compute re as: rho * v / 1.81e-5  (units: 1/m, i.e. per unit length)
+    # === AGENT EDITABLE SECTION START ===
+    indep_var_comp.add_output("v", val=100.0, units="m/s")       # Overridden in sweep
+    indep_var_comp.add_output("alpha", val=0.0, units="deg")     # Overridden in sweep
+    indep_var_comp.add_output("Mach_number", val=0.3)            # Overridden in sweep
+    indep_var_comp.add_output("re", val=1e6, units="1/m")        # Overridden in sweep
+    indep_var_comp.add_output("rho", val=1.225, units="kg/m**3") # Set to match flight condition
+    indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
+    # === AGENT EDITABLE SECTION END ===
 
-for surface in surfaces:
+    prob.model.add_subsystem("flight_vars", indep_var_comp, promotes=["*"])
+
     name = surface["name"]
     geom_group = Geometry(surface=surface)
-    prob.model.add_subsystem(name + "_geom", geom_group)
+    prob.model.add_subsystem(name, geom_group)
 
-for i in range(n_points):
-    aero_group = AeroPoint(surfaces=surfaces)
-    point_name = "aero_point_{}".format(i)
-    prob.model.add_subsystem(point_name, aero_group)
+    aero_group = AeroPoint(surfaces=[surface], rotational=True)
+    point_name = "flight_condition_0"
+    prob.model.add_subsystem(
+        point_name,
+        aero_group,
+        promotes_inputs=["v", "alpha", "beta", "omega", "Mach_number", "re", "rho", "cg"],
+    )
 
-    prob.model.connect("v", point_name + ".v")
-    prob.model.connect("alpha", point_name + ".alpha", src_indices=[i])
-    prob.model.connect("Mach_number", point_name + ".Mach_number")
-    prob.model.connect("re", point_name + ".re")
-    prob.model.connect("rho", point_name + ".rho")
-    prob.model.connect("cg", point_name + ".cg")
+    prob.model.connect(name + ".mesh", point_name + "." + name + ".def_mesh")
+    prob.model.connect(name + ".mesh", point_name + ".aero_states." + name + "_def_mesh")
+    prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_over_c")
 
-    for surface in surfaces:
-        name = surface["name"]
-        prob.model.connect(point_name + ".CD", "multi_CD." + str(i) + "_CD")
-        prob.model.connect(name + "_geom.mesh", point_name + "." + name + ".def_mesh")
-        prob.model.connect(name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh")
-        prob.model.connect(name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c")
+    prob.setup()
 
-prob.model.add_subsystem("multi_CD", MultiCD(n_points=n_points), promotes_outputs=["CD"])
+    # =============================================================================
+    # 5. ANALYSIS SWEEP
+    # =============================================================================
+    # Set the Mach numbers and alpha range to sweep over.
+    # Re is computed from rho and v — do NOT use surface["root_chord"], it doesn't exist.
+    # Formula: re_val = rho * v_val / 1.81e-5  [units: 1/m]
+    # === AGENT EDITABLE SECTION START ===
+    rho_val = 1.225                         # Air density [kg/m^3] — change for cruise altitude
+    mach_range = np.arange(0.1, 0.8, 0.1)  # Mach numbers to sweep
+    alpha_range = np.arange(-10, 16, 1)    # Angle of attack range [deg]
+    # === AGENT EDITABLE SECTION END ===
 
-# =============================================================================
-# 4. OPTIMIZATION SETTINGS
-# =============================================================================
-prob.driver = om.ScipyOptimizeDriver()
-prob.driver.options["tol"] = 1e-6
+    results = []
+    print("Running Aerodynamic Analysis Sweep...")
+    for M in mach_range:
+        for a in alpha_range:
+            v_val = M * 340.0
+            re_val = rho_val * v_val / 1.81e-5   # Re per unit length [1/m]
+            prob.set_val("Mach_number", M)
+            prob.set_val("v", v_val, units="m/s")
+            prob.set_val("re", re_val, units="1/m")
+            prob.set_val("rho", rho_val, units="kg/m**3")
+            prob.set_val("alpha", a, units="deg")
+            prob.run_model()
 
-output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
-os.makedirs(output_dir, exist_ok=True)
-recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
-prob.driver.add_recorder(recorder)
-prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = output_dir
+            CL = prob.get_val("flight_condition_0.wing_perf.CL")[0]
+            CD = prob.get_val("flight_condition_0.wing_perf.CD")[0]
 
-# Design Variables
-# alpha is size (2,)
-prob.model.add_design_var("alpha", lower=-10, upper=15)
-# twist_cp is size (num_twist_cp,)
-prob.model.add_design_var("wing_geom.twist_cp", lower=-5, upper=5)
-# t_over_c_cp is size (num_twist_cp,)
-prob.model.add_design_var("wing_geom.t_over_c_cp", lower=0.08, upper=0.15)
+            results.append({
+                "Mach": round(M, 1),
+                "Alpha": a,
+                "CL": CL,
+                "CD": CD,
+                "L/D": CL / CD if CD != 0 else 0,
+            })
 
-# Constraints: Target CL for Loiter (0) and Dash (1)
-prob.model.add_constraint("aero_point_0.wing_perf.CL", equals=0.8)
-prob.model.add_constraint("aero_point_1.wing_perf.CL", equals=0.4)
+    df = pd.DataFrame(results)
+    csv_path = os.path.join(output_dir, "OptimizedWing_Polars.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"Analysis complete. Saved data to {csv_path}")
 
-# Objective: Minimize average CD
-prob.model.add_objective("CD", scaler=1e3)
+    # =============================================================================
+    # 6. PLOTTING
+    # =============================================================================
+    # === AGENT EDITABLE SECTION START ===
+    try:
+        df["Mach"] = df["Mach"].astype(str)
 
-# =============================================================================
-# 5. EXECUTION
-# =============================================================================
-prob.setup()
-prob.run_driver()
+        fig_ld = px.line(df, x="Alpha", y="L/D", color="Mach", markers=True,
+                         title="Lift-to-Drag Ratio (L/D) vs Angle of Attack",
+                         labels={"Alpha": "Angle of Attack (deg)", "L/D": "Lift / Drag"})
+        fig_ld.update_layout(template="plotly_white", height=600, width=900)
+        fig_ld.write_image(os.path.join(output_dir, "LD_vs_Alpha.png"))
 
-print("\n--- Optimization Results ---")
-print(f"Final CD (Avg): {prob.get_val('CD')[0]:.6f}")
-print(f"CL Point 0: {prob.get_val('aero_point_0.wing_perf.CL')[0]:.4f}")
-print(f"CL Point 1: {prob.get_val('aero_point_1.wing_perf.CL')[0]:.4f}")
-print(f"Twist CP: {prob.get_val('wing_geom.twist_cp')}")
-print(f"Thickness CP: {prob.get_val('wing_geom.t_over_c_cp')}")
+        fig_polar = px.line(df, x="CD", y="CL", color="Mach", markers=True,
+                            title="Drag Polars (CL vs CD)",
+                            labels={"CD": "Drag Coefficient (CD)", "CL": "Lift Coefficient (CL)"})
+        fig_polar.update_layout(template="plotly_white", height=600, width=900)
+        fig_polar.write_image(os.path.join(output_dir, "Drag_Polars.png"))
 
-# --- AD-HOC VISUALIZATION ---
-try:
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import os
+        fig_cl_alpha = px.line(df, x="Alpha", y="CL", color="Mach", markers=True,
+                                title="Lift Coefficient (CL) vs Angle of Attack",
+                                labels={"Alpha": "Angle of Attack (deg)", "CL": "Lift Coefficient (CL)"})
+        fig_cl_alpha.update_layout(template="plotly_white", height=600, width=900)
+        fig_cl_alpha.write_image(os.path.join(output_dir, "CL_vs_Alpha.png"))
+    except Exception as e:
+        print(f"Plotting warning: {e}")
+    # === AGENT EDITABLE SECTION END ===
 
-    # Extract data
-    twist = np.array(prob.get_val('wing_geom.twist_cp'))
-    thickness = np.array(prob.get_val('wing_geom.t_over_c_cp'))
-    
-    # Create control point index for plotting
-    cp_idx = np.arange(len(twist))
-
-    fig, ax1 = plt.subplots(figsize=(8, 5))
-
-    # Plot Twist
-    color = 'tab:blue'
-    ax1.set_xlabel('Control Point Index')
-    ax1.set_ylabel('Twist (deg)', color=color)
-    ax1.plot(cp_idx, twist, marker='o', color=color, label='Twist')
-    ax1.tick_params(axis='y', labelcolor=color)
-    ax1.grid(True, linestyle='--', alpha=0.7)
-
-    # Create second axis for thickness
-    ax2 = ax1.twinx()
-    color = 'tab:red'
-    ax2.set_ylabel('t/c', color=color)
-    ax2.plot(cp_idx, thickness, marker='s', color=color, label='Thickness')
-    ax2.tick_params(axis='y', labelcolor=color)
-
-    plt.title("Optimized Wing Twist and Thickness Distribution")
-    fig.tight_layout()
-
-    # Save using standardized path
-    plot_dir = os.path.join("src", "openaerostruct_out", "agent_plots")
-    os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, "wing_design_dist.png"))
-    plt.close()
-    print(f"Plot saved to {plot_dir}/wing_design_dist.png")
-
-except Exception as e:
-    print(f"Visualization Warning: {e}")
+    # =============================================================================
+    # 7. SPANWISE LIFT DISTRIBUTION
+    # =============================================================================

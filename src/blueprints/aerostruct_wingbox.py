@@ -8,16 +8,18 @@ from openaerostruct.integration.aerostruct_groups import AerostructGeometry, Aer
 from openaerostruct.structures.wingbox_fuel_vol_delta import WingboxFuelVolDelta
 
 # =============================================================================
-# 1. MESH GENERATION
+# AIRFOIL COORDINATES (fixed — defines the wingbox cross-section shape)
 # =============================================================================
-# The agent should modify these parameters to change the wing's baseline shape.
-
-# coordinates
 upper_x = np.array([0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.3, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39, 0.4, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.5, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59, 0.6], dtype="complex128")
 lower_x = np.array([0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.22, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28, 0.29, 0.3, 0.31, 0.32, 0.33, 0.34, 0.35, 0.36, 0.37, 0.38, 0.39, 0.4, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.5, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59, 0.6], dtype="complex128")
 upper_y = np.array([ 0.0447,  0.046,  0.0472,  0.0484,  0.0495,  0.0505,  0.0514,  0.0523,  0.0531,  0.0538, 0.0545,  0.0551,  0.0557, 0.0563,  0.0568, 0.0573,  0.0577,  0.0581,  0.0585,  0.0588,  0.0591,  0.0593,  0.0595,  0.0597,  0.0599,  0.06,    0.0601,  0.0602,  0.0602,  0.0602,  0.0602,  0.0602,  0.0601,  0.06,    0.0599,  0.0598,  0.0596,  0.0594,  0.0592,  0.0589,  0.0586,  0.0583,  0.058,   0.0576,  0.0572,  0.0568,  0.0563,  0.0558,  0.0553,  0.0547,  0.0541], dtype="complex128")
 lower_y = np.array([-0.0447, -0.046, -0.0473, -0.0485, -0.0496, -0.0506, -0.0515, -0.0524, -0.0532, -0.054, -0.0547, -0.0554, -0.056, -0.0565, -0.057, -0.0575, -0.0579, -0.0583, -0.0586, -0.0589, -0.0592, -0.0594, -0.0595, -0.0596, -0.0597, -0.0598, -0.0598, -0.0598, -0.0598, -0.0597, -0.0596, -0.0594, -0.0592, -0.0589, -0.0586, -0.0582, -0.0578, -0.0573, -0.0567, -0.0561, -0.0554, -0.0546, -0.0538, -0.0529, -0.0519, -0.0509, -0.0497, -0.0485, -0.0472, -0.0458, -0.0444], dtype="complex128")
 
+# =============================================================================
+# 1. MESH GENERATION
+# =============================================================================
+# uCRM_based wing type is required for wingbox. num_twist_cp must match
+# the length of twist_cp in the surface dict below.
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 15,
@@ -35,7 +37,9 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
-# Using "wingbox" for high-fidelity structural representation.
+# CRITICAL: Any parameter used as a design variable must be declared here first.
+# twist_cp, spar_thickness_cp, skin_thickness_cp, t_over_c_cp are all pre-included.
+# The number of control points in each array determines the DV vector size.
 # === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
@@ -43,14 +47,19 @@ surf_dict = {
     "S_ref_type": "projected",
     "mesh": mesh,
     "fem_model_type": "wingbox",
+
+    # Airfoil cross-section data (fixed — do not modify)
     "data_x_upper": upper_x,
     "data_x_lower": lower_x,
     "data_y_upper": upper_y,
     "data_y_lower": lower_y,
-    "twist_cp": np.array([4.0, 5.0, 8.0, 9.0]),
-    "spar_thickness_cp": np.array([0.004, 0.005, 0.008, 0.01]),
-    "skin_thickness_cp": np.array([0.005, 0.01, 0.015, 0.025]),
-    "t_over_c_cp": np.array([0.08, 0.08, 0.10, 0.08]),
+
+    # Structural design variables — number of CPs must match add_design_var() usage
+    "twist_cp": np.array([4.0, 5.0, 8.0, 9.0]),                    # Spanwise twist [deg]
+    "spar_thickness_cp": np.array([0.004, 0.005, 0.008, 0.01]),     # Spar wall thickness [m]
+    "skin_thickness_cp": np.array([0.005, 0.01, 0.015, 0.025]),     # Skin thickness [m]
+    "t_over_c_cp": np.array([0.08, 0.08, 0.10, 0.08]),              # Thickness-to-chord ratio
+
     "original_wingbox_airfoil_t_over_c": 0.12,
     "CL0": 0.0,
     "CD0": 0.0078,
@@ -58,6 +67,8 @@ surf_dict = {
     "with_wave": True,
     "k_lam": 0.05,
     "c_max_t": 0.38,
+
+    # Structural material — aluminum
     "E": 73.1e9,
     "G": (73.1e9 / 2 / 1.33),
     "yield": 420.0e6,
@@ -70,31 +81,37 @@ surf_dict = {
     "distributed_fuel_weight": True,
     "n_point_masses": 1,
     "fuel_density": 803.0,
-    "Wf_reserve": 15000.0,
+    "Wf_reserve": 15000.0,          # Reserve fuel [kg]
 }
 # === AGENT EDITABLE SECTION END ===
 
 surfaces = [surf_dict]
 
 # =============================================================================
-# 3. PROBLEM SETUP (AEROSTRUCTURAL WINGBOX)
+# 3. PROBLEM SETUP (AEROSTRUCTURAL WINGBOX — TWO POINT)
 # =============================================================================
+# Point 0 = cruise (Mach 0.85, rho 0.348), connected to "alpha"
+# Point 1 = maneuver (load_factor 2.5), connected to "alpha_maneuver"
 prob = om.Problem()
 
+# === AGENT EDITABLE SECTION START ===
+# Mission and flight condition parameters.
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("Mach_number", val=np.array([0.85, 0.64]))
 indep_var_comp.add_output("v", val=np.array([0.85 * 295.07, 0.64 * 340.294]), units="m/s")
-indep_var_comp.add_output("re", val=np.array([0.348 * 295.07 * 0.85 * 1.0 / (1.43 * 1e-5), 1.225 * 340.294 * 0.64 * 1.0 / (1.81206 * 1e-5)]), units="1/m")
+indep_var_comp.add_output("re", val=np.array([0.348 * 295.07 * 0.85 / (1.43e-5),
+                                               1.225 * 340.294 * 0.64 / (1.81206e-5)]), units="1/m")
 indep_var_comp.add_output("rho", val=np.array([0.348, 1.225]), units="kg/m**3")
 indep_var_comp.add_output("speed_of_sound", val=np.array([295.07, 340.294]), units="m/s")
-indep_var_comp.add_output("CT", val=0.53 / 3600, units="1/s")
-indep_var_comp.add_output("R", val=14.307e6, units="m")
+indep_var_comp.add_output("CT", val=0.53 / 3600, units="1/s")       # Thrust-specific fuel consumption
+indep_var_comp.add_output("R", val=14.307e6, units="m")              # Range [m]
 indep_var_comp.add_output("W0_without_point_masses", val=128000 + surf_dict["Wf_reserve"], units="kg")
-indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.5]))
-indep_var_comp.add_output("alpha", val=0.0, units="deg")
-indep_var_comp.add_output("alpha_maneuver", val=0.0, units="deg")
+indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.5]))   # [cruise, maneuver]
+indep_var_comp.add_output("alpha", val=0.0, units="deg")             # Cruise AoA
+indep_var_comp.add_output("alpha_maneuver", val=0.0, units="deg")    # Maneuver AoA
 indep_var_comp.add_output("empty_cg", val=np.zeros((3)), units="m")
 indep_var_comp.add_output("fuel_mass", val=10000.0, units="kg")
+# === AGENT EDITABLE SECTION END ===
 
 prob.model.add_subsystem("prob_vars", indep_var_comp, promotes=["*"])
 
@@ -102,7 +119,9 @@ point_masses = np.array([[10.0e3]])
 point_mass_locations = np.array([[25, -10.0, 0.0]])
 indep_var_comp.add_output("point_masses", val=point_masses, units="kg")
 indep_var_comp.add_output("point_mass_locations", val=point_mass_locations, units="m")
-prob.model.add_subsystem("W0_comp", om.ExecComp("W0 = W0_without_point_masses + 2 * sum(point_masses)", units="kg"), promotes=["*"])
+prob.model.add_subsystem("W0_comp",
+    om.ExecComp("W0 = W0_without_point_masses + 2 * sum(point_masses)", units="kg"),
+    promotes=["*"])
 
 for surface in surfaces:
     name = surface["name"]
@@ -159,7 +178,7 @@ for i in range(2):
 prob.model.connect("alpha", "AS_point_0.alpha")
 prob.model.connect("alpha_maneuver", "AS_point_1.alpha")
 
-prob.model.add_subsystem("fuel_vol_delta", WingboxFuelVolDelta(surface=surface))
+prob.model.add_subsystem("fuel_vol_delta", WingboxFuelVolDelta(surface=surf_dict))
 prob.model.connect("wing.struct_setup.fuel_vols", "fuel_vol_delta.fuel_vols")
 prob.model.connect("AS_point_0.fuelburn", "fuel_vol_delta.fuelburn")
 
@@ -188,13 +207,32 @@ prob.driver.recording_options["includes"] = ["*"]
 prob.options['work_dir'] = output_dir
 
 # === AGENT EDITABLE SECTION START ===
+# --- Design Variables ---
+# Available DV paths:
+#   "wing.twist_cp"              — spanwise twist CPs [deg]       (declared in surf_dict)
+#   "wing.spar_thickness_cp"     — spar wall thickness CPs [m]    (declared in surf_dict)
+#   "wing.skin_thickness_cp"     — skin thickness CPs [m]         (declared in surf_dict)
+#   "wing.geometry.t_over_c_cp"  — thickness-to-chord ratio CPs   (declared in surf_dict as t_over_c_cp)
+#   "alpha_maneuver"             — maneuver AoA [deg]             (always available)
+#   "fuel_mass"                  — fuel mass [kg]                  (always available)
+#
+# NOTE: "alpha" (cruise AoA) is NOT a DV here — cruise CL is enforced via AS_point_0.CL constraint.
+
 prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 prob.model.add_design_var("wing.twist_cp", lower=-15.0, upper=15.0, scaler=0.1)
 prob.model.add_design_var("wing.spar_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
 prob.model.add_design_var("wing.skin_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
 prob.model.add_design_var("wing.geometry.t_over_c_cp", lower=0.07, upper=0.2, scaler=10.0)
-prob.model.add_design_var("alpha_maneuver", lower=-15.0, upper=15)
+prob.model.add_design_var("alpha_maneuver", lower=-15.0, upper=15.0)
 prob.model.add_design_var("fuel_mass", lower=0.0, upper=2e5, scaler=1e-5)
+
+# --- Constraints ---
+# Available constraint paths:
+#   "AS_point_0.CL"                     — cruise CL (equals target)
+#   "AS_point_1.L_equals_W"             — maneuver lift-equals-weight trim, equals=0
+#   "AS_point_1.wing_perf.failure"      — structural failure at maneuver load, upper=0
+#   "fuel_vol_delta.fuel_vol_delta"     — fuel volume margin, lower=0
+#   "fuel_diff"                         — fuel mass consistency, equals=0
 
 prob.model.add_constraint("AS_point_0.CL", equals=0.5)
 prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)
@@ -212,5 +250,6 @@ prob.model.AS_point_1.coupled.linear_solver = om.LinearBlockGS(iprint=0, maxiter
 prob.run_driver()
 
 print("\n--- Aerostructural Wingbox Results ---")
-print(f"Final fuel burn: {prob.get_val('AS_point_0.fuelburn')[0]:.4f} [kg]")
-print(f"Final structural mass: {prob.get_val('wing.structural_mass')[0] / surf_dict['wing_weight_ratio']:.4f} [kg]")
+print(f"Final fuel burn:      {prob.get_val('AS_point_0.fuelburn')[0]:.4f} [kg]")
+print(f"Final structural mass:{prob.get_val('wing.structural_mass')[0] / surf_dict['wing_weight_ratio']:.4f} [kg]")
+print(f"Final twist_cp:       {prob.get_val('wing.twist_cp')}")
