@@ -192,3 +192,7 @@ openaerostruct_out/
 
 usage_stats.csv
 benchmark_run_out/
+
+# agent edited OpenAeroStruct runs
+src/generated_run.py
+src/benchmark_run.py
