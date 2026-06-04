@@ -3,9 +3,22 @@ import os
 import openmdao.api as om
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.integration.aerostruct_groups import AerostructGeometry, AerostructPoint
 from openaerostruct.utils.constants import grav_constant
+
+# ---------------------------------------------------------------------------
+# Absolute output paths — derived from __file__ so they resolve correctly
+# regardless of the CWD when this script is executed as a subprocess.
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+os.makedirs(_PLOTS_DIR, exist_ok=True)
+os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 # =============================================================================
 # 1. MESH GENERATION
@@ -115,12 +128,10 @@ prob.model.connect(name + ".t_over_c", com_name + ".t_over_c")
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["tol"] = 1e-9
 
-output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
-os.makedirs(output_dir, exist_ok=True)
-recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
+recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = output_dir
+prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
@@ -162,3 +173,44 @@ print("\n--- Aerostructural Tube Results ---")
 print(f"Final fuel burn:      {prob.get_val('AS_point_0.fuelburn')[0]:.4f} [kg]")
 print(f"Final alpha:          {prob.get_val('alpha')[0]:.4f} [deg]")
 print(f"Final structural mass:{prob.get_val('wing.structural_mass')[0]:.4f} [kg]")
+
+# =============================================================================
+# 6. PLOTTING
+# =============================================================================
+try:
+    fuelburn = prob.get_val('AS_point_0.fuelburn')[0]
+    struct_mass = prob.get_val('wing.structural_mass')[0]
+    alpha_val = prob.get_val('alpha')[0]
+    twist_cp_vals = prob.get_val('wing.twist_cp')
+    thickness_cp_vals = prob.get_val('wing.thickness_cp')
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    # Bar chart: key results
+    labels = ["Fuel Burn (kg)", "Struct. Mass (kg)"]
+    values = [fuelburn, struct_mass]
+    axes[0].bar(labels, values, color=["steelblue", "tomato"])
+    axes[0].set_title(f"Key Results  (α={alpha_val:.2f}°)")
+    axes[0].set_ylabel("Value")
+
+    # Twist distribution
+    cp_idx = np.arange(len(twist_cp_vals))
+    axes[1].plot(cp_idx, twist_cp_vals, "o-", color="green")
+    axes[1].set_xlabel("Control Point")
+    axes[1].set_ylabel("Twist (deg)")
+    axes[1].set_title("Optimized Twist")
+    axes[1].grid(True)
+
+    # Thickness distribution
+    axes[2].plot(np.arange(len(thickness_cp_vals)), thickness_cp_vals * 1e3, "s-", color="purple")
+    axes[2].set_xlabel("Control Point")
+    axes[2].set_ylabel("Thickness (mm)")
+    axes[2].set_title("Optimized Wall Thickness")
+    axes[2].grid(True)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(_PLOTS_DIR, "aerostruct_tube_results.png"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"Plot saved to {_PLOTS_DIR}")
+except Exception as e:
+    print(f"Plotting warning: {e}")

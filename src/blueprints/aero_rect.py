@@ -3,9 +3,22 @@ import openmdao.api as om
 import os
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
+
+# ---------------------------------------------------------------------------
+# Absolute output paths — derived from __file__ so they resolve correctly
+# regardless of the CWD when this script is executed as a subprocess.
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+os.makedirs(_PLOTS_DIR, exist_ok=True)
+os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 # =============================================================================
 # 1. MESH GENERATION
@@ -110,12 +123,10 @@ prob.model.connect(f"{name}.t_over_c", f"{point_name}.{name}_perf.t_over_c")
 # =============================================================================
 prob.driver = om.ScipyOptimizeDriver()
 
-output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
-os.makedirs(output_dir, exist_ok=True)
-recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
+recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = output_dir
+prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
@@ -159,3 +170,34 @@ print("\n--- Optimization Results ---")
 print(f"Final Alpha: {prob.get_val('alpha', units='deg')[0]:.4f} deg")
 print(f"Final CL:    {prob.get_val(f'{point_name}.wing_perf.CL')[0]:.4f}")
 print(f"Final CD:    {prob.get_val(f'{point_name}.wing_perf.CD')[0]:.6f}")
+
+# =============================================================================
+# 6. PLOTTING
+# =============================================================================
+try:
+    alpha_val = prob.get_val('alpha', units='deg')[0]
+    CL_val = prob.get_val(f'{point_name}.wing_perf.CL')[0]
+    CD_val = prob.get_val(f'{point_name}.wing_perf.CD')[0]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    axes[0].bar(["CL", "CD"], [CL_val, CD_val], color=["steelblue", "tomato"])
+    axes[0].set_title("Aerodynamic Coefficients")
+    axes[0].set_ylabel("Value")
+
+    mesh_x = mesh[:, :, 0]
+    mesh_y = mesh[:, :, 1]
+    for i in range(mesh_x.shape[0]):
+        axes[1].plot(mesh_y[i, :], mesh_x[i, :], color="C0", lw=1)
+    for j in range(mesh_x.shape[1]):
+        axes[1].plot(mesh_y[:, j], mesh_x[:, j], color="C0", lw=1)
+    axes[1].set_aspect("equal")
+    axes[1].set_xlabel("Span (m)")
+    axes[1].set_ylabel("Chord (m)")
+    axes[1].set_title(f"Wing Mesh  (α={alpha_val:.2f}°)")
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(_PLOTS_DIR, "aero_rect_results.png"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"Plot saved to {_PLOTS_DIR}")
+except Exception as e:
+    print(f"Plotting warning: {e}")

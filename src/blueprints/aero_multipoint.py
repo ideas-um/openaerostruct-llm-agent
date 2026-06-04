@@ -3,11 +3,24 @@ import openmdao.api as om
 import os
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 from openaerostruct.integration.multipoint_comps import MultiCD
+
+# ---------------------------------------------------------------------------
+# Absolute output paths — derived from __file__ so they resolve correctly
+# regardless of the CWD when this script is executed as a subprocess.
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+os.makedirs(_PLOTS_DIR, exist_ok=True)
+os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 # =============================================================================
 # 1. MESH GENERATION
@@ -104,12 +117,10 @@ prob.model.add_subsystem("multi_CD", MultiCD(n_points=n_points), promotes_output
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["tol"] = 1e-9
 
-output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
-os.makedirs(output_dir, exist_ok=True)
-recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
+recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = output_dir
+prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
@@ -147,3 +158,36 @@ print("\n--- Multipoint Optimization Results ---")
 print(f"Final CD (Sum): {prob.get_val('CD')[0]:.6f}")
 print(f"Final alpha:    {prob.get_val('alpha')}")
 print(f"Final twist_cp: {prob.get_val('wing_geom.twist_cp')}")
+
+# =============================================================================
+# 6. PLOTTING
+# =============================================================================
+try:
+    alpha_vals = prob.get_val('alpha')
+    CL_vals = [prob.get_val(f'aero_point_{i}.wing_perf.CL')[0] for i in range(n_points)]
+    CD_vals = [prob.get_val(f'aero_point_{i}.wing_perf.CD')[0] for i in range(n_points)]
+    twist_cp_vals = prob.get_val('wing_geom.twist_cp')
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    point_labels = [f"Point {i}" for i in range(n_points)]
+    axes[0].bar(point_labels, CL_vals, color="steelblue", label="CL", alpha=0.7)
+    ax2 = axes[0].twinx()
+    ax2.bar(point_labels, CD_vals, color="tomato", label="CD", alpha=0.5, width=0.4)
+    axes[0].set_ylabel("CL", color="steelblue")
+    ax2.set_ylabel("CD", color="tomato")
+    axes[0].set_title("CL and CD per Flight Condition")
+
+    cp_indices = np.arange(len(twist_cp_vals))
+    axes[1].plot(cp_indices, twist_cp_vals, "o-", color="green")
+    axes[1].set_xlabel("Control Point Index")
+    axes[1].set_ylabel("Twist (deg)")
+    axes[1].set_title("Optimized Twist Distribution")
+    axes[1].grid(True)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(_PLOTS_DIR, "aero_multipoint_results.png"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"Plot saved to {_PLOTS_DIR}")
+except Exception as e:
+    print(f"Plotting warning: {e}")

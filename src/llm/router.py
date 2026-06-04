@@ -18,7 +18,6 @@ _SKILLS_PATH = os.path.join(_SRC_DIR, "llm", "skills.md")
 
 # ---------------------------------------------------------------------------
 # Blueprint allowlist — only these filenames are permitted as router outputs.
-# Any name the LLM returns that isn't in this set is silently dropped.
 # ---------------------------------------------------------------------------
 VALID_BLUEPRINTS: frozenset = frozenset({
     "aero_analysis.py",
@@ -61,7 +60,7 @@ def _parse_routing_response(response: str) -> dict:
         return {"blueprints": ["aero_rect.py"], "reason": f"Fallback due to parsing error: {e}"}
 
 
-def route_intent(user_prompt: str, model_name: str = "gemini-2.5-flash", provider: str = "Gemini API") -> dict:
+def route_intent(user_prompt: str, model_name: str = "gemini-2.0-flash", provider: str = "Gemini API") -> dict:
     """
     Non-streaming router: picks the right blueprint(s) for the user's request.
     Returns a dict with 'blueprints', 'reason', and optionally 'is_vague'/'missing_info'.
@@ -73,7 +72,7 @@ def route_intent(user_prompt: str, model_name: str = "gemini-2.5-flash", provide
 
 def route_intent_stream(
     user_prompt: str,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-2.0-flash",
     provider: str = "Gemini API",
 ):
     """
@@ -94,7 +93,6 @@ def route_intent_stream(
         client = None
 
     if client is None or provider != "Gemini API":
-        # No streaming available — yield the full response at once then the result.
         response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
         yield response
         yield _parse_routing_response(response)
@@ -112,12 +110,14 @@ def route_intent_stream(
     logger.info(f"--- USER PROMPT ---\n{user_prompt}")
 
     full_response = ""
+    last_chunk = None
     try:
         for chunk in client.models.generate_content_stream(
             model=model_name,
             contents=user_prompt,
             config=stream_config,
         ):
+            last_chunk = chunk
             text = chunk.text or ""
             full_response += text
             yield text
@@ -127,6 +127,22 @@ def route_intent_stream(
             yield full_response
 
     logger.info(f"--- LLM RESPONSE ---\n{full_response}")
-    log_token_usage(provider, model_name, None, None)  # token counts unavailable mid-stream
+
+    # Extract token counts from the final chunk's usage_metadata
+    input_tokens = None
+    output_tokens = None
+    try:
+        if last_chunk is not None and hasattr(last_chunk, "usage_metadata") and last_chunk.usage_metadata:
+            usage = last_chunk.usage_metadata
+            input_tokens  = getattr(usage, "prompt_token_count", None)
+            output_tokens = getattr(usage, "candidates_token_count", None)
+            logger.info(
+                f"Tokens (stream/router) — input: {input_tokens}, "
+                f"output: {output_tokens}"
+            )
+    except Exception:
+        pass
+
+    log_token_usage(provider, model_name, input_tokens, output_tokens)
 
     yield _parse_routing_response(full_response)

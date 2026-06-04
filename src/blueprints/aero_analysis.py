@@ -15,16 +15,26 @@ from openaerostruct.geometry.utils import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
 from openaerostruct.aerodynamics.aero_groups import AeroPoint
 
-# Ensure unified directory for saving results exists
-output_dir = "src/openaerostruct_out/"
-os.makedirs(output_dir, exist_ok=True)
+# ---------------------------------------------------------------------------
+# Absolute output paths — derived from __file__ so they resolve correctly
+# regardless of the CWD when this script is executed as a subprocess.
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+os.makedirs(_PLOTS_DIR, exist_ok=True)
+os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 # =============================================================================
 # 1. UTILITY FUNCTIONS
 # =============================================================================
 
-def plot_mesh(mesh, filename=os.path.join(output_dir, "mesh_analyzed.png")):
+def plot_mesh(mesh, filename=None):
     """Function to plot the VLM mesh"""
+    if filename is None:
+        filename = os.path.join(_PLOTS_DIR, "mesh_analyzed.png")
     mesh_x = mesh[:, :, 0]
     mesh_y = mesh[:, :, 1]
     plt.figure(figsize=(6, 3))
@@ -162,14 +172,13 @@ if __name__ == "__main__":
             })
 
     df = pd.DataFrame(results)
-    csv_path = os.path.join(output_dir, "OptimizedWing_Polars.csv")
+    csv_path = os.path.join(_OUT_DIR, "OptimizedWing_Polars.csv")
     df.to_csv(csv_path, index=False)
     print(f"Analysis complete. Saved data to {csv_path}")
 
     # =============================================================================
-    # 6. PLOTTING
+    # 6. PLOTTING — plots must go to _PLOTS_DIR for the app to display them
     # =============================================================================
-    # === AGENT EDITABLE SECTION START ===
     try:
         df["Mach"] = df["Mach"].astype(str)
 
@@ -177,22 +186,21 @@ if __name__ == "__main__":
                          title="Lift-to-Drag Ratio (L/D) vs Angle of Attack",
                          labels={"Alpha": "Angle of Attack (deg)", "L/D": "Lift / Drag"})
         fig_ld.update_layout(template="plotly_white", height=600, width=900)
-        fig_ld.write_image(os.path.join(output_dir, "LD_vs_Alpha.png"))
+        fig_ld.write_image(os.path.join(_PLOTS_DIR, "LD_vs_Alpha.png"))
 
         fig_polar = px.line(df, x="CD", y="CL", color="Mach", markers=True,
                             title="Drag Polars (CL vs CD)",
                             labels={"CD": "Drag Coefficient (CD)", "CL": "Lift Coefficient (CL)"})
         fig_polar.update_layout(template="plotly_white", height=600, width=900)
-        fig_polar.write_image(os.path.join(output_dir, "Drag_Polars.png"))
+        fig_polar.write_image(os.path.join(_PLOTS_DIR, "Drag_Polars.png"))
 
         fig_cl_alpha = px.line(df, x="Alpha", y="CL", color="Mach", markers=True,
                                 title="Lift Coefficient (CL) vs Angle of Attack",
                                 labels={"Alpha": "Angle of Attack (deg)", "CL": "Lift Coefficient (CL)"})
         fig_cl_alpha.update_layout(template="plotly_white", height=600, width=900)
-        fig_cl_alpha.write_image(os.path.join(output_dir, "CL_vs_Alpha.png"))
+        fig_cl_alpha.write_image(os.path.join(_PLOTS_DIR, "CL_vs_Alpha.png"))
     except Exception as e:
         print(f"Plotting warning: {e}")
-    # === AGENT EDITABLE SECTION END ===
 
     # =============================================================================
     # 7. SPANWISE LIFT DISTRIBUTION
@@ -245,7 +253,7 @@ if __name__ == "__main__":
             yaxis_title='Sectional Lift Coefficient (Cl)',
             template="plotly_white", height=600, width=900,
         )
-        fig.write_image(os.path.join(output_dir, "Sectional_Lift_Distribution_Trim.png"))
-        print(f"Done! Check the {output_dir} folder for your plots.")
+        fig.write_image(os.path.join(_PLOTS_DIR, "Sectional_Lift_Distribution_Trim.png"))
+        print(f"Done! Plots saved to {_PLOTS_DIR}")
     except Exception as e:
         print(f"Spanwise distribution plotting warning: {e}")

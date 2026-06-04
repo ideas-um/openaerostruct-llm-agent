@@ -21,8 +21,6 @@ def _build_prompt(user_prompt: str, blueprint_names: list[str], feedback: str) -
     Assemble the system prompt and user prompt that get sent to the LLM.
     Separated out so both the streaming and non-streaming paths can share it.
     """
-    # Load each blueprint, rejecting any name that tries to escape the
-    # blueprints directory via path traversal (e.g. "../../.env").
     blueprints_context = ""
     for name in blueprint_names:
         candidate = os.path.realpath(os.path.join(_BLUEPRINTS_DIR, name))
@@ -35,7 +33,6 @@ def _build_prompt(user_prompt: str, blueprint_names: list[str], feedback: str) -
         else:
             blueprints_context += f"\nWarning: Blueprint '{name}' not found.\n"
 
-    # Load the system prompt from the markdown file next to this module.
     system_prompt_path = os.path.join(_LLM_DIR, "coder.md")
     if os.path.exists(system_prompt_path):
         with open(system_prompt_path, "r", encoding="utf-8") as f:
@@ -59,10 +56,6 @@ def _build_prompt(user_prompt: str, blueprint_names: list[str], feedback: str) -
 def _parse_response(response: str) -> tuple[str, str]:
     """
     Split the raw LLM response into (reasoning, code).
-
-    The model is expected to output reasoning first, then a delimiter, then
-    the code. If the delimiter is missing we fall back to finding the first
-    import statement as the boundary.
     """
     delimiter = "##### REASONING ENDS #####"
     if delimiter in response:
@@ -82,7 +75,6 @@ def _parse_response(response: str) -> tuple[str, str]:
             reasoning = "Warning: delimiter missing — full response treated as code."
             code = response.strip()
 
-    # Strip markdown code fences if the model wrapped the code in them.
     if "```python" in code:
         code = code.split("```python")[-1].split("```")[0]
     elif "```" in code:
@@ -95,7 +87,7 @@ def generate_code(
     user_prompt: str,
     blueprint_names: list[str],
     feedback: str,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-2.0-flash",
     provider: str = "Gemini API",
 ) -> tuple[str, str]:
     """
@@ -112,7 +104,7 @@ def generate_code_stream(
     user_prompt: str,
     blueprint_names: list[str],
     feedback: str,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-2.0-flash",
     provider: str = "Gemini API",
 ):
     """
@@ -133,22 +125,19 @@ def generate_code_stream(
     """
     system_prompt, prompt = _build_prompt(user_prompt, blueprint_names, feedback)
 
-    # Try to get a raw client for streaming. If config doesn't expose one
-    # (older versions) we fall back to the blocking call.
     try:
         client = get_llm_client(provider, model_name)
     except Exception:
         client = None
 
     if client is None or provider != "Gemini API":
-        # No streaming available — yield the full response at once.
         response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
         yield response
         reasoning, code = _parse_response(response)
         yield (code, reasoning)
         return
 
-    # --- Gemini streaming path -------------------------------------------
+    # --- Gemini streaming path ---
     from google.genai import types as _types
     stream_config = _types.GenerateContentConfig(
         system_instruction=system_prompt or None,
@@ -161,12 +150,14 @@ def generate_code_stream(
     logger.info(f"--- USER PROMPT ---\n{prompt}")
 
     full_response = ""
+    last_chunk = None
     try:
         for chunk in client.models.generate_content_stream(
             model=model_name,
             contents=prompt,
             config=stream_config,
         ):
+            last_chunk = chunk
             text = chunk.text or ""
             full_response += text
             yield text
@@ -176,7 +167,23 @@ def generate_code_stream(
             yield full_response
 
     logger.info(f"--- LLM RESPONSE ---\n{full_response}")
-    log_token_usage(provider, model_name, None, None)  # token counts unavailable mid-stream
+
+    # Extract token counts from the final chunk's usage_metadata
+    input_tokens = None
+    output_tokens = None
+    try:
+        if last_chunk is not None and hasattr(last_chunk, "usage_metadata") and last_chunk.usage_metadata:
+            usage = last_chunk.usage_metadata
+            input_tokens  = getattr(usage, "prompt_token_count", None)
+            output_tokens = getattr(usage, "candidates_token_count", None)
+            logger.info(
+                f"Tokens (stream) — input: {input_tokens}, "
+                f"output: {output_tokens}"
+            )
+    except Exception:
+        pass
+
+    log_token_usage(provider, model_name, input_tokens, output_tokens)
 
     reasoning, code = _parse_response(full_response)
     yield (code, reasoning)

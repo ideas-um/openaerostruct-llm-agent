@@ -3,6 +3,7 @@ import os
 import openmdao.api as om
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.structures.struct_groups import SpatialBeamAlone
 
@@ -12,6 +13,18 @@ from openaerostruct.structures.struct_groups import SpatialBeamAlone
 # with "promotes_inputs failed to find any matches for 'forces'".
 # Loads are applied manually via IndepVarComp inside the SpatialBeamAlone group.
 # =============================================================================
+
+# ---------------------------------------------------------------------------
+# Absolute output paths — derived from __file__ so they resolve correctly
+# regardless of the CWD when this script is executed as a subprocess.
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+os.makedirs(_PLOTS_DIR, exist_ok=True)
+os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 # =============================================================================
 # 1. MESH GENERATION (STRUCTURAL ONLY)
@@ -93,12 +106,10 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["disp"] = True
 prob.driver.options["tol"] = 1e-9
 
-output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
-os.makedirs(output_dir, exist_ok=True)
-recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
+recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = output_dir
+prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
@@ -132,3 +143,35 @@ prob.run_driver()
 print("\n--- Structural Optimization Results ---")
 print(f"Final structural mass: {prob.get_val('wing.structural_mass')[0]:.4f} kg")
 print(f"Final thickness_cp:    {prob.get_val('wing.thickness_cp')}")
+
+# =============================================================================
+# 6. PLOTTING
+# =============================================================================
+try:
+    struct_mass = prob.get_val('wing.structural_mass')[0]
+    thickness_cp_vals = prob.get_val('wing.thickness_cp')
+    failure_val = prob.get_val('wing.failure')[0]
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+    # Thickness distribution
+    cp_idx = np.arange(len(thickness_cp_vals))
+    axes[0].plot(cp_idx, thickness_cp_vals * 1e3, "s-", color="steelblue")
+    axes[0].set_xlabel("Control Point")
+    axes[0].set_ylabel("Thickness (mm)")
+    axes[0].set_title(f"Optimized Wall Thickness\n(Struct. mass: {struct_mass:.1f} kg)")
+    axes[0].grid(True)
+
+    # Summary bar
+    axes[1].bar(["Structural\nMass (kg)", "Failure\nIndex"],
+                [struct_mass, failure_val],
+                color=["steelblue", "tomato" if failure_val > 0 else "green"])
+    axes[1].set_title("Structural Optimization Summary")
+    axes[1].set_ylabel("Value")
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(_PLOTS_DIR, "struct_optimization_results.png"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"Plot saved to {_PLOTS_DIR}")
+except Exception as e:
+    print(f"Plotting warning: {e}")

@@ -3,9 +3,22 @@ import os
 import openmdao.api as om
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.integration.aerostruct_groups import AerostructGeometry, AerostructPoint
 from openaerostruct.structures.wingbox_fuel_vol_delta import WingboxFuelVolDelta
+
+# ---------------------------------------------------------------------------
+# Absolute output paths — derived from __file__ so they resolve correctly
+# regardless of the CWD when this script is executed as a subprocess.
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
+os.makedirs(_PLOTS_DIR, exist_ok=True)
+os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 # =============================================================================
 # AIRFOIL COORDINATES (fixed — defines the wingbox cross-section shape)
@@ -199,25 +212,13 @@ prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["optimizer"] = "SLSQP"
 prob.driver.options["tol"] = 1e-2
 
-output_dir = os.path.join("src", "openaerostruct_out", "generated_run_out")
-os.makedirs(output_dir, exist_ok=True)
-recorder = om.SqliteRecorder(os.path.join(output_dir, "aero.db"))
+recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = output_dir
+prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
-# Available DV paths:
-#   "wing.twist_cp"              — spanwise twist CPs [deg]       (declared in surf_dict)
-#   "wing.spar_thickness_cp"     — spar wall thickness CPs [m]    (declared in surf_dict)
-#   "wing.skin_thickness_cp"     — skin thickness CPs [m]         (declared in surf_dict)
-#   "wing.geometry.t_over_c_cp"  — thickness-to-chord ratio CPs   (declared in surf_dict as t_over_c_cp)
-#   "alpha_maneuver"             — maneuver AoA [deg]             (always available)
-#   "fuel_mass"                  — fuel mass [kg]                  (always available)
-#
-# NOTE: "alpha" (cruise AoA) is NOT a DV here — cruise CL is enforced via AS_point_0.CL constraint.
-
 prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 prob.model.add_design_var("wing.twist_cp", lower=-15.0, upper=15.0, scaler=0.1)
 prob.model.add_design_var("wing.spar_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
@@ -227,13 +228,6 @@ prob.model.add_design_var("alpha_maneuver", lower=-15.0, upper=15.0)
 prob.model.add_design_var("fuel_mass", lower=0.0, upper=2e5, scaler=1e-5)
 
 # --- Constraints ---
-# Available constraint paths:
-#   "AS_point_0.CL"                     — cruise CL (equals target)
-#   "AS_point_1.L_equals_W"             — maneuver lift-equals-weight trim, equals=0
-#   "AS_point_1.wing_perf.failure"      — structural failure at maneuver load, upper=0
-#   "fuel_vol_delta.fuel_vol_delta"     — fuel volume margin, lower=0
-#   "fuel_diff"                         — fuel mass consistency, equals=0
-
 prob.model.add_constraint("AS_point_0.CL", equals=0.5)
 prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)
 prob.model.add_constraint("AS_point_1.wing_perf.failure", upper=0.0)
@@ -253,3 +247,42 @@ print("\n--- Aerostructural Wingbox Results ---")
 print(f"Final fuel burn:      {prob.get_val('AS_point_0.fuelburn')[0]:.4f} [kg]")
 print(f"Final structural mass:{prob.get_val('wing.structural_mass')[0] / surf_dict['wing_weight_ratio']:.4f} [kg]")
 print(f"Final twist_cp:       {prob.get_val('wing.twist_cp')}")
+
+# =============================================================================
+# 6. PLOTTING
+# =============================================================================
+try:
+    fuelburn = prob.get_val('AS_point_0.fuelburn')[0]
+    struct_mass = prob.get_val('wing.structural_mass')[0] / surf_dict['wing_weight_ratio']
+    twist_cp_vals = prob.get_val('wing.twist_cp')
+    spar_t = prob.get_val('wing.spar_thickness_cp') * 1e3   # convert to mm
+    skin_t = prob.get_val('wing.skin_thickness_cp') * 1e3
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    axes[0].bar(["Fuel Burn (kg)", "Struct. Mass (kg)"], [fuelburn, struct_mass],
+                color=["steelblue", "tomato"])
+    axes[0].set_title("Key Wingbox Results")
+    axes[0].set_ylabel("Value")
+
+    cp_idx = np.arange(len(twist_cp_vals))
+    axes[1].plot(cp_idx, twist_cp_vals, "o-", color="green")
+    axes[1].set_xlabel("Control Point")
+    axes[1].set_ylabel("Twist (deg)")
+    axes[1].set_title("Optimized Twist")
+    axes[1].grid(True)
+
+    axes[2].plot(np.arange(len(spar_t)), spar_t, "s-", color="purple", label="Spar")
+    axes[2].plot(np.arange(len(skin_t)), skin_t, "^-", color="orange", label="Skin")
+    axes[2].set_xlabel("Control Point")
+    axes[2].set_ylabel("Thickness (mm)")
+    axes[2].set_title("Optimized Thickness")
+    axes[2].legend()
+    axes[2].grid(True)
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(_PLOTS_DIR, "aerostruct_wingbox_results.png"), bbox_inches="tight")
+    plt.close(fig)
+    print(f"Plot saved to {_PLOTS_DIR}")
+except Exception as e:
+    print(f"Plotting warning: {e}")
