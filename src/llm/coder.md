@@ -44,7 +44,9 @@ Reynolds number: `re = rho * v / 1.81e-5` (per unit length, no chord needed)
 
 **7. CL equality constraint requires `alpha` as a design variable**
 
-**8. Always assign `mesh` to a variable before putting it in `surface` dict**
+**8. No deleting or “cleaning up” unknown fields in `surface` (preserve `k_lam` etc.)**
+
+**9 Always assign `mesh` to a variable before putting it in `surface` dict**
 ```python
 # CORRECT
 mesh = generate_mesh(mesh_dict)          # assign first

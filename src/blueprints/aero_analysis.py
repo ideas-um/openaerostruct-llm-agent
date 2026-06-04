@@ -77,23 +77,24 @@ if __name__ == "__main__":
     # Modify aerodynamic and geometric properties here.
     # IMPORTANT: twist_cp, chord_cp, taper, sweep, dihedral are geometry modifiers.
     # Include them here if you want them reflected in the analysis.
+    # Other parametesrs like CL0, CD0, k_lam, c_max_t are passed directly to the aerodynamics solver and do not affect the geometry and should not be removed.
     # === AGENT EDITABLE SECTION START ===
     surface = {
         "name": "wing",
         "symmetry": True,
         "S_ref_type": "wetted",
         "twist_cp": np.array([0.0, 0.0]),       # Spanwise twist [deg], 2 control points
-        "t_over_c_cp": np.array([0.12]),         # Thickness-to-chord ratio
-        "taper": 1.0,                            # Taper ratio (1.0 = rectangular)
-        "sweep": 0.0,                            # Sweep angle [deg]
-        "dihedral": 0.0,                         # Dihedral angle [deg]
-        "mesh": mesh,
-        "CL0": 0.0,
-        "CD0": 0.005,
-        "k_lam": 0.05,
-        "c_max_t": 0.303,
-        "with_viscous": True,
-        "with_wave": False,
+        "t_over_c_cp": np.array([0.12]),        # Thickness-to-chord ratio
+        "taper": 1.0,                           # Taper ratio (1.0 = rectangular)
+        "sweep": 0.0,                           # Sweep angle [deg]
+        "dihedral": 0.0,                        # Dihedral angle [deg]
+        "mesh": mesh,                           # Mesh generated above must be included in surface definition
+        "CL0": 0.0,                             # Lift coefficient at zero angle of attack --> Should not be removed
+        "CD0": 0.005,                           # Profile drag coefficient (drag at zero lift) --> Should not be removed
+        "k_lam": 0.05,                          #Percentage of laminar flow (0.05 = 5% laminar, 95% turbulent) --> Should not be removed
+        "c_max_t": 0.303,                       #Chordwise location of maximum thickness for airfoil shape (0.303 is typical for NACA 4-digit airfoils) --> Should not be removed   
+        "with_viscous": True,                   # Whether to include viscous drag in the analysis
+        "with_wave": False,                     # Whether to include wave drag in the analysis (only relevant for transonic/supersonic speeds)
     }
     # === AGENT EDITABLE SECTION END ===
 

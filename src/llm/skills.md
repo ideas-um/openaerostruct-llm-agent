@@ -26,7 +26,7 @@ Key signals for `struct_optimization.py`:
 - `aerostruct_tube.py`: tubular spar, CRM geometry, coupled aero+structure
 
 ### Step 5 — Which aero blueprint?
-- `aero_multipoint.py`: multiple flight conditions in one optimization
+- `aero_multipoint.py`: multiple flight conditions (note that it is for FLIGHT CONDITIONS, not different wing designs) in one optimization
 - `aero_rect.py`: single-condition rectangular wing optimization
 - `aero_analysis.py`: sweep or fixed-point analysis (no optimization)
 
@@ -36,8 +36,8 @@ Key signals for `struct_optimization.py`:
 | Fixed nodal/applied loads, minimize structural mass, no aero | `struct_optimization.py` |
 | Aerostructural + wingbox/skin/spar | `aerostruct_wingbox.py` |
 | Aerostructural + tube spar + fuel burn | `aerostruct_tube.py` |
-| Multi-point aero optimization | `aero_multipoint.py` |
-| Single-point aero optimization, rectangular wing | `aero_rect.py` |
+| Multi-point aero optimization **with explicit multiple flight conditions** | `aero_multipoint.py` |
+| Single-point aero optimization, rectangular wing, at one CL/Mach/condition | `aero_rect.py` |
 | Fixed geometry, performance sweep | `aero_analysis.py` |
 
 ## VAGUENESS CHECK
