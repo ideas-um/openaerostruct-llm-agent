@@ -83,4 +83,4 @@ os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
 The app **only** displays images found in `_PLOTS_DIR`. If `savefig`/`write_image` uses any other path, plots will NOT appear in the UI.
 
-Always wrap plotting in `try/except`. Always `matplotlib.use('Agg')`. Always `plt.close()`.
+Always `matplotlib.use('Agg')`. Always `plt.close()`. Do not put the plotting in a try/except block so the errors can be fixed bt the coder. 
