@@ -41,7 +41,7 @@ _BENCH_OUT_DIR = os.path.join(_PROJECT_DIR, "benchmark_run_out")
 # Temporary script file used by the benchmark (mirrors app.py's generated_run.py)
 _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 
 # ---------------------------------------------------------------------------
 # Convergence detection — mirrors app.py logic

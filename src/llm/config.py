@@ -6,7 +6,10 @@ from google.genai import types
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from the project root (parent of src directory)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ENV_FILE = os.path.join(_PROJECT_ROOT, ".env")
+load_dotenv(_ENV_FILE)
 
 # ---------------------------------------------------------------------------
 # Resolve paths relative to this file.
