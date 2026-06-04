@@ -250,7 +250,7 @@ if user_prompt:
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
-    with open(_LOG_FILE, "w") as f:
+    with open(_LOG_FILE, "w", encoding="utf-8") as f:
         f.write("")
 
     st.session_state["stop_run"] = False
@@ -343,7 +343,7 @@ if user_prompt:
                 final_code = code
                 st.info(f"**Coder's Reasoning:** {reasoning}")
 
-                with open(_GEN_SCRIPT, "w") as f:
+                with open(_GEN_SCRIPT, "w", encoding="utf-8") as f:
                     f.write(code)
 
                 with st.expander(f"Generated Code (Attempt {attempt + 1})", expanded=False):
