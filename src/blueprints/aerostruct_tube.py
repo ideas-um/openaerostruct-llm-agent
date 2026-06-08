@@ -24,6 +24,7 @@ os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 # 1. MESH GENERATION
 # =============================================================================
 # CRM mesh is built-in. num_twist_cp sets the number of twist control points.
+# generate_mesh returns TWO values for CRM — always unpack as (mesh, twist_cp).
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 5,
@@ -39,9 +40,30 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
-# CRITICAL: Any geometry or structural parameter used as a design variable must
+# CRITICAL: Any geometry or structural parameter used as a design variable MUST
 # be declared here first. twist_cp and thickness_cp are pre-included.
 # Do NOT remove twist_cp — it is initialized from the CRM geometry above.
+#
+# FULL DV CATALOG for aerostructural tube FEM (from God Document):
+# -----------------------------------------------
+# GEOMETRY DVs (all require matching key here AND add_design_var() below):
+#   KEY           TYPE    DESCRIPTION
+#   twist_cp      array   Spanwise twist B-spline CPs [deg]. Required — from CRM geometry.
+#   chord_cp      array   Chord scaling B-spline CPs. Shape=(n_cp,).
+#   xshear_cp     array   x-shear CPs [m] — generalized sweep. Shape=(n_cp,).
+#   zshear_cp     array   z-shear CPs [m] — generalized dihedral. Shape=(n_cp,).
+#   taper         scalar  Taper ratio (tip_chord / root_chord).
+#   sweep         scalar  Leading-edge sweep angle [deg].
+#   dihedral      scalar  Dihedral angle [deg].
+#
+# STRUCTURAL DVs — tube FEM only (require matching key here AND add_design_var()):
+#   KEY               TYPE    DESCRIPTION
+#   thickness_cp      array   Tube wall thickness B-spline CPs [m]. Shape=(n_cp,).
+#   radius_cp         array   Tube outer radius B-spline CPs [m]. Shape=(n_cp,).
+#                             Optional — adds radial sizing as a DV alongside thickness.
+#
+# FLIGHT DVs (no surface dict entry needed):
+#   "alpha"       — angle of attack (always available via IndepVarComp)
 # === AGENT EDITABLE SECTION START ===
 surface = {
     "name": "wing",
@@ -49,11 +71,22 @@ surface = {
     "S_ref_type": "wetted",
     "fem_model_type": "tube",
 
-    # Structural design variables — must be declared here to use in add_design_var()
-    "thickness_cp": np.array([0.01, 0.02, 0.03]),   # Tube wall thickness B-spline CPs [m]
-    "twist_cp": twist_cp,                            # Spanwise twist CPs [deg]
+    # Structural DVs — declared here to enable in add_design_var()
+    "thickness_cp": np.array([0.01, 0.02, 0.03]),   # Tube wall thickness CPs [m]
+    #"radius_cp": np.ones(3) * 0.05,                 # Tube radius CPs [m] — optional DV
 
-    # Aerodynamic properties
+    # Geometry DVs — declared here to enable in add_design_var()
+    "twist_cp": twist_cp,                            # Spanwise twist CPs [deg] — required
+
+    # Optional geometry DVs — uncomment each to activate
+    #"chord_cp": np.ones(5),                         # Chord scaling CPs
+    #"xshear_cp": np.zeros(5),                       # x-shear CPs [m]
+    #"zshear_cp": np.zeros(5),                       # z-shear CPs [m]
+    #"taper": 1.0,                                   # Taper ratio
+    #"sweep": 0.0,                                   # Sweep angle [deg]
+    #"dihedral": 0.0,                                # Dihedral angle [deg]
+
+    # Aerodynamic solver parameters — always keep these
     "CL0": 0.0,
     "CD0": 0.015,
     "k_lam": 0.05,
@@ -79,12 +112,13 @@ surface = {
 # =============================================================================
 # 3. PROBLEM SETUP (AEROSTRUCTURAL TUBE)
 # =============================================================================
-# Geometry subsystem is named "wing". DV paths are "wing.<var>" e.g. "wing.twist_cp".
+# Geometry subsystem is named "wing". All DV paths are "wing.<var>".
+# e.g. "wing.twist_cp", "wing.thickness_cp", "wing.taper", "wing.xshear_cp".
 prob = om.Problem()
 
 # === AGENT EDITABLE SECTION START ===
 # Mission and flight condition parameters — modify to match the user's scenario.
-# Re is computed internally by OAS from v, rho, and geometry. Use re=1e6 as default.
+# CT = thrust-specific fuel consumption [1/s] = grav_constant * TSFC_in_per_hour * (1/3600)
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("v", val=248.136, units="m/s")        # Cruise speed [m/s]
 indep_var_comp.add_output("alpha", val=5.0, units="deg")        # Initial AoA [deg]
@@ -135,30 +169,57 @@ prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
-# Available DV paths:
-#   "alpha"                  — angle of attack [deg] (must be DV if L=W is a constraint)
-#   "wing.twist_cp"          — spanwise twist B-spline CPs (requires twist_cp in surface dict)
-#   "wing.thickness_cp"      — tube wall thickness CPs [m] (requires thickness_cp in surface dict)
-#   "wing.radius_cp"         — tube radius CPs [m] (requires radius_cp in surface dict)
+# FULL DV PATH REFERENCE for this blueprint (subsystem = "wing"):
+#
+#   PATH                  SURFACE DICT KEY    DESCRIPTION
+#   "alpha"               (none needed)       Angle of attack [deg]
+#                                             Required if L_equals_W is a constraint
+#   "wing.twist_cp"       "twist_cp"          Spanwise twist CPs [deg]
+#   "wing.thickness_cp"   "thickness_cp"      Tube wall thickness CPs [m]
+#   "wing.radius_cp"      "radius_cp"         Tube radius CPs [m]
+#                                             Uncomment "radius_cp" in surface dict first
+#   "wing.chord_cp"       "chord_cp"          Chord scaling CPs
+#                                             Uncomment "chord_cp" in surface dict first
+#   "wing.xshear_cp"      "xshear_cp"         x-shear CPs [m] (generalized sweep)
+#                                             Uncomment "xshear_cp" in surface dict first
+#   "wing.zshear_cp"      "zshear_cp"         z-shear CPs [m] (generalized dihedral)
+#                                             Uncomment "zshear_cp" in surface dict first
+#   "wing.taper"          "taper"             Taper ratio (scalar)
+#                                             Uncomment "taper" in surface dict first
+#   "wing.sweep"          "sweep"             Sweep angle [deg] (scalar)
+#                                             Uncomment "sweep" in surface dict first
+#   "wing.dihedral"       "dihedral"          Dihedral angle [deg] (scalar)
+#                                             Uncomment "dihedral" in surface dict first
 
 prob.model.add_design_var("alpha", lower=-10.0, upper=10.0)
 prob.model.add_design_var("wing.twist_cp", lower=-10.0, upper=15.0)
 prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, scaler=1e2)
+# prob.model.add_design_var("wing.radius_cp", lower=0.01, upper=0.5, scaler=1e2)
+# prob.model.add_design_var("wing.chord_cp", lower=0.5, upper=3.0)
+# prob.model.add_design_var("wing.xshear_cp", lower=-5.0, upper=5.0)
+# prob.model.add_design_var("wing.zshear_cp", lower=-2.0, upper=2.0)
+# prob.model.add_design_var("wing.taper", lower=0.1, upper=1.5)
+# prob.model.add_design_var("wing.sweep", lower=-30.0, upper=30.0)
+# prob.model.add_design_var("wing.dihedral", lower=-10.0, upper=10.0)
 
 # --- Constraints ---
-# Available constraint paths:
-#   "AS_point_0.wing_perf.failure"  — structural failure index (Kreisselmeier-Steinhauser), upper=0
+# FULL CONSTRAINT PATH REFERENCE:
+#   "AS_point_0.wing_perf.failure"  — KS-aggregated structural failure index, upper=0
+#                                     Failure index > 0 means material has yielded.
 #   "AS_point_0.L_equals_W"         — lift-equals-weight trim constraint, equals=0
+#                                     Requires alpha as a design variable.
 #   "AS_point_0.wing_perf.CL"       — lift coefficient
 #   "AS_point_0.fuelburn"           — fuel burn [kg]
+#   "AS_point_0.wing_perf.CD"       — drag coefficient
 
 prob.model.add_constraint("AS_point_0.wing_perf.failure", upper=0.0)
 prob.model.add_constraint("AS_point_0.L_equals_W", equals=0.0)
 
 # --- Objective ---
-# Common objectives:
-#   "AS_point_0.fuelburn"           — fuel burn [kg]  (most common for aerostructural)
-#   "AS_point_0.wing_perf.CD"       — drag coefficient
+# FULL OBJECTIVE PATH REFERENCE:
+#   "AS_point_0.fuelburn"       — fuel burn [kg] (most common for aerostructural)
+#   "AS_point_0.wing_perf.CD"   — drag coefficient
+#   "wing.structural_mass"      — structural mass [kg]
 
 prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 # === AGENT EDITABLE SECTION END ===

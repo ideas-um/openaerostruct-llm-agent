@@ -33,6 +33,9 @@ lower_y = np.array([-0.0447, -0.046, -0.0473, -0.0485, -0.0496, -0.0506, -0.0515
 # =============================================================================
 # uCRM_based wing type is required for wingbox. num_twist_cp must match
 # the length of twist_cp in the surface dict below.
+# CRITICAL: generate_mesh returns TWO values — always unpack as (mesh, twist_cp).
+# Writing `mesh = generate_mesh(...)` (no unpack) makes mesh a tuple and crashes
+# later with: TypeError: tuple indices must be integers or slices, not tuple
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 15,
@@ -45,7 +48,7 @@ mesh_dict = {
 }
 # === AGENT EDITABLE SECTION END ===
 
-mesh, twist_cp = generate_mesh(mesh_dict)
+mesh, twist_cp = generate_mesh(mesh_dict)  # MUST unpack both — mesh is ndarray, twist_cp is ndarray
 
 # =============================================================================
 # 2. SURFACE DEFINITION
@@ -53,6 +56,30 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # CRITICAL: Any parameter used as a design variable must be declared here first.
 # twist_cp, spar_thickness_cp, skin_thickness_cp, t_over_c_cp are all pre-included.
 # The number of control points in each array determines the DV vector size.
+# DO NOT remove n_point_masses, point_masses, or point_mass_locations — removing
+# them causes a size-0 nodal_weightings array crash during prob.setup().
+#
+# FULL DV CATALOG for aerostructural wingbox FEM (from God Document):
+# -----------------------------------------------
+# GEOMETRY DVs (all require matching key here AND add_design_var() below):
+#   KEY           TYPE    DESCRIPTION
+#   twist_cp      array   Spanwise twist CPs [deg]. Required — from uCRM geometry.
+#   chord_cp      array   Chord scaling CPs. Shape=(n_cp,).
+#   xshear_cp     array   x-shear CPs [m] — generalized sweep. Shape=(n_cp,).
+#   zshear_cp     array   z-shear CPs [m] — generalized dihedral. Shape=(n_cp,).
+#
+# STRUCTURAL DVs — wingbox FEM only (require matching key here AND add_design_var()):
+#   KEY                   TYPE    DESCRIPTION
+#   spar_thickness_cp     array   Spar wall thickness CPs [m]. Shape=(n_cp,).
+#   skin_thickness_cp     array   Skin thickness CPs [m]. Shape=(n_cp,).
+#   t_over_c_cp           array   Thickness-to-chord ratio CPs. Shape=(n_cp,).
+#                                 PATH: "wing.geometry.t_over_c_cp" — NOT "wing.t_over_c_cp"
+#                                 The ".geometry." level is required for wingbox.
+#
+# FLIGHT DVs (no surface dict entry needed):
+#   "alpha"           — cruise angle of attack
+#   "alpha_maneuver"  — maneuver point angle of attack (second flight condition)
+#   "fuel_mass"       — fuel mass [kg] (used to close the fuel loop constraint)
 # === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
@@ -67,11 +94,17 @@ surf_dict = {
     "data_y_upper": upper_y,
     "data_y_lower": lower_y,
 
-    # Structural design variables — number of CPs must match add_design_var() usage
+    # Structural DVs — number of CPs must match add_design_var() usage
     "twist_cp": np.array([4.0, 5.0, 8.0, 9.0]),                    # Spanwise twist [deg]
     "spar_thickness_cp": np.array([0.004, 0.005, 0.008, 0.01]),     # Spar wall thickness [m]
     "skin_thickness_cp": np.array([0.005, 0.01, 0.015, 0.025]),     # Skin thickness [m]
     "t_over_c_cp": np.array([0.08, 0.08, 0.10, 0.08]),              # Thickness-to-chord ratio
+
+    # Optional geometry DVs — uncomment to activate
+    # After uncommenting here, also add the matching add_design_var() call in Section 4.
+    #"chord_cp": np.ones(4),                                         # Chord scaling CPs
+    #"xshear_cp": np.zeros(4),                                       # x-shear CPs [m]
+    #"zshear_cp": np.zeros(4),                                       # z-shear CPs [m]
 
     "original_wingbox_airfoil_t_over_c": 0.12,
     "CL0": 0.0,
@@ -92,7 +125,7 @@ surf_dict = {
     "exact_failure_constraint": False,
     "struct_weight_relief": True,
     "distributed_fuel_weight": True,
-    "n_point_masses": 1,
+    "n_point_masses": 1,        # KEEP — removing this causes size-0 crash in setup
     "fuel_density": 803.0,
     "Wf_reserve": 15000.0,          # Reserve fuel [kg]
 }
@@ -128,6 +161,7 @@ indep_var_comp.add_output("fuel_mass", val=10000.0, units="kg")
 
 prob.model.add_subsystem("prob_vars", indep_var_comp, promotes=["*"])
 
+# KEEP these point-mass outputs and connections unchanged — required by n_point_masses=1
 point_masses = np.array([[10.0e3]])
 point_mass_locations = np.array([[25, -10.0, 0.0]])
 indep_var_comp.add_output("point_masses", val=point_masses, units="kg")
@@ -219,15 +253,47 @@ prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
+# FULL DV PATH REFERENCE for this blueprint (subsystem = "wing"):
+#
+#   PATH                          SURFACE DICT KEY      DESCRIPTION
+#   "alpha"                       (none needed)         Cruise AoA [deg]
+#                                                       Add if you want cruise trim as a DV
+#   "alpha_maneuver"              (none needed)         Maneuver AoA [deg]
+#   "fuel_mass"                   (none needed)         Fuel mass [kg] — closes fuel loop
+#   "wing.twist_cp"               "twist_cp"            Spanwise twist CPs [deg]
+#   "wing.spar_thickness_cp"      "spar_thickness_cp"   Spar wall thickness CPs [m]
+#   "wing.skin_thickness_cp"      "skin_thickness_cp"   Skin thickness CPs [m]
+#   "wing.geometry.t_over_c_cp"   "t_over_c_cp"         Thickness-to-chord ratio CPs
+#                                                       MUST use ".geometry." in the path
+#                                                       "wing.t_over_c_cp" is WRONG here
+#   "wing.chord_cp"               "chord_cp"            Chord scaling CPs
+#                                                       Uncomment "chord_cp" in surf_dict first
+#   "wing.xshear_cp"              "xshear_cp"           x-shear CPs [m] (generalized sweep)
+#                                                       Uncomment "xshear_cp" in surf_dict first
+#   "wing.zshear_cp"              "zshear_cp"           z-shear CPs [m] (generalized dihedral)
+#                                                       Uncomment "zshear_cp" in surf_dict first
+
 prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 prob.model.add_design_var("wing.twist_cp", lower=-15.0, upper=15.0, scaler=0.1)
 prob.model.add_design_var("wing.spar_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
 prob.model.add_design_var("wing.skin_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
-prob.model.add_design_var("wing.geometry.t_over_c_cp", lower=0.07, upper=0.2, scaler=10.0)
+prob.model.add_design_var("wing.geometry.t_over_c_cp", lower=0.07, upper=0.2, scaler=10.0)  # .geometry. required
 prob.model.add_design_var("alpha_maneuver", lower=-15.0, upper=15.0)
 prob.model.add_design_var("fuel_mass", lower=0.0, upper=2e5, scaler=1e-5)
+# prob.model.add_design_var("alpha", lower=-15.0, upper=15.0)          # Cruise AoA — add if needed
+# prob.model.add_design_var("wing.chord_cp", lower=0.5, upper=3.0)
+# prob.model.add_design_var("wing.xshear_cp", lower=-5.0, upper=5.0)
+# prob.model.add_design_var("wing.zshear_cp", lower=-2.0, upper=2.0)
 
 # --- Constraints ---
+# FULL CONSTRAINT PATH REFERENCE:
+#   "AS_point_0.CL"                     — cruise lift coefficient (equals target CL)
+#   "AS_point_0.L_equals_W"             — lift-equals-weight at cruise, equals=0
+#   "AS_point_1.L_equals_W"             — lift-equals-weight at maneuver, equals=0
+#   "AS_point_1.wing_perf.failure"      — structural failure at maneuver point, upper=0
+#   "fuel_vol_delta.fuel_vol_delta"     — fuel volume constraint: box must hold fuel, lower=0
+#   "fuel_diff"                         — fuel mass consistency: fuel_mass == fuelburn, equals=0
+
 prob.model.add_constraint("AS_point_0.CL", equals=0.5)
 prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)
 prob.model.add_constraint("AS_point_1.wing_perf.failure", upper=0.0)

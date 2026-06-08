@@ -19,6 +19,34 @@ _SRC_DIR    = os.path.dirname(_LLM_DIR)
 _LOG_FILE   = os.path.join(_SRC_DIR, "agent_backend.log")
 _STATS_FILE = os.path.join(_SRC_DIR, "usage_stats.csv")
 
+# ---------------------------------------------------------------------------
+# Gemini streaming retry config — imported by coder.py and router.py.
+# get_llm_response() handles non-streaming retries internally; these
+# constants are only needed for the streaming paths that call the SDK
+# directly and therefore bypass get_llm_response().
+# ---------------------------------------------------------------------------
+GEMINI_STREAM_RETRY_WAIT    = 60  # seconds to wait before retrying a stream
+GEMINI_STREAM_MAX_RETRIES   = 5   # maximum stream retries per call
+GEMINI_MAX_RETRIES   = 5          # maximum retries per call
+
+_GEMINI_TRANSIENT_MESSAGES = (
+    "resource_exhausted",
+    "quota",
+    "rate limit",
+    "overloaded",
+    "503",
+    "429",
+    "service unavailable",
+    "too many requests",
+)
+
+
+def is_gemini_transient_error(exc: Exception) -> bool:
+    """Return True if the exception looks like a Gemini rate-limit / overload error."""
+    msg = str(exc).lower()
+    return any(pattern in msg for pattern in _GEMINI_TRANSIENT_MESSAGES)
+
+
 logging.basicConfig(
     filename=_LOG_FILE,
     level=logging.INFO,

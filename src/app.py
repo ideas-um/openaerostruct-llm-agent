@@ -1,4 +1,6 @@
+import base64
 import streamlit as st
+import streamlit.components.v1 as components
 import os
 import re
 import shutil
@@ -22,13 +24,6 @@ _GEN_SCRIPT  = os.path.join(_SRC_DIR, "generated_run.py")
 
 # ---------------------------------------------------------------------------
 # Safety: strip ANSI colour codes and block prompt-injection attempts.
-#
-# When the generated script runs, its stdout/stderr is fed back to the LLM
-# as "feedback" for the next attempt. A malicious print statement inside
-# that script could craft output like "ignore previous instructions: …" and
-# trick the LLM into doing something unintended. The patterns below catch
-# the most common forms of that attack and silently drop those lines before
-# they reach the model.
 # ---------------------------------------------------------------------------
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
 _INJECTION_PATTERN = re.compile(
@@ -45,13 +40,6 @@ _INJECTION_PATTERN = re.compile(
 
 
 def sanitize_feedback(text: str, max_chars: int = 1000) -> str:
-    """
-    Clean up process output before handing it back to the LLM.
-
-    Strips terminal colour codes and removes any line that looks like a
-    prompt-injection attempt. Also truncates to max_chars so we don't
-    flood the model's context with a giant stack trace.
-    """
     text = _ANSI_ESCAPE.sub("", text)
     lines = [line for line in text.splitlines() if not _INJECTION_PATTERN.search(line)]
     text = "\n".join(lines)
@@ -59,8 +47,7 @@ def sanitize_feedback(text: str, max_chars: int = 1000) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Helpers for cleaning up result files between runs and finding any plots
-# that a script produced.
+# Helpers
 # ---------------------------------------------------------------------------
 
 def cleanup_artifacts():
@@ -81,22 +68,17 @@ def cleanup_artifacts():
 
 
 def get_generated_plots():
-    """Return a sorted list of image files produced by the last run."""
+    """Return a sorted list of image/PDF files produced by the last run."""
     plots = []
     if os.path.exists(_PLOTS_DIR):
         for f in os.listdir(_PLOTS_DIR):
-            if f.lower().endswith((".png", ".jpg", ".jpeg")):
+            if f.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
                 plots.append(os.path.join(_PLOTS_DIR, f))
     return sorted(plots)
 
 
 # ---------------------------------------------------------------------------
 # Pre-execution safety scan
-#
-# Before we run any LLM-generated script we check its source code for
-# patterns that have no legitimate place in an OpenAeroStruct simulation.
-# If anything suspicious is found we abort and show the user exactly which
-# line triggered the block.
 # ---------------------------------------------------------------------------
 
 _DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
@@ -159,10 +141,6 @@ _DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 
 def check_script_safety(code: str) -> list[str]:
-    """
-    Scan code line-by-line against _DANGEROUS_PATTERNS.
-    Returns a list of violation strings (empty = safe).
-    """
     violations = []
     for lineno, line in enumerate(code.splitlines(), start=1):
         stripped = line.strip()
@@ -176,10 +154,6 @@ def check_script_safety(code: str) -> list[str]:
 
 # ---------------------------------------------------------------------------
 # Conversation history helper
-#
-# Flattens the message history into a plain transcript so the router and
-# coder understand follow-up messages in context. Code blobs are excluded
-# by default to keep the prompt compact.
 # ---------------------------------------------------------------------------
 
 def build_conversation_context(messages: list) -> str:
@@ -191,20 +165,71 @@ def build_conversation_context(messages: list) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Vagueness help card — shown when the router flags is_vague: true
+# ---------------------------------------------------------------------------
+
+_DV_REFERENCE = """
+**Available design variables you can specify:**
+
+| Category | Variable | Description |
+|---|---|---|
+| Flight | `alpha` | Angle of attack [deg] |
+| Geometry | `twist_cp` | Spanwise twist B-spline control points [deg] |
+| Geometry | `chord_cp` | Chord scaling B-spline control points |
+| Geometry | `taper` | Taper ratio (tip/root chord) |
+| Geometry | `sweep` | Leading-edge sweep angle [deg] |
+| Geometry | `dihedral` | Dihedral angle [deg] |
+| Geometry | `xshear_cp` | Generalised sweep (x-shear B-spline CPs) [m] |
+| Geometry | `zshear_cp` | Generalised dihedral (z-shear B-spline CPs) [m] |
+| Struct (tube) | `thickness_cp` | Tube wall thickness B-spline CPs [m] |
+| Struct (tube) | `radius_cp` | Tube outer radius B-spline CPs [m] |
+| Struct (wingbox) | `spar_thickness_cp` | Spar wall thickness CPs [m] |
+| Struct (wingbox) | `skin_thickness_cp` | Skin thickness CPs [m] |
+| Struct (wingbox) | `t_over_c_cp` | Thickness-to-chord ratio CPs |
+| Aerostructural | `fuel_mass` | Fuel mass [kg] (wingbox fuel loop) |
+| Aerostructural | `alpha_maneuver` | Maneuver AoA [deg] (wingbox 2-point) |
+
+**Example well-formed requests:**
+- *"Minimize drag on a rect wing with span=12m, root_chord=2m, at Mach 0.5. DVs: alpha and twist_cp. Constraint: CL=0.5."*
+- *"Compute CL/CD polars for a CRM wing at Mach 0.3–0.8, alpha -5 to 15 deg."*
+- *"Aerostructural tube optimization on a CRM wing at Mach 0.84, minimize fuelburn. DVs: twist_cp, thickness_cp. Constraints: failure≤0, L=W."*
+"""
+
+
+def show_plot(plot_path: str):
+    if plot_path.lower().endswith(".pdf"):
+        st.download_button(
+            label=f"📥 {os.path.basename(plot_path)}",
+            data=open(plot_path, "rb").read(),
+            file_name=os.path.basename(plot_path),
+            mime="application/pdf",
+        )
+    else:
+        st.image(plot_path)
+
+
+def show_vagueness_card(missing_info: str):
+    """Render a structured clarification card in the chat."""
+    st.warning("#### The agent needs more information before it can run.")
+    st.markdown(f"**What's missing:**\n\n{missing_info}")
+    with st.expander("💡 What can I specify? (design variable reference)", expanded=False):
+        st.markdown(_DV_REFERENCE)
+    st.info("Please reply with the missing details and the agent will proceed.")
+
+
+# ---------------------------------------------------------------------------
 # Streamlit app setup
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="OpenAeroStruct Agent V3", layout="wide")
+st.set_page_config(page_title="OpenAeroStruct Agent", layout="wide")
 
-# Streamlit re-runs the entire script on every interaction, so we keep the
-# chat history and stop-flag in session_state so they survive across re-runs.
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "stop_run" not in st.session_state:
     st.session_state["stop_run"] = False
 
 # ---------------------------------------------------------------------------
-# Sidebar — model selection and controls
+# Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.title("Configuration")
 provider = st.sidebar.selectbox("Provider", ["Gemini API", "Ollama"])
@@ -220,10 +245,10 @@ if st.sidebar.button("Clear Conversation"):
     cleanup_artifacts()
     st.rerun()
 
-st.title("OpenAeroStruct-LLM-Agent")
+st.title("OpenAeroStruct — LLM Agent")
 
 # ---------------------------------------------------------------------------
-# Replay the conversation so it's visible when the page loads or re-runs.
+# Replay conversation history
 # ---------------------------------------------------------------------------
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -236,10 +261,10 @@ for message in st.session_state.messages:
         if "plots" in message:
             for plot_path in message["plots"]:
                 if os.path.exists(plot_path):
-                    st.image(plot_path)
+                    show_plot(plot_path)
 
 # ---------------------------------------------------------------------------
-# Main chat loop — handle a new message from the user.
+# Main chat loop
 # ---------------------------------------------------------------------------
 user_prompt = st.chat_input("Enter your design request...")
 
@@ -255,8 +280,6 @@ if user_prompt:
 
     st.session_state["stop_run"] = False
 
-    # Build the full transcript so the router and coder understand follow-ups
-    # ("now increase the span to 15m") in the context of prior turns.
     conversation_context = build_conversation_context(st.session_state.messages)
 
     with st.chat_message("assistant"):
@@ -284,18 +307,24 @@ if user_prompt:
 
             router_placeholder.empty()
 
-            blueprints = routing_data.get("blueprints", ["aero_rect_or_CRM.py"])
-            reason = routing_data.get("reason", "No reason provided")
+            blueprints = routing_data.get("blueprints", ["aero_opt.py"])
+            reason     = routing_data.get("reason", "No reason provided")
 
             is_vague = routing_data.get("is_vague", False)
             if is_vague:
-                clarification_msg = routing_data.get(
-                    "missing_info", "Could you give me more detail about what you'd like to do?"
+                missing_info = routing_data.get(
+                    "missing_info",
+                    "Please provide more detail about your design request."
                 )
-                st.warning(f"### Clarification Needed\n{clarification_msg}")
+                show_vagueness_card(missing_info)
+                # Store a clean summary in history (no DV table — keeps history compact)
+                clarification_msg = (
+                    f"#### Clarification needed\n\n{missing_info}\n\n"
+                    "_Please reply with the missing details._"
+                )
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": f"### Clarification Needed\n{clarification_msg}",
+                    "content": clarification_msg,
                 })
                 st.stop()
 
@@ -311,6 +340,7 @@ if user_prompt:
             feedback = "Initial generation"
             final_code = ""
             final_summary = ""
+
             while attempt < max_retries:
                 if st.session_state.get("stop_run", False):
                     st.warning("Agent stopped by user.")
@@ -318,8 +348,6 @@ if user_prompt:
 
                 st.markdown(f"**Attempt {attempt + 1} of {max_retries}**")
 
-                # Create the placeholder here, after the attempt label, so the
-                # live stream appears directly below "Attempt X of X".
                 code_stream_placeholder = st.empty()
                 streamed_text = ""
                 code, reasoning = "", ""
@@ -337,7 +365,6 @@ if user_prompt:
                         streamed_text += chunk
                         code_stream_placeholder.markdown(f"```\n{streamed_text}\n```")
 
-                # Clear the live stream; final code appears in the expander below.
                 code_stream_placeholder.empty()
 
                 final_code = code
@@ -349,7 +376,7 @@ if user_prompt:
                 with st.expander(f"Generated Code (Attempt {attempt + 1})", expanded=False):
                     st.code(code, language="python")
 
-                # Safety scan — block the script if dangerous patterns are found.
+                # Safety scan
                 violations = check_script_safety(code)
                 if violations:
                     violation_text = "\n".join(f"- {v}" for v in violations)
@@ -369,12 +396,8 @@ if user_prompt:
                     result = execute_run(_GEN_SCRIPT, timeout=120)
 
                 if result.exit_code == 0:
-                    st.success("Execution completed successfully.")
+                    st.success("✅ Execution completed successfully.")
 
-                    # -------------------------------------------------------
-                    # Read the database — check both generated_run_out and
-                    # the parent output dir as a fallback.
-                    # -------------------------------------------------------
                     possible_paths = [
                         os.path.join(_GEN_RUN_DIR, "aero.db"),
                         os.path.join(_GEN_RUN_DIR, "aerostruct.db"),
@@ -387,8 +410,6 @@ if user_prompt:
                     for path in possible_paths:
                         if os.path.exists(path):
                             summary = summarize_optimization(path)
-                            # summarize_optimization returns an error string
-                            # starting with "Error" when it can't read the file.
                             if not summary.startswith("Error"):
                                 db_summary = summary
                                 break
@@ -397,17 +418,13 @@ if user_prompt:
                     final_summary = db_summary
 
                     plots = get_generated_plots()
-                    for plot in plots:
-                        st.image(plot)
-
-                    if not plots:
+                    if plots:
+                        st.write("#### Results")
+                        for plot_path in plots:
+                            show_plot(plot_path)
+                    else:
                         st.info("No plots were generated by this run.")
 
-                    # ----------------------------------------------------------
-                    # Step 3 — Decide whether we're done.
-                    # Optimisation runs need the solver to converge; plain
-                    # analysis runs just need a clean exit code.
-                    # ----------------------------------------------------------
                     is_optimization = "run_driver()" in code
                     converged = any(
                         m in result.stdout
@@ -416,7 +433,7 @@ if user_prompt:
 
                     if is_optimization:
                         if converged:
-                            st.write("Optimization Converged!")
+                            st.write("✅ Optimization converged.")
                             success = True
                             break
                         else:
@@ -426,21 +443,34 @@ if user_prompt:
                                 f"Stdout tail:\n{sanitize_feedback(result.stdout, max_chars=400)}"
                             )
                     else:
-                        st.write("Analysis Completed!")
+                        st.write("✅ Analysis completed.")
                         success = True
                         break
                 else:
-                    st.error("Python Error Occurred")
+                    st.error("❌ Python error occurred.")
                     st.code(result.stderr[-500:], language="text")
                     feedback = f"Python Execution Error:\n{sanitize_feedback(result.stderr, max_chars=1000)}"
 
                 attempt += 1
 
+        # ------------------------------------------------------------------
+        # Final status message (outside the thought expander)
+        # ------------------------------------------------------------------
         if success:
-            assistant_content = "### Optimization Successful\nI have generated and executed the requested design optimization."
+            is_optimization = "run_driver()" in final_code
+            task_word = "Optimization" if is_optimization else "Analysis"
+            assistant_content = (
+                f"### ✅ {task_word} Complete\n"
+                f"The script ran successfully. Results and plots are shown above."
+            )
             st.markdown(assistant_content)
         else:
-            assistant_content = "### Optimization Failed\nThe agent was unable to converge on a working script within the retry limit."
+            assistant_content = (
+                "### ❌ Agent could not complete the task\n"
+                f"Failed after {max_retries} attempt(s). "
+                "Check the error output above — you may need to rephrase your request "
+                "or provide additional constraints."
+            )
             st.error(assistant_content)
 
         st.session_state.messages.append({

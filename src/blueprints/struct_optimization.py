@@ -31,6 +31,7 @@ os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 # =============================================================================
 # Only num_y is needed — no aerodynamic mesh resolution required.
 # num_twist_cp is unused structurally but required by generate_mesh for CRM.
+# generate_mesh returns TWO values for CRM — always unpack as (mesh, twist_cp).
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 7,
@@ -45,8 +46,23 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
-# CRITICAL: thickness_cp must be declared here to use it as a design variable.
-# Material properties set here — modify E, G, yield, safety_factor to match the user's scenario.
+# CRITICAL: Structural DVs (thickness_cp, radius_cp) MUST be declared here first.
+# Material properties set here — modify E, G, yield, safety_factor as needed.
+#
+# FULL STRUCTURAL DV CATALOG for tube FEM (from God Document):
+# -----------------------------------------------
+#   KEY               TYPE    DESCRIPTION
+#   thickness_cp      array   Tube wall thickness B-spline CPs [m]. Shape=(n_cp,).
+#                             Controls the tube wall thickness spanwise.
+#                             Directly affects structural mass and stress.
+#   radius_cp         array   Tube outer radius B-spline CPs [m]. Shape=(n_cp,).
+#                             Controls the tube cross-section radius spanwise.
+#                             Use EITHER thickness_cp OR radius_cp (or both).
+#                             Requires "radius_cp" key here AND add_design_var() below.
+#
+# NOTE: There are NO geometry DVs (twist_cp, chord_cp, etc.) in structural-only
+# optimization — the mesh is fixed and only structural sizing is optimized.
+# t_over_c_cp is included below for intersection checking, not as a DV.
 # === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
@@ -54,13 +70,14 @@ surf_dict = {
     "fem_model_type": "tube",
     "mesh": mesh,
 
-    # Structural design variable — must be declared here
+    # Structural DVs — declare here to use in add_design_var()
     "thickness_cp": np.ones((3)) * 0.1,     # Tube wall thickness B-spline CPs [m]
+    #"radius_cp": np.ones((3)) * 0.05,      # Tube radius B-spline CPs [m] — optional DV
 
-    # Airfoil thickness (used for intersection check)
+    # Airfoil thickness ratio — used for intersection check constraint
     "t_over_c_cp": np.array([0.15]),
 
-    # Material properties
+    # Material properties — modify to match the user's material
     "E": 70.0e9,            # Young's modulus [Pa]
     "G": 30.0e9,            # Shear modulus [Pa]
     "yield": 500.0e6,       # Yield stress [Pa]
@@ -113,24 +130,38 @@ prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
-# Available DV paths:
-#   "wing.thickness_cp"   — tube wall thickness B-spline CPs [m]  (declared in surf_dict)
-#   "wing.radius_cp"      — tube radius CPs [m]                   (requires radius_cp in surf_dict)
+# FULL DV PATH REFERENCE for this blueprint (structural only, subsystem = "wing"):
+#
+#   PATH                  SURFACE DICT KEY    DESCRIPTION
+#   "wing.thickness_cp"   "thickness_cp"      Tube wall thickness CPs [m]
+#                                             lower bound typically 0.001–0.01 m
+#                                             upper bound typically 0.1–0.5 m
+#   "wing.radius_cp"      "radius_cp"         Tube outer radius CPs [m]
+#                                             Uncomment "radius_cp" in surf_dict first.
+#                                             lower bound typically 0.01 m
+#                                             upper bound typically 0.5 m
+#
+# NOTE: There are no geometry DVs in structural-only optimization.
+# The mesh is fixed — only cross-section sizing is optimized.
 
 prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, ref=1e-1)
+# prob.model.add_design_var("wing.radius_cp", lower=0.01, upper=0.5, ref=1e-1)
 
 # --- Constraints ---
-# Available constraint paths:
-#   "wing.failure"              — structural failure index (KS aggregated), upper=0
+# FULL CONSTRAINT PATH REFERENCE:
+#   "wing.failure"              — KS-aggregated structural failure index, upper=0
+#                                 Failure index > 0 means material has yielded.
 #   "wing.thickness_intersects" — prevents tube wall from exceeding airfoil thickness, upper=0
-#   "wing.structural_mass"      — total structural mass [kg]
+#                                 Always include this when using thickness_cp.
+#   "wing.structural_mass"      — total structural mass [kg] (can be used as constraint or objective)
 
 prob.model.add_constraint("wing.failure", upper=0.0)
 prob.model.add_constraint("wing.thickness_intersects", upper=0.0)
 
 # --- Objective ---
-# Common objectives:
+# FULL OBJECTIVE PATH REFERENCE:
 #   "wing.structural_mass"  — minimize structural mass [kg]
+#                             scaler=1e-5 normalizes to order-of-magnitude ~1
 prob.model.add_objective("wing.structural_mass", scaler=1e-5)
 # === AGENT EDITABLE SECTION END ===
 
