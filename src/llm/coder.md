@@ -33,25 +33,52 @@ Only modify code inside these markers. Leave everything else unchanged — inclu
 
 ## CRITICAL RULES
 
-**Code correctness**
-- Use the safe unpack pattern for `generate_mesh` — it returns a plain array for `rect` wings but a tuple for CRM/uCRM. Use `isinstance` to handle both:
-  ```python
-  _r = generate_mesh(mesh_dict)
-  mesh = _r[0] if isinstance(_r, tuple) else _r
-  twist_cp = _r[1] if isinstance(_r, tuple) else np.zeros(mesh_dict.get("num_twist_cp", 5))
-  ```
-- Assign `prob.driver` **before** calling `add_design_var`, `add_constraint`, or `add_objective`.
-- `ScipyOptimizeDriver` accepts **exactly one** objective. Aggregate multiple quantities with `ExecComp` before calling `add_objective`.
-- Never set `"distributed_fuel_weight": True` in tube spar scripts — it requires wingbox-only keys (`Wf_reserve`).
+These points are NOT covered inside the blueprints and violating them will crash the script.
 
-**Surface dict integrity**
-- Never delete or rename surface dict keys — preserve all keys including `k_lam`, `c_max_t`, `CL0`, `CD0`, `mesh`, etc.
-- `"mesh"` must always be present in the surface dict.
+**1. Do not add imports that are not already in the blueprint.**
+Only use modules already imported at the top of the blueprint.
 
-**Blueprint-specific paths**
-- In multipoint blueprints, geometry subsystem is `wing_geom`. DV paths must be `wing_geom.<var>`, not `wing.<var>`.
-- `struct_optimization` uses `SpatialBeamAlone` — never substitute `AerostructPoint`.
-- Wingbox `t_over_c` path is `wing.geometry.t_over_c_cp`, not `wing.t_over_c_cp`.
+**2. CRM mesh always returns a tuple — unpack correctly.**
+`generate_mesh` returns `(mesh, twist_cp)` for CRM/uCRM but a plain array for `rect`. Use `isinstance` to handle both:
+```python
+_r = generate_mesh(mesh_dict)
+mesh = _r[0] if isinstance(_r, tuple) else _r
+twist_cp = _r[1] if isinstance(_r, tuple) else np.zeros(mesh_dict.get("num_twist_cp", 5))
+```
+
+**3. Never delete or rename surface dict keys.**
+Preserve all keys from the blueprint including `k_lam`, `c_max_t`, `CL0`, `CD0`, `mesh`, `distributed_fuel_weight`, `exact_failure_constraint`, etc. Only change values — never remove keys. Missing keys cause `KeyError` at setup.
+
+**4. `"mesh"` must always be present in the surface dict.**
+The blueprint sets `"mesh": mesh` in the surface dict. Keep this line. If you reconstruct the surface dict, always include it:
+```python
+_r = generate_mesh(mesh_dict)
+mesh = _r[0] if isinstance(_r, tuple) else _r
+surface = {
+    "mesh": mesh,   # NEVER remove this key
+    ...
+}
+```
+
+**5. Never set `"distributed_fuel_weight": True` in tube spar scripts.**
+This is a wingbox-only flag requiring `Wf_reserve`. In tube spar scripts it must always be `False`.
+
+**6. `ScipyOptimizeDriver` accepts exactly one objective.**
+Aggregate multiple quantities with `ExecComp` before calling `add_objective`.
+
+**7. Use `ExecComp` for derived quantities not available as model outputs.**
+`om.ExecComp("expr")` evaluates an algebraic expression over connected inputs. Connect sources with `prob.model.connect(...)` and reference the output as the objective or constraint path.
+
+**8. Assign `prob.driver` before `add_design_var`, `add_constraint`, `add_objective`.**
+The blueprint already has this order — do not move these calls above the driver assignment.
+
+**9. Multipoint blueprint: geometry subsystem is `wing_geom`.**
+DV paths must be `wing_geom.twist_cp`, `wing_geom.taper`, etc. — NOT `wing.<var>`.
+
+**10. `struct_optimization` uses `SpatialBeamAlone` — never substitute `AerostructPoint`.**
+
+**11. Wingbox `t_over_c` path requires `.geometry.`**
+Use `wing.geometry.t_over_c_cp` — NOT `wing.t_over_c_cp`.
 
 ---
 

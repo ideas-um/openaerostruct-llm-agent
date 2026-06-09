@@ -29,7 +29,7 @@ ALLOWED_TOP_LEVEL_IMPORTS: frozenset = frozenset({
     "pandas",
     # Safe standard-library modules for computation scripts
     "os", "sys", "warnings", "math", "functools", "itertools",
-    "collections", "typing", "pathlib",
+    "collections", "typing", "pathlib", "re"
 })
 
 # AST-level call names that must never appear, even if the module is allowed.

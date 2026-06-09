@@ -36,7 +36,7 @@ _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 # MAX_RETRIES intentionally higher than app.py (3) so the benchmark measures
 # the true capability ceiling rather than the production retry limit.
 MAX_RETRIES = 5
-NUM_REPS    = 1  # Number of repetitions per test case
+NUM_REPS    = 10  # Number of repetitions per test case
 
 # Safety scan, sanitize_feedback, and check_script_safety are defined once
 # in agent_logic.py and used there. benchmark.py delegates to run_agent().
