@@ -179,9 +179,10 @@ def generate_code_stream(
                 transient_hit = True
                 logger.warning(
                     f"Gemini transient error during stream (attempt {gemini_attempt + 1}/"
-                    f"{_GEMINI_MAX_RETRIES}): {exc}. "
-                    f"Waiting {_GEMINI_RETRY_WAIT}s before retry."
+                    f"{GEMINI_STREAM_MAX_RETRIES}): {exc}. "
+                    f"Waiting {GEMINI_STREAM_RETRY_WAIT}s before retry."
                 )
+                
                 yield f"\n\n⚠️ Gemini API overloaded — retrying in {GEMINI_STREAM_RETRY_WAIT}s (attempt {gemini_attempt + 1}/{GEMINI_STREAM_MAX_RETRIES})...\n"
                 time.sleep(GEMINI_STREAM_RETRY_WAIT)
             else:

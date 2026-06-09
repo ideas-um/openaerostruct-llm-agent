@@ -1,6 +1,5 @@
 import os
 import csv
-import re
 import sys
 import time
 import json
@@ -8,29 +7,20 @@ import shutil
 import statistics
 from datetime import datetime
 
-# Add src to sys.path so we can import internal modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from llm.router import route_intent
-from llm.coder import generate_code
-from tools.executor import execute_run
+from agent_logic import run_agent, AgentResult
 
 # ---------------------------------------------------------------------------
 # __file__-relative paths
 #
-# benchmark.py lives in  src/tools/
-# _TOOLS_DIR  = src/tools/
+# benchmark.py lives in  src/  (same level as app.py)
 # _SRC_DIR    = src/
 # _PROJECT_DIR = project root (parent of src/)
-#
-# Generated scripts write artifacts to src/openaerostruct_out/  (same as app.py)
-# Benchmark history/results go to  <project_root>/benchmark_run_out/
 # ---------------------------------------------------------------------------
-_TOOLS_DIR   = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR     = os.path.dirname(_TOOLS_DIR)
+_SRC_DIR     = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 
-_INPUT_FILE  = os.path.join(_TOOLS_DIR, "test_queries.csv")
+_INPUT_FILE  = os.path.join(_SRC_DIR, "tools", "test_queries.csv")
 
 # Where generated scripts write their output — project_root/openaerostruct_out/
 _OAS_OUT_DIR  = os.path.join(_PROJECT_DIR, "openaerostruct_out")
@@ -40,7 +30,7 @@ _GEN_RUN_DIR  = os.path.join(_OAS_OUT_DIR, "generated_run_out")
 # Where the benchmark runner writes results and history
 _BENCH_OUT_DIR = os.path.join(_PROJECT_DIR, "benchmark_run_out")
 
-# Temporary script file used by the benchmark (mirrors app.py's generated_run.py)
+# Temporary script file (same dir as benchmark, mirrors generated_run.py)
 _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 
 # MAX_RETRIES intentionally higher than app.py (3) so the benchmark measures
@@ -48,105 +38,8 @@ _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 MAX_RETRIES = 5
 NUM_REPS    = 10  # Number of repetitions per test case
 
-# ---------------------------------------------------------------------------
-# Convergence detection — mirrors app.py logic exactly
-# ---------------------------------------------------------------------------
-_CONVERGENCE_STDOUT = ["Optimization terminated successfully", "Optimization Complete"]
-
-# ---------------------------------------------------------------------------
-# Sanitize stderr/stdout before feeding back to the LLM — mirrors app.py
-# ---------------------------------------------------------------------------
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
-_INJECTION_PATTERN = re.compile(
-    r"(?i)("
-    r"ignore\s+(previous|all|prior)\s+(instructions?|prompts?|context)"
-    r"|act\s+as\s+(a|an)\s+"
-    r"|forget\s+(everything|all)"
-    r"|you\s+are\s+now\s"
-    r"|disregard\s+(all|previous|prior)"
-    r"|new\s+instruction"
-    r"|\bsystem\s*:"
-    r")"
-)
-
-def sanitize_feedback(text: str, max_chars: int = 1000) -> str:
-    text = _ANSI_ESCAPE.sub("", text)
-    lines = [l for l in text.splitlines() if not _INJECTION_PATTERN.search(l)]
-    text = "\n".join(lines)
-    return text[-max_chars:] if len(text) > max_chars else text
-
-# ---------------------------------------------------------------------------
-# Safety scan — mirrors app.py check_script_safety() exactly
-# ---------------------------------------------------------------------------
-_DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("Destructive shell command (rm/rmdir/del)",
-     re.compile(r"""(?x)
-         os\.system\s*\(.*\brm\b
-         | subprocess\.\w+\s*\(.*\brm\b
-         | shutil\.rmtree
-         | os\.remove\s*\(
-         | os\.unlink\s*\(
-         | os\.rmdir\s*\(
-     """, re.IGNORECASE)),
-
-    ("Network access (socket/requests/urllib/httpx)",
-     re.compile(r"""(?x)
-         import\s+socket
-         | from\s+socket\s+import
-         | import\s+requests
-         | from\s+requests\s+import
-         | import\s+urllib
-         | from\s+urllib\s+import
-         | import\s+httpx
-         | import\s+aiohttp
-         | urllib\.request
-         | requests\.(get|post|put|delete|patch|head|session)
-         | socket\.connect
-         | socket\.bind
-     """, re.IGNORECASE)),
-
-    ("Arbitrary subprocess / shell execution",
-     re.compile(r"""(?x)
-         subprocess\.(run|call|Popen|check_output|check_call)\s*\(
-         | os\.system\s*\(
-         | os\.popen\s*\(
-         | commands\.getoutput
-     """, re.IGNORECASE)),
-
-    ("File write outside allowed output paths",
-     re.compile(r"""(?x)
-         open\s*\(\s*['"]/(?!.*openaerostruct_out)
-         | open\s*\(\s*['"]\.\.
-         | open\s*\(\s*['"]~
-     """, re.IGNORECASE)),
-
-    ("Dynamic code execution (eval/exec/__import__)",
-     re.compile(r"""(?x)
-         \beval\s*\(
-         | \bexec\s*\(
-         | \b__import__\s*\(
-         | \bcompile\s*\(.*exec
-     """, re.IGNORECASE)),
-
-    ("Environment / credential access",
-     re.compile(r"""(?x)
-         os\.environ\s*\[
-         | os\.getenv\s*\(
-         | keyring\.
-     """, re.IGNORECASE)),
-]
-
-
-def check_script_safety(code: str) -> list[str]:
-    violations = []
-    for lineno, line in enumerate(code.splitlines(), start=1):
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        for label, pattern in _DANGEROUS_PATTERNS:
-            if pattern.search(line):
-                violations.append(f"Line {lineno} [{label}]: `{stripped}`")
-    return violations
+# Safety scan, sanitize_feedback, and check_script_safety are defined once
+# in agent_logic.py and used there. benchmark.py delegates to run_agent().
 
 # ---------------------------------------------------------------------------
 # CSV helpers
@@ -217,40 +110,17 @@ def _copy_artifacts(attempt_dir: str):
                 print(f"    Warning: could not copy {src}: {e}")
 
 # ---------------------------------------------------------------------------
-# db summary helper — mirrors app.py logic
-# ---------------------------------------------------------------------------
-def _find_db_summary(rep_dir: str) -> str:
-    """Look for an optimization DB in the standard locations and return a summary string."""
-    try:
-        from tools.db_reader import summarize_optimization
-    except ImportError:
-        return ""
-    possible_paths = [
-        os.path.join(_GEN_RUN_DIR, "aero.db"),
-        os.path.join(_GEN_RUN_DIR, "aerostruct.db"),
-        os.path.join(_GEN_RUN_DIR, "struct.db"),
-        os.path.join(_OAS_OUT_DIR, "aero.db"),
-        os.path.join(_OAS_OUT_DIR, "aerostruct.db"),
-        os.path.join(_OAS_OUT_DIR, "struct.db"),
-    ]
-    for path in possible_paths:
-        if os.path.exists(path):
-            summary = summarize_optimization(path)
-            if not summary.startswith("Error"):
-                return summary
-    return ""
-
-# ---------------------------------------------------------------------------
-# Single-repetition runner (core logic mirrors app.py while loop exactly)
+# Single-repetition runner — delegates to agent_logic.run_agent()
 # ---------------------------------------------------------------------------
 def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
     """
     Run one repetition of a single test case.
-    Returns a dict with all per-rep metrics.
-    rep_dir: directory to store per-attempt files for this repetition.
-    """
-    case_id = q["id"]
+    Routing is done here (benchmark needs the routing metrics); execution is
+    fully delegated to run_agent() in agent_logic so the logic is identical
+    to what app.py uses.
 
+    Returns a dict with all per-rep metrics.
+    """
     # ------------------------------------------------------------------
     # 1. Intent routing
     # ------------------------------------------------------------------
@@ -265,12 +135,13 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
 
         is_vague = routing.get("is_vague", False)
         if is_vague:
-            print(f"    WARNING: router marked query as vague — counted as routing failure")
+            print("    WARNING: router marked query as vague — counted as routing failure")
             blueprints = blueprints or [json.loads(q["expected_blueprints"])[0]]
 
-        def _norm(name):
+        def _norm(name: str) -> str:
             name = name.strip()
             return name if name.endswith(".py") else name + ".py"
+
         expected_set = set(_norm(b) for b in json.loads(q["expected_blueprints"]))
         selected_set = set(blueprints)
         routing_correct = (expected_set == selected_set)
@@ -281,117 +152,74 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         print(f"    Routing Error: {e}  — falling back to expected blueprint")
 
     # ------------------------------------------------------------------
-    # 2. Iterative generation + execution — mirrors app.py while loop
+    # 2. Iterative generation + execution via shared agent_logic
     # ------------------------------------------------------------------
-    exit_code   = -1
-    converged   = "n/a"
-    success     = False
-    attempt     = 0
-    feedback    = "Initial generation"
-    final_code  = ""
-    error_logs  = []
-
     os.makedirs(rep_dir, exist_ok=True)
 
-    while attempt < MAX_RETRIES:
-        print(f"    Attempt {attempt + 1}/{MAX_RETRIES}...")
-        _cleanup_run_artifacts()
+    # Per-attempt logging callback so the benchmark still captures artifacts.
+    attempt_dirs: dict[int, str] = {}
 
-        try:
-            code, reasoning = generate_code(
-                q["query"], blueprints, feedback,
-                model_name=model, provider=provider,
-            )
-            final_code = code
+    def bench_callback(event: str, data: dict):
+        attempt = data.get("attempt", 0)
 
-            attempt_dir = os.path.join(rep_dir, f"attempt_{attempt + 1}")
+        if event == "attempt_start":
+            _cleanup_run_artifacts()
+            attempt_dir = os.path.join(rep_dir, f"attempt_{attempt}")
             os.makedirs(attempt_dir, exist_ok=True)
+            attempt_dirs[attempt] = attempt_dir
+            print(f"    Attempt {attempt}/{data['max_retries']}...")
+
+        elif event == "code_ready":
+            attempt_dir = attempt_dirs.get(attempt, rep_dir)
             with open(os.path.join(attempt_dir, "reasoning.txt"), "w") as fh:
-                fh.write(reasoning)
+                fh.write(data.get("reasoning", ""))
             with open(os.path.join(attempt_dir, "code.py"), "w") as fh:
-                fh.write(code)
+                fh.write(data.get("code", ""))
 
-            # Safety scan — mirrors app.py check_script_safety() block
-            violations = check_script_safety(code)
-            if violations:
-                violation_text = "\n".join(f"- {v}" for v in violations)
-                err_msg = f"[attempt {attempt + 1}] Safety check failed:\n{violation_text}"
-                error_logs.append(err_msg)
-                print(f"      BLOCKED by safety scan. Retrying with feedback...")
-                feedback = (
-                    f"Your previous script was blocked by the safety checker. "
-                    f"Do NOT include any of the following:\n{violation_text}\n"
-                    f"Rewrite the script without these patterns."
-                )
-                attempt += 1
-                continue
-
-            with open(_BENCH_SCRIPT, "w") as fh:
-                fh.write(code)
-
-            exec_res = execute_run(_BENCH_SCRIPT, timeout=120)
-            exit_code = exec_res.exit_code
-
-            with open(os.path.join(attempt_dir, "execution.log"), "w") as fh:
-                fh.write(f"--- STDOUT ---\n{exec_res.stdout}\n\n--- STDERR ---\n{exec_res.stderr}")
-
+        elif event in ("exec_success", "exec_error", "no_converge"):
+            attempt_dir = attempt_dirs.get(attempt, rep_dir)
+            # Copy artifacts produced by this attempt
             _copy_artifacts(attempt_dir)
+            # Write execution log if exit code info is available
+            log_path = os.path.join(attempt_dir, "execution.log")
+            if event == "exec_error":
+                with open(log_path, "w") as fh:
+                    fh.write(f"--- STDERR TAIL ---\n{data.get('stderr_tail', '')}")
+            if event == "exec_success":
+                with open(log_path, "w") as fh:
+                    fh.write(f"--- DB SUMMARY ---\n{data.get('db_summary', '')}")
 
-            if exit_code == 0:
-                is_optimization = "run_driver()" in code
-                converged_bool  = any(m in exec_res.stdout for m in _CONVERGENCE_STDOUT)
+        elif event == "done":
+            status = "SUCCESS" if data["success"] else f"FAILED after {data['attempts']} attempts"
+            print(f"      {status}")
 
-                if is_optimization:
-                    if converged_bool:
-                        converged = "yes"
-                        success = True
-                        print(f"      SUCCESS — converged on attempt {attempt + 1}")
-                        break
-                    else:
-                        converged = "no"
-                        err_msg = f"[attempt {attempt + 1}] Optimization did not converge"
-                        error_logs.append(err_msg)
-                        print(f"      Ran but did not converge. Retrying with feedback...")
-                        db_summary = _find_db_summary(rep_dir)
-                        feedback = (
-                            f"Optimization failed to converge."
-                            + (f" Results so far:\n{db_summary}\n\n" if db_summary else "\n\n")
-                            + f"Stdout tail:\n{sanitize_feedback(exec_res.stdout, max_chars=400)}"
-                        )
-                else:
-                    converged = "n/a"
-                    success = True
-                    print(f"      SUCCESS — analysis complete on attempt {attempt + 1}")
-                    break
-            else:
-                err_msg = f"[attempt {attempt + 1}] {exec_res.stderr[-600:]}"
-                error_logs.append(err_msg)
-                print(f"      FAILED (exit {exit_code}). Retrying with error feedback...")
-                feedback = f"Python Execution Error:\n{sanitize_feedback(exec_res.stderr, max_chars=1000)}"
+    result: AgentResult = run_agent(
+        user_prompt=q["query"],
+        blueprints=blueprints,
+        model_name=model,
+        provider=provider,
+        max_retries=MAX_RETRIES,
+        stream=False,
+        callback=bench_callback,
+        gen_script_path=_BENCH_SCRIPT,
+    )
 
-        except Exception as e:
-            err_msg = f"[attempt {attempt + 1}] Generation/Execution Error: {e}"
-            error_logs.append(err_msg)
-            print(f"      Generation/Execution Error: {e}")
-            feedback = f"Code generation or execution error: {sanitize_feedback(str(e), max_chars=500)}"
-
-        attempt += 1
-
-    if not success:
-        print(f"    FAILED after {MAX_RETRIES} attempts.")
-
-    if final_code:
+    if result.final_code:
         with open(os.path.join(rep_dir, "final_code.py"), "w") as fh:
-            fh.write(final_code)
+            fh.write(result.final_code)
+
+    # Map AgentResult.converged back to the exit_code convention used by the
+    # benchmark CSV (exit_code = 0 on any successful run, -1 on failure).
+    exit_code = 0 if result.success else -1
 
     return {
         "selected_blueprints": selected,
         "routing_correct":     routing_correct,
-        "attempts":            attempt + 1,
+        "attempts":            result.attempts,
         "exit_code":           exit_code,
-        "converged":           converged,
-        "success":             success,
-        "error_logs":          error_logs,
+        "converged":           result.converged,
+        "success":             result.success,
+        "error_logs":          result.error_logs,
     }
 
 # ---------------------------------------------------------------------------

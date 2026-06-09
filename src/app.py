@@ -1,173 +1,22 @@
-import base64
-import streamlit as st
-import streamlit.components.v1 as components
 import os
-import re
-import shutil
+import streamlit as st
 
 from llm.router import route_intent_stream
-from llm.coder import generate_code_stream
-from tools.executor import execute_run
-from tools.db_reader import summarize_optimization
-
-# ---------------------------------------------------------------------------
-# Resolve absolute paths relative to this file so the app works regardless
-# of the working directory it's launched from.
-# ---------------------------------------------------------------------------
-_SRC_DIR     = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_DIR = os.path.dirname(_SRC_DIR)
-_OUT_DIR     = os.path.join(_PROJECT_DIR, "openaerostruct_out")
-_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
-_GEN_RUN_DIR = os.path.join(_OUT_DIR, "generated_run_out")
-_LOG_FILE    = os.path.join(_SRC_DIR, "agent_backend.log")
-_GEN_SCRIPT  = os.path.join(_SRC_DIR, "generated_run.py")
-
-# ---------------------------------------------------------------------------
-# Safety: strip ANSI colour codes and block prompt-injection attempts.
-# ---------------------------------------------------------------------------
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
-_INJECTION_PATTERN = re.compile(
-    r"(?i)("
-    r"ignore\s+(previous|all|prior)\s+(instructions?|prompts?|context)"
-    r"|act\s+as\s+(a|an)\s+"
-    r"|forget\s+(everything|all)"
-    r"|you\s+are\s+now\s"
-    r"|disregard\s+(all|previous|prior)"
-    r"|new\s+instruction"
-    r"|\bsystem\s*:"
-    r")"
+from agent_logic import (
+    run_agent,
+    cleanup_artifacts,
+    get_generated_plots,
 )
 
-
-def sanitize_feedback(text: str, max_chars: int = 1000) -> str:
-    text = _ANSI_ESCAPE.sub("", text)
-    lines = [line for line in text.splitlines() if not _INJECTION_PATTERN.search(line)]
-    text = "\n".join(lines)
-    return text[-max_chars:] if len(text) > max_chars else text
-
+# ---------------------------------------------------------------------------
+# Resolve absolute paths relative to this file
+# ---------------------------------------------------------------------------
+_SRC_DIR  = os.path.dirname(os.path.abspath(__file__))
+_LOG_FILE = os.path.join(_SRC_DIR, "agent_backend.log")
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Design variable reference card (shown when router flags is_vague)
 # ---------------------------------------------------------------------------
-
-def cleanup_artifacts():
-    """Delete plots and output files left over from the previous run."""
-    for p in [_OUT_DIR, _PLOTS_DIR, _GEN_RUN_DIR]:
-        if os.path.exists(p):
-            for filename in os.listdir(p):
-                file_path = os.path.join(p, filename)
-                try:
-                    if os.path.isfile(file_path) or os.path.islink(file_path):
-                        os.unlink(file_path)
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path)
-                except Exception as e:
-                    print(f'Failed to delete {file_path}. Reason: {e}')
-        else:
-            os.makedirs(p, exist_ok=True)
-
-
-def get_generated_plots():
-    """Return a sorted list of image/PDF files produced by the last run."""
-    plots = []
-    if os.path.exists(_PLOTS_DIR):
-        for f in os.listdir(_PLOTS_DIR):
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".pdf")):
-                plots.append(os.path.join(_PLOTS_DIR, f))
-    return sorted(plots)
-
-
-# ---------------------------------------------------------------------------
-# Pre-execution safety scan
-# ---------------------------------------------------------------------------
-
-_DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("Destructive shell command (rm/rmdir/del)",
-     re.compile(r"""(?x)
-         os\.system\s*\(.*\brm\b
-         | subprocess\.\w+\s*\(.*\brm\b
-         | shutil\.rmtree
-         | os\.remove\s*\(
-         | os\.unlink\s*\(
-         | os\.rmdir\s*\(
-     """, re.IGNORECASE)),
-
-    ("Network access (socket/requests/urllib/httpx)",
-     re.compile(r"""(?x)
-         import\s+socket
-         | from\s+socket\s+import
-         | import\s+requests
-         | from\s+requests\s+import
-         | import\s+urllib
-         | from\s+urllib\s+import
-         | import\s+httpx
-         | import\s+aiohttp
-         | urllib\.request
-         | requests\.(get|post|put|delete|patch|head|session)
-         | socket\.connect
-         | socket\.bind
-     """, re.IGNORECASE)),
-
-    ("Arbitrary subprocess / shell execution",
-     re.compile(r"""(?x)
-         subprocess\.(run|call|Popen|check_output|check_call)\s*\(
-         | os\.system\s*\(
-         | os\.popen\s*\(
-         | commands\.getoutput
-     """, re.IGNORECASE)),
-
-    ("File write outside allowed output paths",
-     re.compile(r"""(?x)
-         open\s*\(\s*['"]/(?!.*openaerostruct_out)
-         | open\s*\(\s*['"]\.\.
-         | open\s*\(\s*['"]~
-     """, re.IGNORECASE)),
-
-    ("Dynamic code execution (eval/exec/__import__)",
-     re.compile(r"""(?x)
-         \beval\s*\(
-         | \bexec\s*\(
-         | \b__import__\s*\(
-         | \bcompile\s*\(.*exec
-     """, re.IGNORECASE)),
-
-    ("Environment / credential access",
-     re.compile(r"""(?x)
-         os\.environ\s*\[
-         | os\.getenv\s*\(
-         | keyring\.
-     """, re.IGNORECASE)),
-]
-
-
-def check_script_safety(code: str) -> list[str]:
-    violations = []
-    for lineno, line in enumerate(code.splitlines(), start=1):
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            continue
-        for label, pattern in _DANGEROUS_PATTERNS:
-            if pattern.search(line):
-                violations.append(f"Line {lineno} [{label}]: `{stripped}`")
-    return violations
-
-
-# ---------------------------------------------------------------------------
-# Conversation history helper
-# ---------------------------------------------------------------------------
-
-def build_conversation_context(messages: list) -> str:
-    lines = []
-    for msg in messages:
-        role = "User" if msg["role"] == "user" else "Assistant"
-        lines.append(f"{role}: {msg['content']}")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Vagueness help card — shown when the router flags is_vague: true
-# ---------------------------------------------------------------------------
-
 _DV_REFERENCE = """
 **Available design variables you can specify:**
 
@@ -196,7 +45,12 @@ _DV_REFERENCE = """
 """
 
 
+# ---------------------------------------------------------------------------
+# Display helpers
+# ---------------------------------------------------------------------------
+
 def show_plot(plot_path: str):
+    """Display a plot file inline. PDFs get a download button; PNGs render inline."""
     if plot_path.lower().endswith(".pdf"):
         st.download_button(
             label=f"📥 {os.path.basename(plot_path)}",
@@ -215,6 +69,14 @@ def show_vagueness_card(missing_info: str):
     with st.expander("💡 What can I specify? (design variable reference)", expanded=False):
         st.markdown(_DV_REFERENCE)
     st.info("Please reply with the missing details and the agent will proceed.")
+
+
+def build_conversation_context(messages: list) -> str:
+    lines = []
+    for msg in messages:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        lines.append(f"{role}: {msg['content']}")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +179,6 @@ if user_prompt:
                     "Please provide more detail about your design request."
                 )
                 show_vagueness_card(missing_info)
-                # Store a clean summary in history (no DV table — keeps history compact)
                 clarification_msg = (
                     f"#### Clarification needed\n\n{missing_info}\n\n"
                     "_Please reply with the missing details._"
@@ -334,130 +195,75 @@ if user_prompt:
             # Step 2 — Iterative code generation and execution
             # ------------------------------------------------------------------
             st.write("### 2. Iterative Generation & Execution")
-            max_retries = 3
-            attempt = 0
-            success = False
-            feedback = "Initial generation"
-            final_code = ""
-            final_summary = ""
 
-            while attempt < max_retries:
+            # Per-attempt stream state (keyed by attempt number)
+            _stream_state: dict[int, dict] = {}
+
+            def ui_callback(event: str, data: dict):
+                """Translate agent_logic events into Streamlit UI updates."""
                 if st.session_state.get("stop_run", False):
-                    st.warning("Agent stopped by user.")
-                    break
+                    return
 
-                st.markdown(f"**Attempt {attempt + 1} of {max_retries}**")
+                attempt = data.get("attempt", 0)
 
-                code_stream_placeholder = st.empty()
-                streamed_text = ""
-                code, reasoning = "", ""
+                if event == "attempt_start":
+                    st.markdown(f"**Attempt {data['attempt']} of {data['max_retries']}**")
+                    _stream_state[attempt] = {"placeholder": st.empty(), "text": ""}
 
-                for chunk in generate_code_stream(
-                    conversation_context,
-                    blueprints,
-                    feedback,
-                    model_name=model_name,
-                    provider=provider,
-                ):
-                    if isinstance(chunk, tuple):
-                        code, reasoning = chunk
-                    else:
-                        streamed_text += chunk
-                        code_stream_placeholder.markdown(f"```\n{streamed_text}\n```")
+                elif event == "code_chunk":
+                    state = _stream_state.get(attempt, {})
+                    state["text"] = state.get("text", "") + data["chunk"]
+                    state.get("placeholder", st.empty()).markdown(
+                        f"```\n{state['text']}\n```"
+                    )
 
-                code_stream_placeholder.empty()
+                elif event == "code_ready":
+                    state = _stream_state.get(attempt, {})
+                    if "placeholder" in state:
+                        state["placeholder"].empty()
+                    st.info(f"**Coder's Reasoning:** {data['reasoning']}")
+                    with st.expander(f"Generated Code (Attempt {attempt})", expanded=False):
+                        st.code(data["code"], language="python")
 
-                final_code = code
-                st.info(f"**Coder's Reasoning:** {reasoning}")
-
-                with open(_GEN_SCRIPT, "w", encoding="utf-8") as f:
-                    f.write(code)
-
-                with st.expander(f"Generated Code (Attempt {attempt + 1})", expanded=False):
-                    st.code(code, language="python")
-
-                # Safety scan
-                violations = check_script_safety(code)
-                if violations:
-                    violation_text = "\n".join(f"- {v}" for v in violations)
+                elif event == "safety_blocked":
+                    violation_text = "\n".join(f"- {v}" for v in data["violations"])
                     st.error(
                         f"**Safety check failed — script blocked.**\n\n"
                         f"The following dangerous patterns were detected:\n{violation_text}"
                     )
-                    feedback = (
-                        f"Your previous script was blocked by the safety checker. "
-                        f"Do NOT include any of the following:\n{violation_text}\n"
-                        f"Rewrite the script without these patterns."
-                    )
-                    attempt += 1
-                    continue
 
-                with st.spinner("Executing OpenAeroStruct..."):
-                    result = execute_run(_GEN_SCRIPT, timeout=120)
-
-                if result.exit_code == 0:
+                elif event == "exec_success":
                     st.success("✅ Execution completed successfully.")
-
-                    possible_paths = [
-                        os.path.join(_GEN_RUN_DIR, "aero.db"),
-                        os.path.join(_GEN_RUN_DIR, "aerostruct.db"),
-                        os.path.join(_GEN_RUN_DIR, "struct.db"),
-                        os.path.join(_OUT_DIR, "aero.db"),
-                        os.path.join(_OUT_DIR, "aerostruct.db"),
-                        os.path.join(_OUT_DIR, "struct.db"),
-                    ]
-                    db_summary = "No optimization database found."
-                    for path in possible_paths:
-                        if os.path.exists(path):
-                            summary = summarize_optimization(path)
-                            if not summary.startswith("Error"):
-                                db_summary = summary
-                                break
-
-                    st.markdown(db_summary)
-                    final_summary = db_summary
-
-                    plots = get_generated_plots()
-                    if plots:
+                    st.markdown(data["db_summary"])
+                    if data["plots"]:
                         st.write("#### Results")
-                        for plot_path in plots:
+                        for plot_path in data["plots"]:
                             show_plot(plot_path)
                     else:
                         st.info("No plots were generated by this run.")
 
-                    is_optimization = "run_driver()" in code
-                    converged = any(
-                        m in result.stdout
-                        for m in ["Optimization terminated successfully", "Optimization Complete"]
-                    )
-
-                    if is_optimization:
-                        if converged:
-                            st.write("✅ Optimization converged.")
-                            success = True
-                            break
-                        else:
-                            st.warning("Script ran but the optimiser did not converge. Retrying with feedback.")
-                            feedback = (
-                                f"Optimization failed to converge. Results so far:\n{db_summary}\n\n"
-                                f"Stdout tail:\n{sanitize_feedback(result.stdout, max_chars=400)}"
-                            )
-                    else:
-                        st.write("✅ Analysis completed.")
-                        success = True
-                        break
-                else:
+                elif event == "exec_error":
                     st.error("❌ Python error occurred.")
-                    st.code(result.stderr[-500:], language="text")
-                    feedback = f"Python Execution Error:\n{sanitize_feedback(result.stderr, max_chars=1000)}"
+                    st.code(data["stderr_tail"], language="text")
 
-                attempt += 1
+                elif event == "no_converge":
+                    st.warning("Script ran but the optimiser did not converge. Retrying with feedback.")
+
+            result = run_agent(
+                user_prompt=conversation_context,
+                blueprints=blueprints,
+                model_name=model_name,
+                provider=provider,
+                max_retries=3,
+                stream=True,
+                callback=ui_callback,
+            )
 
         # ------------------------------------------------------------------
-        # Final status message (outside the thought expander)
+        # Final status (outside the thought expander)
         # ------------------------------------------------------------------
-        if success:
-            is_optimization = "run_driver()" in final_code
+        if result.success:
+            is_optimization = "run_driver()" in result.final_code
             task_word = "Optimization" if is_optimization else "Analysis"
             assistant_content = (
                 f"### ✅ {task_word} Complete\n"
@@ -467,7 +273,7 @@ if user_prompt:
         else:
             assistant_content = (
                 "### ❌ Agent could not complete the task\n"
-                f"Failed after {max_retries} attempt(s). "
+                f"Failed after {result.attempts} attempt(s). "
                 "Check the error output above — you may need to rephrase your request "
                 "or provide additional constraints."
             )
@@ -476,7 +282,7 @@ if user_prompt:
         st.session_state.messages.append({
             "role": "assistant",
             "content": assistant_content,
-            "code": final_code,
-            "summary": final_summary,
+            "code": result.final_code,
+            "summary": result.final_summary,
             "plots": get_generated_plots(),
         })
