@@ -33,9 +33,11 @@ mesh_dict = {
     "symmetry": True,
     "num_twist_cp": 5,
 }
-# === AGENT EDITABLE SECTION END ===
 
 mesh, twist_cp = generate_mesh(mesh_dict)
+# === AGENT EDITABLE SECTION END ===
+
+
 
 # =============================================================================
 # 2. SURFACE DEFINITION

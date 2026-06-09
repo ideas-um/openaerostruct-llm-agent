@@ -42,8 +42,9 @@ Events emitted:
   "safety_blocked"  {"violations": list[str]}
   "exec_success"    {"db_summary": str, "plots": list[str]}
   "exec_error"      {"stderr_tail": str}
-  "no_converge"     {"db_summary": str, "stdout_tail": str}
-  "done"            {"success": bool, "attempts": int}
+  "no_converge"       {"db_summary": str, "stdout_tail": str}
+  "no_converge_final" {"db_summary": str, "error_logs": list[str]}  # all retries exhausted, not a code bug
+  "done"              {"success": bool, "attempts": int}
 """
 
 from __future__ import annotations
@@ -239,6 +240,31 @@ class AgentResult:
 # Core agent loop
 # ---------------------------------------------------------------------------
 
+def _get_relaxation_suggestion(user_prompt: str, error_logs: list, model_name: str, provider: str) -> str:
+    """Ask the LLM for concrete bound/DV relaxations given the convergence history."""
+    from llm.config import get_llm_response
+    prompt = (
+        "An OpenAeroStruct optimization ran successfully (no Python errors) but the "
+        "optimiser failed to converge after multiple attempts. This is a problem setup "
+        "issue, not a code bug.\n\n"
+        f"Original user request:\n{user_prompt}\n\n"
+        "Convergence history:\n" + "\n".join(error_logs) + "\n\n"
+        "Suggest 2–3 specific, concrete changes to the problem setup that would make "
+        "it more likely to converge. Focus on: relaxing DV bounds, changing initial "
+        "values, adding or removing design variables, loosening constraints, or "
+        "adjusting flight conditions. Be specific with numbers. Keep the response "
+        "under 150 words."
+    )
+    try:
+        return get_llm_response(prompt, model_name, provider=provider)
+    except Exception:
+        return (
+            "Could not generate a suggestion automatically. Consider: "
+            "widening DV bounds, starting from a feasible initial point, "
+            "or relaxing constraints."
+        )
+
+
 def _build_feedback(error_history: list[str]) -> str:
     """
     Concatenate the full error history into a single feedback string for the LLM.
@@ -266,17 +292,20 @@ def run_agent(
     stream: bool = False,
     callback: Optional[Callable[[str, dict], None]] = None,
     gen_script_path: Optional[str] = None,
+    prior_error_logs: Optional[list[str]] = None,
 ) -> AgentResult:
     """
     Run the full agent loop: generate code → safety-scan → execute → evaluate.
 
     Parameters
     ----------
-    user_prompt     : The user's design request (and any conversation context).
-    blueprints      : List of blueprint filenames chosen by the router.
-    model_name      : LLM model identifier.
-    provider        : "Gemini API" or "Ollama".
-    max_retries     : Maximum number of generation+execution attempts.
+    user_prompt      : The user's design request (and any conversation context).
+    blueprints       : List of blueprint filenames chosen by the router.
+    model_name       : LLM model identifier.
+    provider         : "Gemini API" or "Ollama".
+    max_retries      : Maximum number of generation+execution attempts.
+    prior_error_logs : Error logs from a previous run (e.g. a relaxation retry).
+                       Pre-populates error_history so the LLM sees what already failed.
     stream          : If True, use generate_code_stream (yields chunks via callback).
     callback        : Optional function(event, data) called at each stage for UI updates.
     gen_script_path : Override the path where the generated script is written.
@@ -298,7 +327,10 @@ def run_agent(
             callback(event, {"attempt": attempt + 1, **data})
 
     result = AgentResult()
-    error_history: list[str] = []   # accumulates ALL errors across attempts
+    # Seed error_history with any logs from a prior run (e.g. convergence failure
+    # from the previous attempt before the user approved a relaxation retry).
+    # This ensures the LLM sees what already failed, not just the new instructions.
+    error_history: list[str] = list(prior_error_logs) if prior_error_logs else []
 
     attempt = 0
 
@@ -368,9 +400,43 @@ def run_agent(
             emit("exec_success", {"db_summary": db_summary, "plots": plots})
 
             is_optimization = "run_driver()" in code
-            converged_bool = any(
-                m in exec_result.stdout
-                for m in ["Optimization terminated successfully", "Optimization Complete"]
+
+            # Convergence detection — check stdout for explicit failure signals
+            # FIRST, then look for success signals. Failure takes priority.
+            _stdout_lower = exec_result.stdout.lower()
+
+            # Explicit failure indicators — any of these means not converged
+            _failed = any(
+                m in _stdout_lower
+                for m in [
+                    "optimization failed",
+                    "exit mode 8",       # positive directional derivative
+                    "exit mode 9",       # iteration limit exceeded
+                    "exit mode 6",       # inequality constraints incompatible
+                    "exit mode 7",       # equality constraints incompatible
+                    "maximum number of function",
+                    "positive directional derivative",
+                ]
+            )
+
+            # Explicit success indicators
+            _succeeded = any(
+                m in _stdout_lower
+                for m in [
+                    "optimization terminated successfully",
+                    "optimization complete",
+                    "optimization successful",
+                    "exit mode 0",       # SLSQP success
+                ]
+            )
+
+            # If explicit success found and no failure, converged.
+            # If no signal at all (some OAS versions are silent), fall back to
+            # DB existence — but only if there's no failure signal.
+            _no_signal = not _succeeded and not _failed
+            converged_bool = (
+                (_succeeded and not _failed)
+                or (_no_signal and db_summary and "No optimization" not in db_summary)
             )
 
             if is_optimization:
@@ -381,18 +447,23 @@ def run_agent(
                     emit("done", {"success": True, "attempts": result.attempts})
                     return result
                 else:
+                    # Convergence failure = problem setup issue, not a code bug.
+                    # Stop immediately — retrying with the same code will not help
+                    # and risks the LLM rewriting working code and introducing errors.
                     result.converged = "no"
+                    result.attempts = attempt + 1
                     err = (
-                        f"Optimization did not converge.\n"
+                        f"Optimization did not converge (Exit mode 8/9 or FAILED signal).\n"
                         + (f"DB summary:\n{db_summary}\n\n" if db_summary and "No optimization" not in db_summary else "")
                         + f"Stdout tail:\n{sanitize_feedback(exec_result.stdout, max_chars=400)}"
                     )
-                    error_history.append(err)
                     result.error_logs.append(f"[attempt {attempt + 1}] {err}")
                     emit("no_converge", {
                         "db_summary": db_summary,
                         "stdout_tail": sanitize_feedback(exec_result.stdout, max_chars=400),
                     })
+                    # Break immediately — go to no_converge_final handling below
+                    break
             else:
                 result.converged = "n/a"
                 result.success = True
@@ -408,7 +479,23 @@ def run_agent(
 
         attempt += 1
 
-    # Exhausted all retries
+    # Exhausted all retries — distinguish convergence failure from code failure
     result.attempts = attempt
+    if result.converged == "no":
+        # Script ran without errors but optimiser never converged — this is a
+        # problem setup issue, not a code bug. Generate a relaxation suggestion
+        # here (in agent_logic) so both app.py and benchmark.py get it without
+        # each having to implement their own LLM call.
+        suggestion = _get_relaxation_suggestion(
+            user_prompt=user_prompt,
+            error_logs=result.error_logs,
+            model_name=model_name,
+            provider=provider,
+        )
+        emit("no_converge_final", {
+            "db_summary": result.final_summary,
+            "error_logs": result.error_logs,
+            "suggestion": suggestion,
+        })
     emit("done", {"success": False, "attempts": result.attempts})
     return result
