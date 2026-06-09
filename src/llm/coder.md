@@ -43,12 +43,24 @@ Use `wing.geometry.t_over_c_cp` — NOT `wing.t_over_c_cp`.
 
 **5. No deleting or "cleaning up" unknown surface dict fields**
 Preserve all keys including `k_lam`, `c_max_t`, `CL0`, `CD0`, etc.
+The `"mesh"` key is the most critical — it must always be present in the surface dict. Removing it causes `KeyError: 'mesh'` at setup and the script will crash immediately.
+
+**8. `"mesh"` must always be in the surface dict**
+The blueprint sets `"mesh": mesh` inside the surface dictionary. You must keep this line when editing the surface dict. If you reconstruct the surface dict from scratch, always include it:
+```python
+_mesh_result = generate_mesh(mesh_dict)
+mesh = _mesh_result[0] if isinstance(_mesh_result, tuple) else _mesh_result
+surface = {
+    "mesh": mesh,   # NEVER remove this key
+    ...
+}
+```
 
 **6. `ScipyOptimizeDriver` accepts exactly one objective**
 Calling `add_objective()` more than once will error. When combining multiple aerostructural points, aggregate the per-point quantities into a single scalar first (e.g. using `ExecComp`) and minimise that.
 
 **7. Use `ExecComp` to define derived quantities that don't yet exist as model outputs**
-`om.ExecComp("expr", var=init_val)` creates a component that evaluates an algebraic expression over connected inputs. Use it whenever you need a quantity that is computed from existing outputs but is not directly available in the system — e.g. summing per-point fuelburn values, computing a weighted average, or a new variable like static margin. Connect the source paths to its inputs with `prob.model.connect(...)`, then reference its output as the objective or constraint path.
+`om.ExecComp("expr", var=init_val)` creates a component that evaluates an algebraic expression over connected inputs. Use it whenever you need a quantity that is computed from existing outputs but is not directly available as a path — e.g. summing per-point fuelbURN values, computing a weighted average, or forming a composite objective. Connect the source paths to its inputs with `prob.model.connect(...)`, then reference its output as the objective or constraint path.
 
 ---
 
@@ -82,6 +94,9 @@ matplotlib.rcParams.update({
 })
 ```
 
+**Axis labels — mandatory on every plot:**
+Every axis must have a descriptive label with units in square brackets, e.g. `ax.set_xlabel("Spanwise station")`, `ax.set_ylabel("Twist [deg]")`. Never leave an axis unlabelled.
+
 **Lines:** Primary trend lines use `color="black"`, `linewidth=1.5`.
 **Multi-case comparison:** Use the `viridis` colormap or distinct markers for different runs/conditions.
 **Noisy/raw data:** Plot raw signal in `lightgrey`, `linewidth=0.5`, `alpha=0.8`; overlay trend in black.
@@ -99,10 +114,10 @@ ax.legend(
 **Layout and export:**
 ```python
 fig.tight_layout()
-fig.savefig(os.path.join(_PLOTS_DIR, "plot_name.pdf"), bbox_inches="tight")
+fig.savefig(os.path.join(_PLOTS_DIR, "plot_name.png"), bbox_inches="tight", dpi=150)
 ```
 
-Save as `.pdf` for vector quality. The app also accepts `.png` — use `.png` only when a raster format is specifically needed (e.g. spanwise colour maps).
+Always save as `.png`. Never use `.pdf`.
 
 **Bar charts:** Each bar must have a distinct colour or hatch. Never stack two quantities on the same bar without a twinx axis. Use `ax.bar_label()` to annotate bar heights so values are readable without squinting.
 

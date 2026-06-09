@@ -50,16 +50,8 @@ _DV_REFERENCE = """
 # ---------------------------------------------------------------------------
 
 def show_plot(plot_path: str):
-    """Display a plot file inline. PDFs get a download button; PNGs render inline."""
-    if plot_path.lower().endswith(".pdf"):
-        st.download_button(
-            label=f"📥 {os.path.basename(plot_path)}",
-            data=open(plot_path, "rb").read(),
-            file_name=os.path.basename(plot_path),
-            mime="application/pdf",
-        )
-    else:
-        st.image(plot_path)
+    """Display a plot image inline."""
+    st.image(plot_path)
 
 
 def show_vagueness_card(missing_info: str):
