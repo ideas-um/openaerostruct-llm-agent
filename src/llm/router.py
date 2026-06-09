@@ -45,8 +45,7 @@ def _load_system_prompt() -> str:
 def _parse_routing_response(response: str) -> dict:
     """
     Parse the router's JSON response and validate blueprint names.
-    Accepts 1 or 2 blueprints; silently drops any beyond the second or
-    any name not in VALID_BLUEPRINTS.
+    Accepts 1 blueprint; drops any name not in VALID_BLUEPRINTS.
     """
     try:
         cleaned = response.strip()
@@ -64,7 +63,7 @@ def _parse_routing_response(response: str) -> dict:
             data["blueprints"] = [data["blueprint"]]
 
         raw = data.get("blueprints", [])
-        validated = [b for b in raw if b in VALID_BLUEPRINTS][:2]  # max 2
+        validated = [b for b in raw if b in VALID_BLUEPRINTS][:1]  # max 1
         data["blueprints"] = validated if validated else ["aero_opt.py"]
         return data
     except Exception as e:
