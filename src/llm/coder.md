@@ -80,6 +80,15 @@ DV paths must be `wing_geom.twist_cp`, `wing_geom.taper`, etc. — NOT `wing.<va
 **11. Wingbox `t_over_c` path requires `.geometry.`**
 Use `wing.geometry.t_over_c_cp` — NOT `wing.t_over_c_cp`.
 
+**12. Always attach a `SqliteRecorder` to the driver — never omit it.**
+This is required for the UI to display optimization results. Place it after `prob.driver` is assigned and before `prob.setup()`:
+```python
+recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
+prob.driver.add_recorder(recorder)
+prob.driver.recording_options["includes"] = ["*"]
+```
+This applies even when crossbreeding 2 or more blueprints — do not drop it.
+
 ---
 
 ## PATHS — ABSOLUTE PATHS ONLY

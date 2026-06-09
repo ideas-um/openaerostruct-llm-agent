@@ -5,6 +5,9 @@ from google import genai
 from google.genai import types
 import ollama
 from dotenv import load_dotenv
+import time as _time
+import threading as _threading
+import collections as _collections
 
 # Load .env — try several candidate locations so the key is found regardless
 # of which directory the script is run from:
@@ -65,6 +68,36 @@ def is_gemini_transient_error(exc: Exception) -> bool:
     return any(pattern in msg for pattern in _GEMINI_TRANSIENT_MESSAGES)
 
 
+# ---------------------------------------------------------------------------
+# Proactive rate limiter — keeps Gemini calls under RPM_LIMIT per minute.
+# Both get_llm_response() (non-streaming) and get_llm_client() (streaming)
+# call _gemini_rate_limit() before dispatching, so the cap is enforced on
+# every path automatically. No changes needed elsewhere.
+# ---------------------------------------------------------------------------
+
+RPM_LIMIT   = 14    # stay one below the hard 15-RPM cap for safety
+_RL_WINDOW  = 60.0  # sliding window in seconds
+_rl_lock    = _threading.Lock()
+_rl_times: _collections.deque = _collections.deque()
+
+
+def _gemini_rate_limit() -> None:
+    """Block until issuing a Gemini call would not exceed RPM_LIMIT/min."""
+    while True:
+        with _rl_lock:
+            now = _time.monotonic()
+            # Drop timestamps older than the window
+            while _rl_times and _rl_times[0] <= now - _RL_WINDOW:
+                _rl_times.popleft()
+            if len(_rl_times) < RPM_LIMIT:
+                _rl_times.append(now)
+                return  # under the cap — proceed
+            # Oldest call drops out of the window after this many seconds
+            wait = _RL_WINDOW - (now - _rl_times[0]) + 0.05
+        # Sleep outside the lock so other threads can check concurrently
+        _time.sleep(wait)
+
+
 logging.basicConfig(
     filename=_LOG_FILE,
     level=logging.INFO,
@@ -90,6 +123,7 @@ def get_llm_client(provider: str, model_name: str):
     streaming APIs directly. Returns None for providers that don't support it.
     """
     if "Gemini" in provider:
+        _gemini_rate_limit()
         return _make_gemini_client()
     return None
 
@@ -127,6 +161,7 @@ def get_llm_response(prompt: str, model_name: str, system_prompt: str = None, pr
 
     if "Gemini" in provider:
         import time
+        _gemini_rate_limit()
         client = _make_gemini_client()
         config = types.GenerateContentConfig(
             system_instruction=system_prompt or None,
