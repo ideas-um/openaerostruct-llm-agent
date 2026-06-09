@@ -266,18 +266,18 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         is_vague = routing.get("is_vague", False)
         if is_vague:
             print(f"    WARNING: router marked query as vague — counted as routing failure")
-            blueprints = blueprints or [q["expected_blueprints"].split(",")[0].strip()]
+            blueprints = blueprints or [json.loads(q["expected_blueprints"])[0]]
 
         def _norm(name):
             name = name.strip()
             return name if name.endswith(".py") else name + ".py"
-        expected_set = set(_norm(b) for b in q["expected_blueprints"].split(","))
+        expected_set = set(_norm(b) for b in json.loads(q["expected_blueprints"]))
         selected_set = set(blueprints)
         routing_correct = (expected_set == selected_set)
         print(f"    Routing: {selected}  (correct={routing_correct})")
     except Exception as e:
         selected = "ERROR"
-        blueprints = [q["expected_blueprints"].split(",")[0].strip()]
+        blueprints = [json.loads(q["expected_blueprints"])[0]]
         print(f"    Routing Error: {e}  — falling back to expected blueprint")
 
     # ------------------------------------------------------------------

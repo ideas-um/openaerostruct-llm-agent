@@ -44,6 +44,12 @@ Use `wing.geometry.t_over_c_cp` — NOT `wing.t_over_c_cp`.
 **5. No deleting or "cleaning up" unknown surface dict fields**
 Preserve all keys including `k_lam`, `c_max_t`, `CL0`, `CD0`, etc.
 
+**6. `ScipyOptimizeDriver` accepts exactly one objective**
+Calling `add_objective()` more than once will error. When combining multiple aerostructural points, aggregate the per-point quantities into a single scalar first (e.g. using `ExecComp`) and minimise that.
+
+**7. Use `ExecComp` to define derived quantities that don't yet exist as model outputs**
+`om.ExecComp("expr", var=init_val)` creates a component that evaluates an algebraic expression over connected inputs. Use it whenever you need a quantity that is computed from existing outputs but is not directly available in the system — e.g. summing per-point fuelburn values, computing a weighted average, or a new variable like static margin. Connect the source paths to its inputs with `prob.model.connect(...)`, then reference its output as the objective or constraint path.
+
 ---
 
 ## PATHS — ABSOLUTE PATHS ONLY
@@ -93,10 +99,10 @@ ax.legend(
 **Layout and export:**
 ```python
 fig.tight_layout()
-fig.savefig(os.path.join(_PLOTS_DIR, "plot_name.png"), bbox_inches="tight", dpi=150)
+fig.savefig(os.path.join(_PLOTS_DIR, "plot_name.pdf"), bbox_inches="tight")
 ```
 
-Use `.png` such that the images can be shown in the app without issue. 
+Save as `.pdf` for vector quality. The app also accepts `.png` — use `.png` only when a raster format is specifically needed (e.g. spanwise colour maps).
 
 **Bar charts:** Each bar must have a distinct colour or hatch. Never stack two quantities on the same bar without a twinx axis. Use `ax.bar_label()` to annotate bar heights so values are readable without squinting.
 
