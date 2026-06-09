@@ -74,26 +74,59 @@ if __name__ == "__main__":
     # =============================================================================
     # 3. SURFACE DEFINITION
     # =============================================================================
-    # Modify aerodynamic and geometric properties here.
-    # IMPORTANT: twist_cp, chord_cp, taper, sweep, dihedral are geometry modifiers.
-    # Include them here if you want them reflected in the analysis.
+    # This script performs ANALYSIS (run_model), not optimization (run_driver).
+    # Geometry parameters declared here define the fixed wing shape for the sweep.
+    # To test a different geometry, activate the desired keys below and set values.
+    #
+    # FULL GEOMETRY DV CATALOG (from God Document):
+    # -----------------------------------------------
+    # Any key declared here becomes part of the wing geometry passed to the Geometry
+    # group. For analysis sweeps these are fixed values, not optimized.
+    #
+    #   KEY               TYPE        DESCRIPTION
+    #   twist_cp          array       Spanwise twist B-spline CPs [deg]. Shape = (n_cp,).
+    #                                 Controls washout/washin along the span.
+    #   chord_cp          array       Chord scaling B-spline CPs. Shape = (n_cp,).
+    #                                 Scales the chord distribution spanwise.
+    #   xshear_cp         array       Spanwise x-shear (sweep) B-spline CPs [m]. Shape = (n_cp,).
+    #                                 Generalized sweep — shifts LE/TE x-coords spanwise.
+    #   zshear_cp         array       Spanwise z-shear (dihedral) B-spline CPs [m]. Shape = (n_cp,).
+    #                                 Generalized dihedral — shifts mesh z-coords spanwise.
+    #   taper             scalar      Taper ratio (tip_chord / root_chord). 1.0 = rectangular.
+    #   sweep             scalar      Leading-edge sweep angle [deg]. 0.0 = unswept.
+    #   dihedral          scalar      Dihedral angle [deg]. 0.0 = flat wing.
+    #   t_over_c_cp       array       Thickness-to-chord ratio B-spline CPs. Shape = (n_cp,).
+    #                                 Used for viscous/wave drag calculation — do not remove.
+    #
+    # NOTE: CL0, CD0, k_lam, c_max_t, with_viscous, with_wave are aerodynamic solver
+    # parameters, not geometry DVs. They affect drag bookkeeping and should not be removed.
     # === AGENT EDITABLE SECTION START ===
     surface = {
         "name": "wing",
         "symmetry": True,
         "S_ref_type": "wetted",
+
+        # --- Active geometry (modify values to test different shapes) ---
         "twist_cp": np.array([0.0, 0.0]),       # Spanwise twist [deg], 2 control points
         "t_over_c_cp": np.array([0.12]),         # Thickness-to-chord ratio
         "taper": 1.0,                            # Taper ratio (1.0 = rectangular)
         "sweep": 0.0,                            # Sweep angle [deg]
         "dihedral": 0.0,                         # Dihedral angle [deg]
-        "mesh": mesh,
-        "CL0": 0.0,
-        "CD0": 0.005,
-        "k_lam": 0.05,
-        "c_max_t": 0.303,
-        "with_viscous": True,
-        "with_wave": False,
+
+        # --- Optional geometry modifiers — uncomment to activate ---
+        #"chord_cp": np.ones(2),                 # Chord B-spline CPs (1.0 = no scaling)
+        #"xshear_cp": np.zeros(2),               # x-shear CPs [m] — generalized sweep
+        #"zshear_cp": np.zeros(2),               # z-shear CPs [m] — generalized dihedral
+
+        "mesh": mesh,                            # Mesh generated above — do not remove
+
+        # --- Aerodynamic solver parameters — do not remove ---
+        "CL0": 0.0,                              # Lift coefficient at zero AoA
+        "CD0": 0.005,                            # Profile drag coefficient (zero-lift drag)
+        "k_lam": 0.05,                           # Fraction of laminar flow (0.05 = 5%)
+        "c_max_t": 0.303,                        # Chordwise location of max thickness (NACA 4-digit: 0.303)
+        "with_viscous": True,                    # Include viscous drag in the analysis
+        "with_wave": False,                      # Include wave drag (transonic/supersonic only)
     }
     # === AGENT EDITABLE SECTION END ===
 

@@ -1,11 +1,15 @@
 import json
 import os
+import time
 import logging
-from .config import get_llm_response, log_token_usage
-try:
-    from .config import get_llm_client
-except ImportError:
-    get_llm_client = None
+from .config import (
+    get_llm_response,
+    get_llm_client,
+    log_token_usage,
+    is_gemini_transient_error,
+    GEMINI_STREAM_RETRY_WAIT,
+    GEMINI_STREAM_MAX_RETRIES,
+)
 
 logger = logging.getLogger("LLM_Backend")
 
@@ -22,7 +26,7 @@ _SKILLS_PATH = os.path.join(_SRC_DIR, "llm", "skills.md")
 VALID_BLUEPRINTS: frozenset = frozenset({
     "aero_analysis.py",
     "aero_multipoint.py",
-    "aero_rect.py",
+    "aero_opt.py",
     "aerostruct_tube.py",
     "aerostruct_wingbox.py",
     "struct_optimization.py",
@@ -37,7 +41,11 @@ def _load_system_prompt() -> str:
 
 
 def _parse_routing_response(response: str) -> dict:
-    """Parse the router's JSON response and validate blueprint names."""
+    """
+    Parse the router's JSON response and validate blueprint names.
+    Accepts 1 or 2 blueprints; silently drops any beyond the second or
+    any name not in VALID_BLUEPRINTS.
+    """
     try:
         cleaned = response.strip()
         if cleaned.startswith("```json"):
@@ -49,21 +57,27 @@ def _parse_routing_response(response: str) -> dict:
 
         data = json.loads(cleaned.strip())
 
+        # Accept singular 'blueprint' key as well
         if "blueprint" in data and "blueprints" not in data:
             data["blueprints"] = [data["blueprint"]]
 
         raw = data.get("blueprints", [])
-        validated = [b for b in raw if b in VALID_BLUEPRINTS]
-        data["blueprints"] = validated if validated else ["aero_rect.py"]
+        validated = [b for b in raw if b in VALID_BLUEPRINTS][:2]  # max 2
+        data["blueprints"] = validated if validated else ["aero_opt.py"]
         return data
     except Exception as e:
-        return {"blueprints": ["aero_rect.py"], "reason": f"Fallback due to parsing error: {e}"}
+        return {"blueprints": ["aero_opt.py"], "reason": f"Fallback due to parsing error: {e}"}
 
 
-def route_intent(user_prompt: str, model_name: str = "gemini-2.0-flash", provider: str = "Gemini API") -> dict:
+def route_intent(
+    user_prompt: str,
+    model_name: str = "gemini-2.0-flash",
+    provider: str = "Gemini API",
+) -> dict:
     """
     Non-streaming router: picks the right blueprint(s) for the user's request.
     Returns a dict with 'blueprints', 'reason', and optionally 'is_vague'/'missing_info'.
+    Transient retry is handled inside get_llm_response() in config.py.
     """
     system_prompt = _load_system_prompt()
     response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
@@ -84,11 +98,13 @@ def route_intent_stream(
                 routing_data = chunk   # final result
             else:
                 display(chunk)         # stream this to the UI
+
+    Retries on transient Gemini API errors without propagating them to the caller.
     """
     system_prompt = _load_system_prompt()
 
     try:
-        client = get_llm_client(provider, model_name) if get_llm_client else None
+        client = get_llm_client(provider, model_name)
     except Exception:
         client = None
 
@@ -109,22 +125,41 @@ def route_intent_stream(
     logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
     logger.info(f"--- USER PROMPT ---\n{user_prompt}")
 
-    full_response = ""
-    last_chunk = None
-    try:
-        for chunk in client.models.generate_content_stream(
-            model=model_name,
-            contents=user_prompt,
-            config=stream_config,
-        ):
-            last_chunk = chunk
-            text = chunk.text or ""
-            full_response += text
-            yield text
-    except Exception:
-        if not full_response:
-            full_response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
-            yield full_response
+    for gemini_attempt in range(GEMINI_STREAM_MAX_RETRIES):
+        full_response = ""
+        last_chunk = None
+        transient_hit = False
+
+        try:
+            for chunk in client.models.generate_content_stream(
+                model=model_name,
+                contents=user_prompt,
+                config=stream_config,
+            ):
+                last_chunk = chunk
+                text = chunk.text or ""
+                full_response += text
+                yield text
+
+        except Exception as exc:
+            if is_gemini_transient_error(exc) and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
+                transient_hit = True
+                logger.warning(
+                    f"Gemini transient error in stream/router (attempt {gemini_attempt + 1}/"
+                    f"{GEMINI_STREAM_MAX_RETRIES}): {exc}. "
+                    f"Waiting {GEMINI_STREAM_RETRY_WAIT}s before retry."
+                )
+                yield f"\n\n⚠️ Gemini API overloaded — retrying in {GEMINI_STREAM_RETRY_WAIT}s...\n"
+                time.sleep(GEMINI_STREAM_RETRY_WAIT)
+            else:
+                if not full_response:
+                    full_response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
+                    yield full_response
+
+        if transient_hit:
+            continue  # retry the entire stream
+
+        break  # stream completed without transient error
 
     logger.info(f"--- LLM RESPONSE ---\n{full_response}")
 

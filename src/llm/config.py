@@ -6,7 +6,29 @@ from google.genai import types
 import ollama
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env — try several candidate locations so the key is found regardless
+# of which directory the script is run from:
+#   1. project root  (parent of src/)
+#   2. src/          (one level up from this file's llm/ package)
+#   3. cwd           (wherever the caller launched from)
+_LLM_DIR_ENV    = os.path.dirname(os.path.abspath(__file__))   # src/llm/
+_SRC_DIR_ENV    = os.path.dirname(_LLM_DIR_ENV)                # src/
+_PROJECT_ROOT   = os.path.dirname(_SRC_DIR_ENV)                # project root
+_env_loaded_from = None
+for _env_candidate in [
+    os.path.join(_PROJECT_ROOT, ".env"),
+    os.path.join(_SRC_DIR_ENV,  ".env"),
+    os.path.join(os.getcwd(),   ".env"),
+]:
+    if os.path.exists(_env_candidate):
+        load_dotenv(_env_candidate, override=True, encoding="utf-8")
+        _env_loaded_from = _env_candidate
+        break
+
+# DEBUG — remove once API key issue is resolved
+_api_key_found = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
+print(f"[config] .env loaded from: {_env_loaded_from}")
+print(f"[config] API key found: {_api_key_found}  (GOOGLE_API_KEY={bool(os.getenv('GOOGLE_API_KEY'))}, GEMINI_API_KEY={bool(os.getenv('GEMINI_API_KEY'))})")
 
 # ---------------------------------------------------------------------------
 # Resolve paths relative to this file.
@@ -15,6 +37,33 @@ _LLM_DIR    = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR    = os.path.dirname(_LLM_DIR)
 _LOG_FILE   = os.path.join(_SRC_DIR, "agent_backend.log")
 _STATS_FILE = os.path.join(_SRC_DIR, "usage_stats.csv")
+
+# ---------------------------------------------------------------------------
+# Gemini streaming retry config — imported by coder.py and router.py.
+# get_llm_response() handles non-streaming retries internally; these
+# constants are only needed for the streaming paths that call the SDK
+# directly and therefore bypass get_llm_response().
+# ---------------------------------------------------------------------------
+GEMINI_STREAM_RETRY_WAIT    = 60  # seconds to wait before retrying a stream
+GEMINI_STREAM_MAX_RETRIES   = 3   # maximum stream retries per call
+
+_GEMINI_TRANSIENT_MESSAGES = (
+    "resource_exhausted",
+    "quota",
+    "rate limit",
+    "overloaded",
+    "503",
+    "429",
+    "service unavailable",
+    "too many requests",
+)
+
+
+def is_gemini_transient_error(exc: Exception) -> bool:
+    """Return True if the exception looks like a Gemini rate-limit / overload error."""
+    msg = str(exc).lower()
+    return any(pattern in msg for pattern in _GEMINI_TRANSIENT_MESSAGES)
+
 
 logging.basicConfig(
     filename=_LOG_FILE,

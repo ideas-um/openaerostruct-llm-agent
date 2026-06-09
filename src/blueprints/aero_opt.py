@@ -23,14 +23,20 @@ os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
-# Modify span, root_chord, and mesh resolution here.
+# wing_type controls which geometry is used:
+#   "rect"      — rectangular planform; requires "span" and "root_chord"
+#   "CRM"       — NASA Common Research Model built-in geometry; span/root_chord ignored;
+#                 generate_mesh returns (mesh, twist_cp) — both are unpacked below
+#
 # num_y must be an odd number.
+# num_twist_cp is used when we want to initialize twist as a design variable
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 19,            # Number of spanwise panels (must be odd)
     "num_x": 3,             # Number of chordwise panels
-    "wing_type": "rect",    # Always "rect" for this blueprint
+    "wing_type": "rect",    # "rect" or "CRM"
     "symmetry": True,
+    # --- rect-only parameters (ignored when wing_type="CRM") ---
     "span": 10.0,           # Full wingspan [m]
     "root_chord": 2.0,      # Root chord [m]
     "span_cos_spacing": 0.0,
@@ -38,18 +44,45 @@ mesh_dict = {
 }
 # === AGENT EDITABLE SECTION END ===
 
-mesh = generate_mesh(mesh_dict)
+# generate_mesh returns a tuple (mesh, twist_cp) for CRM, or just mesh for rect.
+# We handle both cases here so no code change is needed when switching wing_type.
+_mesh_result = generate_mesh(mesh_dict)
+if isinstance(_mesh_result, tuple):
+    mesh, _crm_twist_cp = _mesh_result   # CRM: unpack both
+else:
+    mesh = _mesh_result                  # rect: single array
+    _crm_twist_cp = None
 
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
-# CRITICAL: Any geometry parameter you want to use as a design variable (twist_cp,
-# chord_cp, taper, sweep, dihedral) MUST be declared here in the surface dict first.
-# If you add a design variable in Section 4 without declaring it here, the
-# Geometry group will not create that output and OpenMDAO will crash with:
-#   "Output not found for design variable 'wing.twist_cp'"
+# CRITICAL: Any geometry parameter you want to use as a design variable MUST be
+# declared here in the surface dict BEFORE it can be added via add_design_var().
+# If a DV is added in Section 4 without a matching key here, OpenMDAO will crash:
+#   "Output not found for design variable 'wing.<var>'"
 #
-# Uncomment the keys you need and add them as design variables in Section 4.
+# For CRM wings: twist_cp should be initialized from the CRM geometry (_crm_twist_cp).
+# For rect wings: twist_cp should be set manually, e.g. np.zeros(3).
+#
+# FULL GEOMETRY DV CATALOG (from God Document):
+# -----------------------------------------------
+#   KEY           TYPE    DESCRIPTION
+#   twist_cp      array   Spanwise twist B-spline CPs [deg]. Shape=(n_cp,).
+#                         For CRM: use _crm_twist_cp (initialized from geometry).
+#                         For rect: use np.zeros(N) for N control points.
+#   chord_cp      array   Chord scaling B-spline CPs. Shape=(n_cp,).
+#                         Scales the chord distribution spanwise.
+#   xshear_cp     array   x-shear B-spline CPs [m]. Shape=(n_cp,).
+#                         Generalized sweep — shifts leading/trailing edge x-coords.
+#   zshear_cp     array   z-shear B-spline CPs [m]. Shape=(n_cp,).
+#                         Generalized dihedral — shifts mesh z-coords spanwise.
+#   taper         scalar  Taper ratio (tip_chord / root_chord). 1.0 = rectangular.
+#                         NOTE: taper is defined per section for multi-section wings.
+#   sweep         scalar  Leading-edge sweep angle [deg]. 0.0 = unswept.
+#   dihedral      scalar  Dihedral angle [deg]. 0.0 = flat wing.
+#
+# NOTE: t_over_c_cp, CL0, CD0, k_lam, c_max_t, with_viscous, with_wave are
+# aerodynamic solver parameters — do not add them as DVs.
 # === AGENT EDITABLE SECTION START ===
 surface = {
     "name": "wing",
@@ -57,22 +90,26 @@ surface = {
     "S_ref_type": "wetted",
     "mesh": mesh,
 
-    # Aerodynamic properties
-    "CL0": 0.0,
-    "CD0": 0.0,
-    "with_viscous": True,
-    "with_wave": False,
-    "k_lam": 0.05,
-    "c_max_t": 0.303,
-    "t_over_c_cp": np.array([0.12]),
+    # --- Aerodynamic solver parameters — always keep these ---
+    "CL0": 0.0,                      # Lift coefficient at zero AoA
+    "CD0": 0.0,                      # Profile drag (zero-lift drag)
+    "with_viscous": True,            # Include viscous drag
+    "with_wave": False,              # Include wave drag (transonic/supersonic only)
+    "k_lam": 0.05,                   # Fraction of laminar flow (0.05 = 5%)
+    "c_max_t": 0.303,                # Chordwise location of max thickness (NACA 4-digit: 0.303)
+    "t_over_c_cp": np.array([0.12]), # Thickness-to-chord ratio — affects viscous drag
 
-    # Geometry design variables — uncomment to enable, then add to add_design_var() below.
-    # Each one you uncomment here MUST also appear in the design variables section.
-    #"twist_cp": np.zeros(3),      # Spanwise twist [deg], shape must match add_design_var bounds
-    #"chord_cp": np.ones(3),       # Chord scaling B-spline control points
-    #"taper": 1.0,                 # Taper ratio
-    #"sweep": 0.0,                 # Sweep angle [deg]
-    #"dihedral": 0.0,              # Dihedral angle [deg]
+    # --- Geometry DVs — uncomment each key you want to optimize ---
+    # For CRM: use _crm_twist_cp for twist_cp initialization.
+    # For rect: use np.zeros(N) or np.array([...]) manually.
+    # After uncommenting here, also add the matching add_design_var() call in Section 4.
+    #"twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(3),
+    #"chord_cp": np.ones(3),          # Chord scaling CPs (1.0 = no scaling)
+    #"xshear_cp": np.zeros(3),        # x-shear CPs [m] — generalized sweep
+    #"zshear_cp": np.zeros(3),        # z-shear CPs [m] — generalized dihedral
+    #"taper": 1.0,                    # Taper ratio
+    #"sweep": 0.0,                    # Sweep angle [deg]
+    #"dihedral": 0.0,                 # Dihedral angle [deg]
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -101,7 +138,8 @@ indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
 prob.model.add_subsystem("flight_vars", indep_var_comp, promotes=["*"])
 
 # Geometry group — uses surface dict as defined above.
-# Subsystem name is "wing" — all DV paths are "wing.<var_name>" (e.g. "wing.twist_cp").
+# Subsystem name is "wing" — ALL DV paths must be "wing.<var_name>".
+# Example: "wing.twist_cp", "wing.taper", "wing.xshear_cp", etc.
 name = surface["name"]
 geom_group = Geometry(surface=surface)
 prob.model.add_subsystem(name, geom_group)
@@ -130,33 +168,52 @@ prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
-# RULE: Any geometry DV listed here must also be declared in the surface dict above.
-# alpha is always available (no surface dict entry needed).
-# All other wing geometry DVs need a corresponding key in surface{} first.
+# RULE: Any geometry DV listed here MUST also have a matching key declared in the
+# surface dict (Section 2). Failing to do so will crash OpenMDAO at setup.
+# EXCEPTION: "alpha" is always available — it requires no surface dict entry.
 #
-# Available DV paths:
-#   "alpha"             — angle of attack (always available)
-#   "wing.twist_cp"     — requires "twist_cp" in surface dict
-#   "wing.chord_cp"     — requires "chord_cp" in surface dict
-#   "wing.taper"        — requires "taper" in surface dict
-#   "wing.sweep"        — requires "sweep" in surface dict
-#   "wing.dihedral"     — requires "dihedral" in surface dict
+# FULL DV PATH REFERENCE for this blueprint (geometry subsystem = "wing"):
 #
-# NOTE: For span constraints, use "wing.mesh.stretch.span" (not "wing.span").
-# NOTE: For area constraints, use "flight_condition_0.wing_perf.S_ref" (not "wing.S_ref").
+#   PATH                  SURFACE DICT KEY    DESCRIPTION
+#   "alpha"               (none needed)       Angle of attack [deg]
+#   "wing.twist_cp"       "twist_cp"          Spanwise twist B-spline CPs [deg]
+#                                             For CRM: initialize with _crm_twist_cp
+#                                             For rect: initialize with np.zeros(N)
+#   "wing.chord_cp"       "chord_cp"          Chord scaling B-spline CPs
+#   "wing.xshear_cp"      "xshear_cp"         x-shear CPs [m] (generalized sweep)
+#   "wing.zshear_cp"      "zshear_cp"         z-shear CPs [m] (generalized dihedral)
+#   "wing.taper"          "taper"             Taper ratio (scalar)
+#   "wing.sweep"          "sweep"             Sweep angle [deg] (scalar)
+#   "wing.dihedral"       "dihedral"          Dihedral angle [deg] (scalar)
+#
+# Span and area are NOT design variables — use constraints instead:
+#   Span constraint:  "wing.mesh.stretch.span"               (upper/lower bounds)
+#   Area constraint:  "flight_condition_0.wing_perf.S_ref"   (equals/lower)
 
 prob.model.add_design_var("alpha", lower=-10.0, upper=10.0)
 # prob.model.add_design_var("wing.twist_cp", lower=-10.0, upper=10.0)
+# prob.model.add_design_var("wing.chord_cp", lower=0.5, upper=3.0)
+# prob.model.add_design_var("wing.xshear_cp", lower=-5.0, upper=5.0)
+# prob.model.add_design_var("wing.zshear_cp", lower=-2.0, upper=2.0)
 # prob.model.add_design_var("wing.taper", lower=0.1, upper=1.5)
 # prob.model.add_design_var("wing.sweep", lower=-30.0, upper=30.0)
+# prob.model.add_design_var("wing.dihedral", lower=-10.0, upper=10.0)
 
 # --- Constraints ---
-# CL constraint requires alpha as a design variable (see above).
+# FULL CONSTRAINT PATH REFERENCE:
+#   "flight_condition_0.wing_perf.CL"       — lift coefficient (equals or bounds)
+#   "flight_condition_0.wing_perf.CD"       — drag coefficient
+#   "flight_condition_0.wing_perf.S_ref"    — reference area [m^2]
+#   "wing.mesh.stretch.span"                — wing span [m]
+
 prob.model.add_constraint(f"{point_name}.wing_perf.CL", equals=0.5)
 # prob.model.add_constraint(f"{point_name}.wing_perf.S_ref", lower=30.0)   # area constraint
 # prob.model.add_constraint("wing.mesh.stretch.span", upper=12.0)          # span constraint
 
 # --- Objective ---
+# FULL OBJECTIVE PATH REFERENCE:
+#   "flight_condition_0.wing_perf.CD"   — drag coefficient (minimize drag)
+#   "flight_condition_0.wing_perf.CL"   — lift coefficient (maximize → scaler=-1)
 prob.model.add_objective(f"{point_name}.wing_perf.CD", ref=0.01)
 # === AGENT EDITABLE SECTION END ===
 
@@ -196,7 +253,7 @@ try:
     axes[1].set_title(f"Wing Mesh  (α={alpha_val:.2f}°)")
 
     fig.tight_layout()
-    fig.savefig(os.path.join(_PLOTS_DIR, "aero_rect_results.png"), bbox_inches="tight")
+    fig.savefig(os.path.join(_PLOTS_DIR, "aero_opt_results.png"), bbox_inches="tight")
     plt.close(fig)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:

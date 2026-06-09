@@ -1,10 +1,14 @@
 import os
+import time
 import logging
-from .config import get_llm_response, log_token_usage
-try:
-    from .config import get_llm_client
-except ImportError:
-    get_llm_client = None
+from .config import (
+    get_llm_response,
+    get_llm_client,
+    log_token_usage,
+    is_gemini_transient_error,
+    GEMINI_STREAM_RETRY_WAIT,
+    GEMINI_STREAM_MAX_RETRIES,
+)
 
 logger = logging.getLogger("LLM_Backend")
 
@@ -93,6 +97,7 @@ def generate_code(
     """
     Generate an OpenAeroStruct script (non-streaming).
     Returns (code, reasoning).
+    Transient retry is handled inside get_llm_response() in config.py.
     """
     system_prompt, prompt = _build_prompt(user_prompt, blueprint_names, feedback)
     response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
@@ -122,6 +127,10 @@ def generate_code_stream(
 
     Falls back to non-streaming if the provider doesn't support it or if
     get_llm_client is not available.
+
+    Retries on transient Gemini API errors (rate limit / overload) without
+    propagating the error to the caller — these are infrastructure issues,
+    not code bugs, and should not consume a user retry attempt.
     """
     system_prompt, prompt = _build_prompt(user_prompt, blueprint_names, feedback)
 
@@ -130,7 +139,7 @@ def generate_code_stream(
     except Exception:
         client = None
 
-    if client is None or provider != "Gemini API":
+    if client is None or provider != "Gemini API":  # noqa: SIM102
         response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
         yield response
         reasoning, code = _parse_response(response)
@@ -149,22 +158,44 @@ def generate_code_stream(
     logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
     logger.info(f"--- USER PROMPT ---\n{prompt}")
 
-    full_response = ""
-    last_chunk = None
-    try:
-        for chunk in client.models.generate_content_stream(
-            model=model_name,
-            contents=prompt,
-            config=stream_config,
-        ):
-            last_chunk = chunk
-            text = chunk.text or ""
-            full_response += text
-            yield text
-    except Exception:
-        if not full_response:
-            full_response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
-            yield full_response
+    for gemini_attempt in range(GEMINI_STREAM_MAX_RETRIES):
+        full_response = ""
+        last_chunk = None
+        transient_hit = False
+
+        try:
+            for chunk in client.models.generate_content_stream(
+                model=model_name,
+                contents=prompt,
+                config=stream_config,
+            ):
+                last_chunk = chunk
+                text = chunk.text or ""
+                full_response += text
+                yield text
+
+        except Exception as exc:
+            if is_gemini_transient_error(exc) and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
+                transient_hit = True
+                logger.warning(
+                    f"Gemini transient error during stream (attempt {gemini_attempt + 1}/"
+                    f"{GEMINI_STREAM_MAX_RETRIES}): {exc}. "
+                    f"Waiting {GEMINI_STREAM_RETRY_WAIT}s before retry."
+                )
+                
+                yield f"\n\n⚠️ Gemini API overloaded — retrying in {GEMINI_STREAM_RETRY_WAIT}s (attempt {gemini_attempt + 1}/{GEMINI_STREAM_MAX_RETRIES})...\n"
+                time.sleep(GEMINI_STREAM_RETRY_WAIT)
+            else:
+                # Non-transient error or final attempt — fall back to non-streaming
+                if not full_response:
+                    full_response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
+                    yield full_response
+
+        if transient_hit:
+            continue  # retry the entire stream
+
+        # Stream completed without transient error — exit retry loop
+        break
 
     logger.info(f"--- LLM RESPONSE ---\n{full_response}")
 

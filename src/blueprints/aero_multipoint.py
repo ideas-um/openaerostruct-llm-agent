@@ -27,6 +27,7 @@ os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 # =============================================================================
 # CRM mesh is built-in — span and root_chord are not required for "CRM".
 # num_twist_cp controls how many twist control points are initialized from the CRM geometry.
+# generate_mesh returns TWO values for CRM — always unpack as (mesh, twist_cp).
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 5,
@@ -43,22 +44,55 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
-# CRITICAL: Any geometry parameter used as a design variable MUST be declared here first.
-# twist_cp is already included from generate_mesh above — do not remove it.
+# CRITICAL: Any geometry parameter you want to use as a design variable MUST be
+# declared here in the surface dict BEFORE it can be added via add_design_var().
+# twist_cp is pre-included (initialized from CRM geometry) — do not remove it.
+#
+# FULL GEOMETRY DV CATALOG (from God Document):
+# -----------------------------------------------
+#   KEY           TYPE    DESCRIPTION
+#   twist_cp      array   Spanwise twist B-spline CPs [deg]. Shape=(n_cp,).
+#                         Required — initialized from CRM geometry above.
+#   chord_cp      array   Chord scaling B-spline CPs. Shape=(n_cp,).
+#                         Scales the chord distribution spanwise.
+#   xshear_cp     array   x-shear B-spline CPs [m]. Shape=(n_cp,).
+#                         Generalized sweep — shifts leading/trailing edge x-coords.
+#   zshear_cp     array   z-shear B-spline CPs [m]. Shape=(n_cp,).
+#                         Generalized dihedral — shifts mesh z-coords spanwise.
+#   taper         scalar  Taper ratio (tip_chord / root_chord). 1.0 = rectangular.
+#   sweep         scalar  Leading-edge sweep angle [deg]. 0.0 = unswept.
+#   dihedral      scalar  Dihedral angle [deg]. 0.0 = flat wing.
+#
+# NOTE: CL0, CD0, k_lam, t_over_c_cp, c_max_t, with_viscous, with_wave are
+# aerodynamic solver parameters — do not remove them and do not add them as DVs.
 # === AGENT EDITABLE SECTION START ===
 surf_dict = {
     "name": "wing",
     "symmetry": True,
     "S_ref_type": "wetted",
     "mesh": mesh,
-    "twist_cp": twist_cp,           # Required — initialized from CRM geometry
-    "CL0": 0.0,
-    "CD0": 0.015,
-    "k_lam": 0.05,
-    "t_over_c_cp": np.array([0.15]),
-    "c_max_t": 0.303,
-    "with_viscous": True,
-    "with_wave": False,
+
+    # Required — initialized from CRM geometry; do not remove
+    "twist_cp": twist_cp,
+
+    # --- Aerodynamic solver parameters — always keep these ---
+    "CL0": 0.0,                      # Lift coefficient at zero AoA
+    "CD0": 0.015,                    # Profile drag (zero-lift drag)
+    "k_lam": 0.05,                   # Fraction of laminar flow
+    "t_over_c_cp": np.array([0.15]), # Thickness-to-chord ratio — affects viscous drag
+    "c_max_t": 0.303,                # Chordwise location of max thickness
+    "with_viscous": True,            # Include viscous drag
+    "with_wave": False,              # Include wave drag (transonic/supersonic only)
+
+    # --- Optional geometry DVs — uncomment to activate ---
+    # After uncommenting here, also add the matching add_design_var() call in Section 4.
+    # Use path "wing_geom.<var>" (NOT "wing.<var>") — see critical note below.
+    #"chord_cp": np.ones(5),          # Chord scaling CPs (1.0 = no scaling)
+    #"xshear_cp": np.zeros(5),        # x-shear CPs [m] — generalized sweep
+    #"zshear_cp": np.zeros(5),        # z-shear CPs [m] — generalized dihedral
+    #"taper": 1.0,                    # Taper ratio
+    #"sweep": 0.0,                    # Sweep angle [deg]
+    #"dihedral": 0.0,                 # Dihedral angle [deg]
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -68,9 +102,13 @@ n_points = 2
 # =============================================================================
 # 3. PROBLEM SETUP (MULTIPOINT)
 # =============================================================================
-# IMPORTANT: The geometry subsystem is named "wing_geom" (not "wing").
-# All geometry DV paths must use "wing_geom.<var>" e.g. "wing_geom.twist_cp".
-# alpha is a vector of length n_points — one value per flight condition.
+# CRITICAL NAMING RULE:
+#   The geometry subsystem is added as "wing_geom" (surface["name"] + "_geom"),
+#   NOT as "wing". This means ALL geometry DV paths must use "wing_geom.<var>",
+#   e.g. "wing_geom.twist_cp", "wing_geom.taper", "wing_geom.xshear_cp".
+#   Using "wing.<var>" will fail — that path does not exist in this blueprint.
+#
+# alpha is a vector of length n_points — one AoA value per flight condition.
 # === AGENT EDITABLE SECTION START ===
 prob = om.Problem()
 
@@ -124,27 +162,47 @@ prob.options['work_dir'] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
-# Available DV paths:
-#   "alpha"                  — vector of AoA per point, shape=(n_points,); bounds apply to all
-#   "wing_geom.twist_cp"     — spanwise twist B-spline CPs (twist_cp must be in surf_dict)
+# CRITICAL: Geometry subsystem is "wing_geom", NOT "wing".
+# All geometry DV paths MUST use the prefix "wing_geom.<var>".
 #
-# NOTE: geometry subsystem is "wing_geom", NOT "wing". Always use "wing_geom.<var>".
+# FULL DV PATH REFERENCE for this blueprint:
+#
+#   PATH                      SURFACE DICT KEY    DESCRIPTION
+#   "alpha"                   (none needed)       AoA vector [deg], shape=(n_points,)
+#   "wing_geom.twist_cp"      "twist_cp"          Spanwise twist CPs [deg]
+#   "wing_geom.chord_cp"      "chord_cp"          Chord scaling CPs
+#   "wing_geom.xshear_cp"     "xshear_cp"         x-shear CPs [m] (generalized sweep)
+#   "wing_geom.zshear_cp"     "zshear_cp"         z-shear CPs [m] (generalized dihedral)
+#   "wing_geom.taper"         "taper"             Taper ratio (scalar)
+#   "wing_geom.sweep"         "sweep"             Sweep angle [deg] (scalar)
+#   "wing_geom.dihedral"      "dihedral"          Dihedral angle [deg] (scalar)
 
 prob.model.add_design_var("alpha", lower=-15, upper=15)
 prob.model.add_design_var("wing_geom.twist_cp", lower=-5, upper=8)
+# prob.model.add_design_var("wing_geom.chord_cp", lower=0.5, upper=3.0)
+# prob.model.add_design_var("wing_geom.xshear_cp", lower=-5.0, upper=5.0)
+# prob.model.add_design_var("wing_geom.zshear_cp", lower=-2.0, upper=2.0)
+# prob.model.add_design_var("wing_geom.taper", lower=0.1, upper=1.5)
+# prob.model.add_design_var("wing_geom.sweep", lower=-30.0, upper=30.0)
+# prob.model.add_design_var("wing_geom.dihedral", lower=-10.0, upper=10.0)
 
 # --- Constraints ---
-# Per-point CL constraints — each point has its own AeroPoint subsystem.
-# Available constraint paths:
-#   "aero_point_0.wing_perf.CL"   — CL at flight condition 0
-#   "aero_point_1.wing_perf.CL"   — CL at flight condition 1
-#   "aero_point_0.wing_perf.S_ref" — reference area (not "wing.S_ref" — that path is wrong)
+# Per-point CL constraints — each AeroPoint has its own subsystem.
+# FULL CONSTRAINT PATH REFERENCE:
+#   "aero_point_0.wing_perf.CL"       — CL at flight condition 0
+#   "aero_point_1.wing_perf.CL"       — CL at flight condition 1
+#   "aero_point_0.wing_perf.S_ref"    — reference area at point 0 (NOT "wing.S_ref")
+#   "aero_point_0.wing_perf.CD"       — drag at point 0
+#   "CD"                              — total weighted drag (output of MultiCD)
 
 prob.model.add_constraint("aero_point_0.wing_perf.CL", equals=0.45)
 prob.model.add_constraint("aero_point_1.wing_perf.CL", equals=0.5)
 
 # --- Objective ---
-# "CD" is the sum of drag across all points (output of MultiCD component).
+# "CD" is the sum of drag across all flight points (output of MultiCD component).
+# FULL OBJECTIVE PATH REFERENCE:
+#   "CD"                              — weighted sum of drag (MultiCD output)
+#   "aero_point_0.wing_perf.CD"       — drag at a single flight point
 prob.model.add_objective("CD", scaler=1e4)
 # === AGENT EDITABLE SECTION END ===
 
