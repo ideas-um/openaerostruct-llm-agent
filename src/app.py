@@ -11,7 +11,7 @@ from agent_logic import (
 # ---------------------------------------------------------------------------
 # Resolve absolute paths relative to this file
 # ---------------------------------------------------------------------------
-_SRC_DIR  = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 _LOG_FILE = os.path.join(_SRC_DIR, "agent_backend.log")
 
 # ---------------------------------------------------------------------------
@@ -49,6 +49,7 @@ _DV_REFERENCE = """
 # Display helpers
 # ---------------------------------------------------------------------------
 
+
 def show_plot(plot_path: str):
     """Display a plot image inline."""
     st.image(plot_path)
@@ -58,7 +59,9 @@ def show_vagueness_card(missing_info: str):
     """Render a structured clarification card in the chat."""
     st.warning("#### The agent needs more information before it can run.")
     st.markdown(f"**What's missing:**\n\n{missing_info}")
-    with st.expander("💡 What can I specify? (design variable reference)", expanded=False):
+    with st.expander(
+        "💡 What can I specify? (design variable reference)", expanded=False
+    ):
         st.markdown(_DV_REFERENCE)
     st.info("Please reply with the missing details and the agent will proceed.")
 
@@ -97,7 +100,13 @@ st.sidebar.title("Configuration")
 provider = st.sidebar.selectbox("Provider", ["Gemini API", "Ollama"])
 model_name = st.sidebar.selectbox(
     "Model Selection",
-    ["gemini-flash-lite-latest", "gemma-4-26b-a4b-it", "gemini-3-flash-preview", "gemini-2.5-flash", "llama3.2:latest"],
+    [
+        "gemini-flash-lite-latest",
+        "gemma-4-26b-a4b-it",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "llama3.2:latest",
+    ],
 )
 max_retries = st.sidebar.slider("Max retries", min_value=1, max_value=6, value=3)
 st.sidebar.markdown("Requires Ollama running locally or `GEMINI_API_KEY`.")
@@ -115,8 +124,10 @@ st.title("OpenAeroStruct — LLM Agent")
 # Shared agent UI helpers (used by both main loop and relaxation retry)
 # ---------------------------------------------------------------------------
 
+
 def _make_ui_callback(stream_state: dict, no_converge_store: dict):
     """Return a callback that routes agent events to Streamlit UI elements."""
+
     def cb(event: str, data: dict):
         if st.session_state.get("stop_run", False):
             return
@@ -141,8 +152,10 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
 
         elif event == "safety_blocked":
             violation_text = "\n".join(f"- {v}" for v in data["violations"])
-            st.error(f"**Safety check failed — script blocked.**\n\n"
-                     f"Dangerous patterns detected:\n{violation_text}")
+            st.error(
+                f"**Safety check failed — script blocked.**\n\n"
+                f"Dangerous patterns detected:\n{violation_text}"
+            )
 
         elif event == "exec_success":
             st.success("✅ Execution completed successfully.")
@@ -159,7 +172,9 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             st.code(data["stderr_tail"], language="text")
 
         elif event == "no_converge":
-            st.warning("Optimiser did not converge — stopping (setup issue, not a code error).")
+            st.warning(
+                "Optimiser did not converge — stopping (setup issue, not a code error)."
+            )
 
         elif event == "no_converge_final":
             no_converge_store.update(data)
@@ -167,56 +182,73 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
     return cb
 
 
-def _handle_agent_result(result, no_converge_data: dict, conversation_context: str, blueprints: list):
+def _handle_agent_result(
+    result, no_converge_data: dict, conversation_context: str, blueprints: list
+):
     """Render the final status card and save the assistant message to history."""
     if result.success:
         is_opt = "run_driver()" in result.final_code
         task_word = "Optimization" if is_opt else "Analysis"
-        content = (f"### ✅ {task_word} Complete\n"
-                   "The script ran successfully. Results and plots are shown above.")
+        content = (
+            f"### ✅ {task_word} Complete\n"
+            "The script ran successfully. Results and plots are shown above."
+        )
         st.markdown(content)
-        st.session_state.messages.append({
-            "role":    "assistant",
-            "content": content,
-            "code":    result.final_code,
-            "summary": result.final_summary,
-            "plots":   get_generated_plots(),
-        })
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "code": result.final_code,
+                "summary": result.final_summary,
+                "plots": get_generated_plots(),
+            }
+        )
 
     elif no_converge_data:
-        content = ("### ⚠️ Optimization did not converge\n"
-                   "The script ran without errors but the optimiser could not find a solution. "
-                   "See the relaxation suggestions below.")
+        content = (
+            "### ⚠️ Optimization did not converge\n"
+            "The script ran without errors but the optimiser could not find a solution. "
+            "See the relaxation suggestions below."
+        )
         st.warning(content)
         # Save to history BEFORE rerun so it appears when the page re-renders
-        st.session_state.messages.append({
-            "role":    "assistant",
-            "content": content,
-            "code":    result.final_code,
-            "summary": result.final_summary,
-            "plots":   get_generated_plots(),
-        })
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "code": result.final_code,
+                "summary": result.final_summary,
+                "plots": get_generated_plots(),
+            }
+        )
         st.session_state["pending_relaxation"] = {
-            "suggestion":  no_converge_data.get("suggestion", "No suggestion available."),
+            "suggestion": no_converge_data.get(
+                "suggestion", "No suggestion available."
+            ),
             "user_prompt": conversation_context,
-            "blueprints":  blueprints,
-            "error_logs":  no_converge_data.get("error_logs", []),
+            "blueprints": blueprints,
+            "error_logs": no_converge_data.get("error_logs", []),
         }
         st.rerun()
 
     else:
-        content = (f"### ❌ Agent could not complete the task\n"
-                   f"Failed after {result.attempts} attempt(s). "
-                   "Check the error output above.")
+        content = (
+            f"### ❌ Agent could not complete the task\n"
+            f"Failed after {result.attempts} attempt(s). "
+            "Check the error output above."
+        )
         st.error(content)
         # Append to history (non-converge branch handles its own append before rerun)
-        st.session_state.messages.append({
-            "role":    "assistant",
-            "content": content,
-            "code":    result.final_code,
-            "summary": result.final_summary,
-            "plots":   get_generated_plots(),
-        })
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": content,
+                "code": result.final_code,
+                "summary": result.final_summary,
+                "plots": get_generated_plots(),
+            }
+        )
+
 
 # ---------------------------------------------------------------------------
 # Replay conversation history
@@ -279,7 +311,9 @@ if st.session_state["pending_relaxation"]:
                     )
                 # Store the relaxation prompt separately — main loop will run the
                 # agent without adding a visible chat bubble for the retry prompt
-                st.session_state["relaxation_prompt"] = pr["user_prompt"] + "\n\n" + extra
+                st.session_state["relaxation_prompt"] = (
+                    pr["user_prompt"] + "\n\n" + extra
+                )
                 st.session_state["relaxation_blueprints"] = pr["blueprints"]
                 st.session_state["relaxation_error_logs"] = pr.get("error_logs", [])
                 st.session_state["pending_relaxation"] = None
@@ -304,7 +338,9 @@ if _relaxation_prompt:
     st.session_state["stop_run"] = False
 
     with st.chat_message("assistant"):
-        thought_expander = st.expander("Relaxation Retry — Agent Thought Process", expanded=True)
+        thought_expander = st.expander(
+            "Relaxation Retry — Agent Thought Process", expanded=True
+        )
         with thought_expander:
             st.info("Retrying with relaxed problem setup (approved by user).")
             st.write("### Iterative Generation & Execution")
@@ -320,7 +356,9 @@ if _relaxation_prompt:
                 callback=_make_ui_callback(_rs, _rn),
                 prior_error_logs=_relaxation_error_logs,
             )
-        _handle_agent_result(result, _rn, _relaxation_prompt, _relaxation_blueprints or [])
+        _handle_agent_result(
+            result, _rn, _relaxation_prompt, _relaxation_blueprints or []
+        )
 
 if user_prompt:
     cleanup_artifacts()
@@ -362,26 +400,30 @@ if user_prompt:
             router_placeholder.empty()
 
             blueprints = routing_data.get("blueprints", ["aero_opt.py"])
-            reason     = routing_data.get("reason", "No reason provided")
+            reason = routing_data.get("reason", "No reason provided")
 
             is_vague = routing_data.get("is_vague", False)
             if is_vague:
                 missing_info = routing_data.get(
                     "missing_info",
-                    "Please provide more detail about your design request."
+                    "Please provide more detail about your design request.",
                 )
                 show_vagueness_card(missing_info)
                 clarification_msg = (
                     f"#### Clarification needed\n\n{missing_info}\n\n"
                     "_Please reply with the missing details._"
                 )
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": clarification_msg,
-                })
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": clarification_msg,
+                    }
+                )
                 st.stop()
 
-            st.info(f"**Selected Blueprint(s):** `{', '.join(blueprints)}`\n\n**Reason:** {reason}")
+            st.info(
+                f"**Selected Blueprint(s):** `{', '.join(blueprints)}`\n\n**Reason:** {reason}"
+            )
 
             # ------------------------------------------------------------------
             # Step 2 — Iterative code generation and execution

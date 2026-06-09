@@ -43,7 +43,8 @@ Events emitted:
   "exec_success"    {"db_summary": str, "plots": list[str]}
   "exec_error"      {"stderr_tail": str}
   "no_converge"       {"db_summary": str, "stdout_tail": str}
-  "no_converge_final" {"db_summary": str, "error_logs": list[str]}  # all retries exhausted, not a code bug
+  "no_converge_final" {"db_summary": str, "error_logs": list[str], "suggestion": str}
+                      # app mode only (retry_on_no_converge=False)
   "done"              {"success": bool, "attempts": int}
 """
 
@@ -63,12 +64,12 @@ from typing import Callable, Optional
 #   _OUT_DIR    = project_root/openaerostruct_out/
 # agent_logic.py must use the same root so DB and plot lookups match.
 # ---------------------------------------------------------------------------
-_SRC_DIR     = os.path.dirname(os.path.abspath(__file__))   # src/
-_PROJECT_DIR = os.path.dirname(_SRC_DIR)                    # project root
-_OUT_DIR     = os.path.join(_PROJECT_DIR, "openaerostruct_out")
-_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))  # src/
+_PROJECT_DIR = os.path.dirname(_SRC_DIR)  # project root
+_OUT_DIR = os.path.join(_PROJECT_DIR, "openaerostruct_out")
+_PLOTS_DIR = os.path.join(_OUT_DIR, "agent_plots")
 _GEN_RUN_DIR = os.path.join(_OUT_DIR, "generated_run_out")
-_GEN_SCRIPT  = os.path.join(_SRC_DIR, "generated_run.py")
+_GEN_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
 
 # ---------------------------------------------------------------------------
 # Sanitize stderr/stdout before feeding back to the LLM.
@@ -98,18 +99,24 @@ def sanitize_feedback(text: str, max_chars: int = 1000) -> str:
 # Safety scan
 # ---------------------------------------------------------------------------
 _DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("Destructive shell command (rm/rmdir/del)",
-     re.compile(r"""(?x)
+    (
+        "Destructive shell command (rm/rmdir/del)",
+        re.compile(
+            r"""(?x)
          os\.system\s*\(.*\brm\b
          | subprocess\.\w+\s*\(.*\brm\b
          | shutil\.rmtree
          | os\.remove\s*\(
          | os\.unlink\s*\(
          | os\.rmdir\s*\(
-     """, re.IGNORECASE)),
-
-    ("Network access (socket/requests/urllib/httpx)",
-     re.compile(r"""(?x)
+     """,
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Network access (socket/requests/urllib/httpx)",
+        re.compile(
+            r"""(?x)
          import\s+socket
          | from\s+socket\s+import
          | import\s+requests
@@ -122,37 +129,56 @@ _DANGEROUS_PATTERNS: list[tuple[str, re.Pattern]] = [
          | requests\.(get|post|put|delete|patch|head|session)
          | socket\.connect
          | socket\.bind
-     """, re.IGNORECASE)),
-
-    ("Arbitrary subprocess / shell execution",
-     re.compile(r"""(?x)
+     """,
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Arbitrary subprocess / shell execution",
+        re.compile(
+            r"""(?x)
          subprocess\.(run|call|Popen|check_output|check_call)\s*\(
          | os\.system\s*\(
          | os\.popen\s*\(
          | commands\.getoutput
-     """, re.IGNORECASE)),
-
-    ("File write outside allowed output paths",
-     re.compile(r"""(?x)
+     """,
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "File write outside allowed output paths",
+        re.compile(
+            r"""(?x)
          open\s*\(\s*['"]/(?!.*openaerostruct_out)
          | open\s*\(\s*['"]\.\.
          | open\s*\(\s*['"]~
-     """, re.IGNORECASE)),
-
-    ("Dynamic code execution (eval/exec/__import__)",
-     re.compile(r"""(?x)
+     """,
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Dynamic code execution (eval/exec/__import__)",
+        re.compile(
+            r"""(?x)
          \beval\s*\(
          | \bexec\s*\(
          | \b__import__\s*\(
          | \bcompile\s*\(.*exec
-     """, re.IGNORECASE)),
-
-    ("Environment / credential access",
-     re.compile(r"""(?x)
+     """,
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Environment / credential access",
+        re.compile(
+            r"""(?x)
          os\.environ\s*\[
          | os\.getenv\s*\(
          | keyring\.
-     """, re.IGNORECASE)),
+     """,
+            re.IGNORECASE,
+        ),
+    ),
 ]
 
 
@@ -171,6 +197,7 @@ def check_script_safety(code: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Artifact helpers
 # ---------------------------------------------------------------------------
+
 
 def cleanup_artifacts():
     """Delete plots and output files from the previous run."""
@@ -225,24 +252,29 @@ def _find_db_summary() -> str:
 # Result dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AgentResult:
-    success:       bool       = False
-    final_code:    str        = ""
-    final_summary: str        = ""
-    plots:         list[str]  = field(default_factory=list)
-    attempts:      int        = 0      # number of attempts made
-    error_logs:    list[str]  = field(default_factory=list)
-    converged:     str        = "n/a"  # "yes" | "no" | "n/a"
+    success: bool = False
+    final_code: str = ""
+    final_summary: str = ""
+    plots: list[str] = field(default_factory=list)
+    attempts: int = 0  # number of attempts made
+    error_logs: list[str] = field(default_factory=list)
+    converged: str = "n/a"  # "yes" | "no" | "n/a"
 
 
 # ---------------------------------------------------------------------------
 # Core agent loop
 # ---------------------------------------------------------------------------
 
-def _get_relaxation_suggestion(user_prompt: str, error_logs: list, model_name: str, provider: str) -> str:
+
+def _get_relaxation_suggestion(
+    user_prompt: str, error_logs: list, model_name: str, provider: str
+) -> str:
     """Ask the LLM for concrete bound/DV relaxations given the convergence history."""
     from llm.config import get_llm_response
+
     prompt = (
         "An OpenAeroStruct optimization ran successfully (no Python errors) but the "
         "optimiser failed to converge after multiple attempts. This is a problem setup "
@@ -293,23 +325,30 @@ def run_agent(
     callback: Optional[Callable[[str, dict], None]] = None,
     gen_script_path: Optional[str] = None,
     prior_error_logs: Optional[list[str]] = None,
+    retry_on_no_converge: bool = False,
 ) -> AgentResult:
     """
     Run the full agent loop: generate code → safety-scan → execute → evaluate.
 
+    Success = script runs without error AND (for optimizations) converges.
+
     Parameters
     ----------
-    user_prompt      : The user's design request (and any conversation context).
-    blueprints       : List of blueprint filenames chosen by the router.
-    model_name       : LLM model identifier.
-    provider         : "Gemini API" or "Ollama".
-    max_retries      : Maximum number of generation+execution attempts.
-    prior_error_logs : Error logs from a previous run (e.g. a relaxation retry).
-                       Pre-populates error_history so the LLM sees what already failed.
-    stream          : If True, use generate_code_stream (yields chunks via callback).
-    callback        : Optional function(event, data) called at each stage for UI updates.
-    gen_script_path : Override the path where the generated script is written.
-                      Defaults to _GEN_SCRIPT (src/generated_run.py).
+    user_prompt           : The user's design request (and any conversation context).
+    blueprints            : List of blueprint filenames chosen by the router.
+    model_name            : LLM model identifier.
+    provider              : "Gemini API" or "Ollama".
+    max_retries           : Maximum number of generation+execution attempts.
+    prior_error_logs      : Error logs from a previous run.
+                            Pre-populates error_history so the LLM sees what already failed.
+    stream                : If True, use generate_code_stream (yields chunks via callback).
+    callback              : Optional function(event, data) called at each stage for UI updates.
+    gen_script_path       : Override the path where the generated script is written.
+                            Defaults to _GEN_SCRIPT (src/generated_run.py).
+    retry_on_no_converge  : If True, non-convergence is fed back as an error and the loop
+                            retries (benchmark mode). If False (default), non-convergence
+                            stops the loop immediately so the app can offer a relaxation
+                            suggestion (app mode).
 
     Returns
     -------
@@ -320,16 +359,11 @@ def run_agent(
 
     script_path = gen_script_path or _GEN_SCRIPT
 
-    # emit() always injects the current attempt number so callbacks can
-    # look up the right placeholder without tracking state separately.
     def emit(event: str, data: dict):
         if callback is not None:
             callback(event, {"attempt": attempt + 1, **data})
 
     result = AgentResult()
-    # Seed error_history with any logs from a prior run (e.g. convergence failure
-    # from the previous attempt before the user approved a relaxation retry).
-    # This ensures the LLM sees what already failed, not just the new instructions.
     error_history: list[str] = list(prior_error_logs) if prior_error_logs else []
 
     attempt = 0
@@ -346,10 +380,12 @@ def run_agent(
 
         try:
             if stream and callback is not None:
-                # Streaming path — yield chunks through callback
                 for chunk in generate_code_stream(
-                    user_prompt, blueprints, feedback,
-                    model_name=model_name, provider=provider,
+                    user_prompt,
+                    blueprints,
+                    feedback,
+                    model_name=model_name,
+                    provider=provider,
                 ):
                     if isinstance(chunk, tuple):
                         code, reasoning = chunk
@@ -357,8 +393,11 @@ def run_agent(
                         emit("code_chunk", {"chunk": chunk})
             else:
                 code, reasoning = generate_code(
-                    user_prompt, blueprints, feedback,
-                    model_name=model_name, provider=provider,
+                    user_prompt,
+                    blueprints,
+                    feedback,
+                    model_name=model_name,
+                    provider=provider,
                 )
         except Exception as exc:
             err = f"Code generation error: {sanitize_feedback(str(exc), max_chars=500)}"
@@ -370,7 +409,6 @@ def run_agent(
         result.final_code = code
         emit("code_ready", {"code": code, "reasoning": reasoning})
 
-        # Write generated script to disk
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
 
@@ -401,75 +439,73 @@ def run_agent(
 
             is_optimization = "run_driver()" in code
 
-            # Convergence detection — check stdout for explicit failure signals
-            # FIRST, then look for success signals. Failure takes priority.
+            if not is_optimization:
+                result.converged = "n/a"
+                result.success = True
+                result.attempts = attempt + 1
+                emit("done", {"success": True, "attempts": result.attempts})
+                return result
+
+            # Convergence detection
             _stdout_lower = exec_result.stdout.lower()
 
-            # Explicit failure indicators — any of these means not converged
             _failed = any(
                 m in _stdout_lower
                 for m in [
                     "optimization failed",
-                    "exit mode 8",       # positive directional derivative
-                    "exit mode 9",       # iteration limit exceeded
-                    "exit mode 6",       # inequality constraints incompatible
-                    "exit mode 7",       # equality constraints incompatible
+                    "exit mode 8",
+                    "exit mode 9",
+                    "exit mode 6",
+                    "exit mode 7",
                     "maximum number of function",
                     "positive directional derivative",
                 ]
             )
-
-            # Explicit success indicators
             _succeeded = any(
                 m in _stdout_lower
                 for m in [
                     "optimization terminated successfully",
                     "optimization complete",
                     "optimization successful",
-                    "exit mode 0",       # SLSQP success
+                    "exit mode 0",
                 ]
             )
-
-            # If explicit success found and no failure, converged.
-            # If no signal at all (some OAS versions are silent), fall back to
-            # DB existence — but only if there's no failure signal.
             _no_signal = not _succeeded and not _failed
-            converged_bool = (
-                (_succeeded and not _failed)
-                or (_no_signal and db_summary and "No optimization" not in db_summary)
+            converged_bool = (_succeeded and not _failed) or (
+                _no_signal and db_summary and "No optimization" not in db_summary
             )
 
-            if is_optimization:
-                if converged_bool:
-                    result.converged = "yes"
-                    result.success = True
-                    result.attempts = attempt + 1
-                    emit("done", {"success": True, "attempts": result.attempts})
-                    return result
-                else:
-                    # Convergence failure = problem setup issue, not a code bug.
-                    # Stop immediately — retrying with the same code will not help
-                    # and risks the LLM rewriting working code and introducing errors.
-                    result.converged = "no"
-                    result.attempts = attempt + 1
-                    err = (
-                        f"Optimization did not converge (Exit mode 8/9 or FAILED signal).\n"
-                        + (f"DB summary:\n{db_summary}\n\n" if db_summary and "No optimization" not in db_summary else "")
-                        + f"Stdout tail:\n{sanitize_feedback(exec_result.stdout, max_chars=400)}"
-                    )
-                    result.error_logs.append(f"[attempt {attempt + 1}] {err}")
-                    emit("no_converge", {
-                        "db_summary": db_summary,
-                        "stdout_tail": sanitize_feedback(exec_result.stdout, max_chars=400),
-                    })
-                    # Break immediately — go to no_converge_final handling below
-                    break
-            else:
-                result.converged = "n/a"
+            if converged_bool:
+                result.converged = "yes"
                 result.success = True
                 result.attempts = attempt + 1
                 emit("done", {"success": True, "attempts": result.attempts})
                 return result
+            else:
+                result.converged = "no"
+                stdout_tail = sanitize_feedback(exec_result.stdout, max_chars=400)
+                err = (
+                    f"Optimization did not converge.\n"
+                    + (
+                        f"DB summary:\n{db_summary}\n\n"
+                        if db_summary and "No optimization" not in db_summary
+                        else ""
+                    )
+                    + f"Stdout tail:\n{stdout_tail}"
+                )
+                result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+                emit(
+                    "no_converge",
+                    {"db_summary": db_summary, "stdout_tail": stdout_tail},
+                )
+                if retry_on_no_converge:
+                    # Benchmark mode: feed convergence failure back and retry.
+                    error_history.append(err)
+                else:
+                    # App mode: stop immediately so the caller can offer a relaxation
+                    # suggestion via _get_relaxation_suggestion.
+                    result.attempts = attempt + 1
+                    break
 
         else:
             err = f"Python Execution Error:\n{sanitize_feedback(exec_result.stderr, max_chars=1000)}"
@@ -479,23 +515,23 @@ def run_agent(
 
         attempt += 1
 
-    # Exhausted all retries — distinguish convergence failure from code failure
     result.attempts = attempt
-    if result.converged == "no":
-        # Script ran without errors but optimiser never converged — this is a
-        # problem setup issue, not a code bug. Generate a relaxation suggestion
-        # here (in agent_logic) so both app.py and benchmark.py get it without
-        # each having to implement their own LLM call.
+    if result.converged == "no" and not retry_on_no_converge:
+        # App mode: script ran but optimiser never converged — generate a relaxation
+        # suggestion for the UI to display.
         suggestion = _get_relaxation_suggestion(
             user_prompt=user_prompt,
             error_logs=result.error_logs,
             model_name=model_name,
             provider=provider,
         )
-        emit("no_converge_final", {
-            "db_summary": result.final_summary,
-            "error_logs": result.error_logs,
-            "suggestion": suggestion,
-        })
+        emit(
+            "no_converge_final",
+            {
+                "db_summary": result.final_summary,
+                "error_logs": result.error_logs,
+                "suggestion": suggestion,
+            },
+        )
     emit("done", {"success": False, "attempts": result.attempts})
     return result

@@ -2,7 +2,8 @@ import numpy as np
 import openmdao.api as om
 import os
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from openaerostruct.meshing.mesh_generator import generate_mesh
@@ -14,10 +15,10 @@ from openaerostruct.integration.multipoint_comps import MultiCD
 # Absolute output paths — derived from __file__ so they resolve correctly
 # regardless of the CWD when this script is executed as a subprocess.
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
-_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
-_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR = os.path.join(_OUT_DIR, "agent_plots")
 _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
@@ -71,28 +72,25 @@ surf_dict = {
     "symmetry": True,
     "S_ref_type": "wetted",
     "mesh": mesh,
-
     # Required — initialized from CRM geometry; do not remove
     "twist_cp": twist_cp,
-
     # --- Aerodynamic solver parameters — always keep these ---
-    "CL0": 0.0,                      # Lift coefficient at zero AoA
-    "CD0": 0.015,                    # Profile drag (zero-lift drag)
-    "k_lam": 0.05,                   # Fraction of laminar flow
-    "t_over_c_cp": np.array([0.15]), # Thickness-to-chord ratio — affects viscous drag
-    "c_max_t": 0.303,                # Chordwise location of max thickness
-    "with_viscous": True,            # Include viscous drag
-    "with_wave": False,              # Include wave drag (transonic/supersonic only)
-
+    "CL0": 0.0,  # Lift coefficient at zero AoA
+    "CD0": 0.015,  # Profile drag (zero-lift drag)
+    "k_lam": 0.05,  # Fraction of laminar flow
+    "t_over_c_cp": np.array([0.15]),  # Thickness-to-chord ratio — affects viscous drag
+    "c_max_t": 0.303,  # Chordwise location of max thickness
+    "with_viscous": True,  # Include viscous drag
+    "with_wave": False,  # Include wave drag (transonic/supersonic only)
     # --- Optional geometry DVs — uncomment to activate ---
     # After uncommenting here, also add the matching add_design_var() call in Section 4.
     # Use path "wing_geom.<var>" (NOT "wing.<var>") — see critical note below.
-    #"chord_cp": np.ones(5),          # Chord scaling CPs (1.0 = no scaling)
-    #"xshear_cp": np.zeros(5),        # x-shear CPs [m] — generalized sweep
-    #"zshear_cp": np.zeros(5),        # z-shear CPs [m] — generalized dihedral
-    #"taper": 1.0,                    # Taper ratio
-    #"sweep": 0.0,                    # Sweep angle [deg]
-    #"dihedral": 0.0,                 # Dihedral angle [deg]
+    # "chord_cp": np.ones(5),          # Chord scaling CPs (1.0 = no scaling)
+    # "xshear_cp": np.zeros(5),        # x-shear CPs [m] — generalized sweep
+    # "zshear_cp": np.zeros(5),        # z-shear CPs [m] — generalized dihedral
+    # "taper": 1.0,                    # Taper ratio
+    # "sweep": 0.0,                    # Sweep angle [deg]
+    # "dihedral": 0.0,                 # Dihedral angle [deg]
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -114,7 +112,9 @@ prob = om.Problem()
 
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("v", val=248.136, units="m/s")
-indep_var_comp.add_output("alpha", val=np.ones(n_points) * 6.64, units="deg")  # shape=(n_points,)
+indep_var_comp.add_output(
+    "alpha", val=np.ones(n_points) * 6.64, units="deg"
+)  # shape=(n_points,)
 indep_var_comp.add_output("Mach_number", val=0.84)
 indep_var_comp.add_output("re", val=1.0e6, units="1/m")
 indep_var_comp.add_output("rho", val=0.38, units="kg/m**3")
@@ -126,7 +126,7 @@ prob.model.add_subsystem("prob_vars", indep_var_comp, promotes=["*"])
 for surface in surfaces:
     name = surface["name"]
     geom_group = Geometry(surface=surface)
-    prob.model.add_subsystem(name + "_geom", geom_group)   # subsystem = "wing_geom"
+    prob.model.add_subsystem(name + "_geom", geom_group)  # subsystem = "wing_geom"
 
 for i in range(n_points):
     aero_group = AeroPoint(surfaces=surfaces)
@@ -144,10 +144,16 @@ for i in range(n_points):
         name = surface["name"]
         prob.model.connect(point_name + ".CD", "multi_CD." + str(i) + "_CD")
         prob.model.connect(name + "_geom.mesh", point_name + "." + name + ".def_mesh")
-        prob.model.connect(name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh")
-        prob.model.connect(name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c")
+        prob.model.connect(
+            name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh"
+        )
+        prob.model.connect(
+            name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c"
+        )
 
-prob.model.add_subsystem("multi_CD", MultiCD(n_points=n_points), promotes_outputs=["CD"])
+prob.model.add_subsystem(
+    "multi_CD", MultiCD(n_points=n_points), promotes_outputs=["CD"]
+)
 
 # =============================================================================
 # 4. OPTIMIZATION SETTINGS
@@ -158,7 +164,7 @@ prob.driver.options["tol"] = 1e-9
 recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = _RUN_OUT_DIR
+prob.options["work_dir"] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
@@ -221,10 +227,10 @@ print(f"Final twist_cp: {prob.get_val('wing_geom.twist_cp')}")
 # 6. PLOTTING
 # =============================================================================
 try:
-    alpha_vals = prob.get_val('alpha')
-    CL_vals = [prob.get_val(f'aero_point_{i}.wing_perf.CL')[0] for i in range(n_points)]
-    CD_vals = [prob.get_val(f'aero_point_{i}.wing_perf.CD')[0] for i in range(n_points)]
-    twist_cp_vals = prob.get_val('wing_geom.twist_cp')
+    alpha_vals = prob.get_val("alpha")
+    CL_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CL")[0] for i in range(n_points)]
+    CD_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CD")[0] for i in range(n_points)]
+    twist_cp_vals = prob.get_val("wing_geom.twist_cp")
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
@@ -244,7 +250,9 @@ try:
     axes[1].grid(True)
 
     fig.tight_layout()
-    fig.savefig(os.path.join(_PLOTS_DIR, "aero_multipoint_results.png"), bbox_inches="tight")
+    fig.savefig(
+        os.path.join(_PLOTS_DIR, "aero_multipoint_results.png"), bbox_inches="tight"
+    )
     plt.close(fig)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:

@@ -16,21 +16,23 @@ logger = logging.getLogger("LLM_Backend")
 # ---------------------------------------------------------------------------
 # __file__-relative paths
 # ---------------------------------------------------------------------------
-_LLM_DIR     = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR     = os.path.dirname(_LLM_DIR)
+_LLM_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(_LLM_DIR)
 _SKILLS_PATH = os.path.join(_SRC_DIR, "llm", "skills.md")
 
 # ---------------------------------------------------------------------------
 # Blueprint allowlist — only these filenames are permitted as router outputs.
 # ---------------------------------------------------------------------------
-VALID_BLUEPRINTS: frozenset = frozenset({
-    "aero_analysis.py",
-    "aero_multipoint.py",
-    "aero_opt.py",
-    "aerostruct_tube.py",
-    "aerostruct_wingbox.py",
-    "struct_optimization.py",
-})
+VALID_BLUEPRINTS: frozenset = frozenset(
+    {
+        "aero_analysis.py",
+        "aero_multipoint.py",
+        "aero_opt.py",
+        "aerostruct_tube.py",
+        "aerostruct_wingbox.py",
+        "struct_optimization.py",
+    }
+)
 
 
 def _load_system_prompt() -> str:
@@ -66,7 +68,10 @@ def _parse_routing_response(response: str) -> dict:
         data["blueprints"] = validated if validated else ["aero_opt.py"]
         return data
     except Exception as e:
-        return {"blueprints": ["aero_opt.py"], "reason": f"Fallback due to parsing error: {e}"}
+        return {
+            "blueprints": ["aero_opt.py"],
+            "reason": f"Fallback due to parsing error: {e}",
+        }
 
 
 def route_intent(
@@ -80,7 +85,9 @@ def route_intent(
     Transient retry is handled inside get_llm_response() in config.py.
     """
     system_prompt = _load_system_prompt()
-    response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
+    response = get_llm_response(
+        user_prompt, model_name, system_prompt, provider=provider
+    )
     return _parse_routing_response(response)
 
 
@@ -109,19 +116,24 @@ def route_intent_stream(
         client = None
 
     if client is None or provider != "Gemini API":
-        response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
+        response = get_llm_response(
+            user_prompt, model_name, system_prompt, provider=provider
+        )
         yield response
         yield _parse_routing_response(response)
         return
 
     from google.genai import types as _types
+
     stream_config = _types.GenerateContentConfig(
         system_instruction=system_prompt,
         temperature=0.2,
         max_output_tokens=1024,
     )
 
-    logger.info(f"========== NEW LLM REQUEST (stream/router) ({model_name} via {provider}) ==========")
+    logger.info(
+        f"========== NEW LLM REQUEST (stream/router) ({model_name} via {provider}) =========="
+    )
     logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
     logger.info(f"--- USER PROMPT ---\n{user_prompt}")
 
@@ -142,7 +154,10 @@ def route_intent_stream(
                 yield text
 
         except Exception as exc:
-            if is_gemini_transient_error(exc) and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
+            if (
+                is_gemini_transient_error(exc)
+                and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1
+            ):
                 transient_hit = True
                 logger.warning(
                     f"Gemini transient error in stream/router (attempt {gemini_attempt + 1}/"
@@ -153,7 +168,9 @@ def route_intent_stream(
                 time.sleep(GEMINI_STREAM_RETRY_WAIT)
             else:
                 if not full_response:
-                    full_response = get_llm_response(user_prompt, model_name, system_prompt, provider=provider)
+                    full_response = get_llm_response(
+                        user_prompt, model_name, system_prompt, provider=provider
+                    )
                     yield full_response
 
         if transient_hit:
@@ -167,9 +184,13 @@ def route_intent_stream(
     input_tokens = None
     output_tokens = None
     try:
-        if last_chunk is not None and hasattr(last_chunk, "usage_metadata") and last_chunk.usage_metadata:
+        if (
+            last_chunk is not None
+            and hasattr(last_chunk, "usage_metadata")
+            and last_chunk.usage_metadata
+        ):
             usage = last_chunk.usage_metadata
-            input_tokens  = getattr(usage, "prompt_token_count", None)
+            input_tokens = getattr(usage, "prompt_token_count", None)
             output_tokens = getattr(usage, "candidates_token_count", None)
             logger.info(
                 f"Tokens (stream/router) — input: {input_tokens}, "

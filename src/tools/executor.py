@@ -10,39 +10,73 @@ import struct
 # __file__-relative base paths
 # ---------------------------------------------------------------------------
 _TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR   = os.path.dirname(_TOOLS_DIR)
+_SRC_DIR = os.path.dirname(_TOOLS_DIR)
 _DEFAULT_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
 
 # ---------------------------------------------------------------------------
 # Static-analysis whitelist
 # ---------------------------------------------------------------------------
 # Only these top-level module names are permitted in LLM-generated scripts.
-ALLOWED_TOP_LEVEL_IMPORTS: frozenset = frozenset({
-    # Numerics / science
-    "numpy", "scipy",
-    # Simulation frameworks
-    "openaerostruct", "openmdao",
-    # Plotting – niceplots is a project dependency used by several blueprints
-    # for styled matplotlib figures; plotly is used by the analysis blueprint
-    "matplotlib", "plotly", "niceplots",
-    # Data handling
-    "pandas",
-    # Safe standard-library modules for computation scripts
-    "os", "sys", "warnings", "math", "functools", "itertools",
-    "collections", "typing", "pathlib", "re"
-})
+ALLOWED_TOP_LEVEL_IMPORTS: frozenset = frozenset(
+    {
+        # Numerics / science
+        "numpy",
+        "scipy",
+        # Simulation frameworks
+        "openaerostruct",
+        "openmdao",
+        # Plotting – niceplots is a project dependency used by several blueprints
+        # for styled matplotlib figures; plotly is used by the analysis blueprint
+        "matplotlib",
+        "plotly",
+        "niceplots",
+        # Data handling
+        "pandas",
+        # Safe standard-library modules for computation scripts
+        "os",
+        "sys",
+        "warnings",
+        "math",
+        "functools",
+        "itertools",
+        "collections",
+        "typing",
+        "pathlib",
+        "re",
+    }
+)
 
 # AST-level call names that must never appear, even if the module is allowed.
-_DANGEROUS_CALL_NAMES: frozenset = frozenset({
-    # Built-in code execution
-    "eval", "exec", "compile", "__import__", "breakpoint",
-    # os-module process helpers
-    "system", "popen", "execv", "execve", "execvp", "execvpe",
-    "spawnl", "spawnle", "spawnlp", "spawnlpe",
-    "spawnv", "spawnve", "spawnvp", "spawnvpe",
-    # subprocess / shell helpers
-    "call", "Popen", "check_call", "check_output",
-})
+_DANGEROUS_CALL_NAMES: frozenset = frozenset(
+    {
+        # Built-in code execution
+        "eval",
+        "exec",
+        "compile",
+        "__import__",
+        "breakpoint",
+        # os-module process helpers
+        "system",
+        "popen",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "spawnl",
+        "spawnle",
+        "spawnlp",
+        "spawnlpe",
+        "spawnv",
+        "spawnve",
+        "spawnvp",
+        "spawnvpe",
+        # subprocess / shell helpers
+        "call",
+        "Popen",
+        "check_call",
+        "check_output",
+    }
+)
 
 
 def validate_generated_code(code: str) -> tuple:
@@ -91,28 +125,28 @@ def validate_generated_code(code: str) -> tuple:
 # Deny-list: network I/O + process-spawning syscalls.
 # Everything else is allowed (Python / NumPy / SciPy need many syscalls).
 _BLOCKED_SYSCALLS_X86_64: tuple = (
-    41,   # socket
-    42,   # connect
-    43,   # accept
-    44,   # sendto
-    45,   # recvfrom
-    46,   # sendmsg
-    47,   # recvmsg
-    48,   # shutdown
-    49,   # bind
-    50,   # listen
-    56,   # clone
-    57,   # fork
-    58,   # vfork
-    59,   # execve
+    41,  # socket
+    42,  # connect
+    43,  # accept
+    44,  # sendto
+    45,  # recvfrom
+    46,  # sendmsg
+    47,  # recvmsg
+    48,  # shutdown
+    49,  # bind
+    50,  # listen
+    56,  # clone
+    57,  # fork
+    58,  # vfork
+    59,  # execve
     322,  # execveat
 )
 
 _PR_SET_NO_NEW_PRIVS = 38
-_PR_SET_SECCOMP      = 22
+_PR_SET_SECCOMP = 22
 _SECCOMP_MODE_FILTER = 2
-_SECCOMP_RET_ALLOW   = 0x7FFF0000
-_SECCOMP_RET_ERRNO   = 0x00050001  # ERRNO(EPERM) – returns clear error instead of KILL
+_SECCOMP_RET_ALLOW = 0x7FFF0000
+_SECCOMP_RET_ERRNO = 0x00050001  # ERRNO(EPERM) – returns clear error instead of KILL
 
 
 def _build_seccomp_preexec():
@@ -143,13 +177,13 @@ def _build_seccomp_preexec():
     def _bpf_jump(code: int, k: int, jt: int, jf: int) -> bytes:
         return struct.pack("<HBBI", code, jt, jf, k)
 
-    BPF_LD  = 0x00
+    BPF_LD = 0x00
     BPF_JMP = 0x05
     BPF_RET = 0x06
-    BPF_W   = 0x00
+    BPF_W = 0x00
     BPF_ABS = 0x20
     BPF_JEQ = 0x10
-    BPF_K   = 0x00
+    BPF_K = 0x00
 
     n = len(blocked)
     instructions = [_bpf_stmt(BPF_LD | BPF_W | BPF_ABS, 0)]
@@ -190,6 +224,7 @@ _SECCOMP_PREEXEC = _build_seccomp_preexec()
 # Public API
 # ---------------------------------------------------------------------------
 
+
 class ExecutionResult:
     def __init__(self, exit_code, stdout, stderr):
         self.exit_code = exit_code
@@ -220,8 +255,9 @@ def execute_run(script_path=_DEFAULT_SCRIPT, timeout=120):
     is_safe, reason = validate_generated_code(code)
     if not is_safe:
         return ExecutionResult(
-            -1, "",
-            f"SecurityError: Generated code was rejected by static analysis – {reason}"
+            -1,
+            "",
+            f"SecurityError: Generated code was rejected by static analysis – {reason}",
         )
 
     # ── Subprocess execution ───────────────────────────────────────────────

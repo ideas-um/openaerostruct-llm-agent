@@ -15,12 +15,14 @@ logger = logging.getLogger("LLM_Backend")
 # ---------------------------------------------------------------------------
 # Resolve the blueprints directory relative to this file.
 # ---------------------------------------------------------------------------
-_LLM_DIR        = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR        = os.path.dirname(_LLM_DIR)
+_LLM_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(_LLM_DIR)
 _BLUEPRINTS_DIR = os.path.realpath(os.path.join(_SRC_DIR, "blueprints"))
 
 
-def _build_prompt(user_prompt: str, blueprint_names: list[str], feedback: str) -> tuple[str, str]:
+def _build_prompt(
+    user_prompt: str, blueprint_names: list[str], feedback: str
+) -> tuple[str, str]:
     """
     Assemble the system prompt and user prompt that get sent to the LLM.
     Separated out so both the streaming and non-streaming paths can share it.
@@ -29,11 +31,15 @@ def _build_prompt(user_prompt: str, blueprint_names: list[str], feedback: str) -
     for name in blueprint_names:
         candidate = os.path.realpath(os.path.join(_BLUEPRINTS_DIR, name))
         if not candidate.startswith(_BLUEPRINTS_DIR + os.sep):
-            blueprints_context += f"\nWarning: Blueprint '{name}' rejected (path traversal).\n"
+            blueprints_context += (
+                f"\nWarning: Blueprint '{name}' rejected (path traversal).\n"
+            )
             continue
         if os.path.exists(candidate):
             with open(candidate, "r") as f:
-                blueprints_context += f"\n--- BLUEPRINT: {name} ---\n```python\n{f.read()}\n```\n"
+                blueprints_context += (
+                    f"\n--- BLUEPRINT: {name} ---\n```python\n{f.read()}\n```\n"
+                )
         else:
             blueprints_context += f"\nWarning: Blueprint '{name}' not found.\n"
 
@@ -52,7 +58,9 @@ def _build_prompt(user_prompt: str, blueprint_names: list[str], feedback: str) -
         f"Base Blueprints provided for reference:\n{blueprints_context}\n"
     )
     if feedback and feedback != "Initial generation":
-        prompt += f"\nPrevious execution failed. Feedback:\n{feedback}\nPlease fix the logic."
+        prompt += (
+            f"\nPrevious execution failed. Feedback:\n{feedback}\nPlease fix the logic."
+        )
 
     return system_prompt, prompt
 
@@ -68,9 +76,9 @@ def _parse_response(response: str) -> tuple[str, str]:
         code = code_part.strip()
     else:
         import_index = response.find("import ")
-        from_index   = response.find("from ")
-        candidates   = [i for i in [import_index, from_index] if i != -1]
-        start_index  = min(candidates) if candidates else -1
+        from_index = response.find("from ")
+        candidates = [i for i in [import_index, from_index] if i != -1]
+        start_index = min(candidates) if candidates else -1
 
         if start_index != -1:
             reasoning = response[:start_index].replace("REASONING:", "").strip()
@@ -140,7 +148,9 @@ def generate_code_stream(
         client = None
 
     if client is None or provider != "Gemini API":  # noqa: SIM102
-        response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
+        response = get_llm_response(
+            prompt, model_name, system_prompt, provider=provider
+        )
         yield response
         reasoning, code = _parse_response(response)
         yield (code, reasoning)
@@ -148,13 +158,16 @@ def generate_code_stream(
 
     # --- Gemini streaming path ---
     from google.genai import types as _types
+
     stream_config = _types.GenerateContentConfig(
         system_instruction=system_prompt or None,
         temperature=0.2,
         max_output_tokens=8192,
     )
 
-    logger.info(f"========== NEW LLM REQUEST (stream) ({model_name} via {provider}) ==========")
+    logger.info(
+        f"========== NEW LLM REQUEST (stream) ({model_name} via {provider}) =========="
+    )
     logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
     logger.info(f"--- USER PROMPT ---\n{prompt}")
 
@@ -175,20 +188,25 @@ def generate_code_stream(
                 yield text
 
         except Exception as exc:
-            if is_gemini_transient_error(exc) and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
+            if (
+                is_gemini_transient_error(exc)
+                and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1
+            ):
                 transient_hit = True
                 logger.warning(
                     f"Gemini transient error during stream (attempt {gemini_attempt + 1}/"
                     f"{GEMINI_STREAM_MAX_RETRIES}): {exc}. "
                     f"Waiting {GEMINI_STREAM_RETRY_WAIT}s before retry."
                 )
-                
+
                 yield f"\n\n⚠️ Gemini API overloaded — retrying in {GEMINI_STREAM_RETRY_WAIT}s (attempt {gemini_attempt + 1}/{GEMINI_STREAM_MAX_RETRIES})...\n"
                 time.sleep(GEMINI_STREAM_RETRY_WAIT)
             else:
                 # Non-transient error or final attempt — fall back to non-streaming
                 if not full_response:
-                    full_response = get_llm_response(prompt, model_name, system_prompt, provider=provider)
+                    full_response = get_llm_response(
+                        prompt, model_name, system_prompt, provider=provider
+                    )
                     yield full_response
 
         if transient_hit:
@@ -203,13 +221,16 @@ def generate_code_stream(
     input_tokens = None
     output_tokens = None
     try:
-        if last_chunk is not None and hasattr(last_chunk, "usage_metadata") and last_chunk.usage_metadata:
+        if (
+            last_chunk is not None
+            and hasattr(last_chunk, "usage_metadata")
+            and last_chunk.usage_metadata
+        ):
             usage = last_chunk.usage_metadata
-            input_tokens  = getattr(usage, "prompt_token_count", None)
+            input_tokens = getattr(usage, "prompt_token_count", None)
             output_tokens = getattr(usage, "candidates_token_count", None)
             logger.info(
-                f"Tokens (stream) — input: {input_tokens}, "
-                f"output: {output_tokens}"
+                f"Tokens (stream) — input: {input_tokens}, output: {output_tokens}"
             )
     except Exception:
         pass
