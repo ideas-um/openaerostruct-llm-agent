@@ -2,7 +2,8 @@ import numpy as np
 import openmdao.api as om
 import os
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from openaerostruct.meshing.mesh_generator import generate_mesh
 from openaerostruct.geometry.geometry_group import Geometry
@@ -12,10 +13,10 @@ from openaerostruct.aerodynamics.aero_groups import AeroPoint
 # Absolute output paths — derived from __file__ so they resolve correctly
 # regardless of the CWD when this script is executed as a subprocess.
 # ---------------------------------------------------------------------------
-_SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-_SRC_DIR     = os.path.dirname(_SCRIPT_DIR)
-_OUT_DIR     = os.path.join(_SRC_DIR, "openaerostruct_out")
-_PLOTS_DIR   = os.path.join(_OUT_DIR, "agent_plots")
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SRC_DIR = os.path.dirname(_SCRIPT_DIR)
+_OUT_DIR = os.path.join(_SRC_DIR, "openaerostruct_out")
+_PLOTS_DIR = os.path.join(_OUT_DIR, "agent_plots")
 _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
@@ -32,13 +33,13 @@ os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 # num_twist_cp is used when we want to initialize twist as a design variable
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
-    "num_y": 19,            # Number of spanwise panels (must be odd)
-    "num_x": 3,             # Number of chordwise panels
-    "wing_type": "rect",    # "rect" or "CRM"
+    "num_y": 19,  # Number of spanwise panels (must be odd)
+    "num_x": 3,  # Number of chordwise panels
+    "wing_type": "rect",  # "rect" or "CRM"
     "symmetry": True,
     # --- rect-only parameters (ignored when wing_type="CRM") ---
-    "span": 10.0,           # Full wingspan [m]
-    "root_chord": 2.0,      # Root chord [m]
+    "span": 10.0,  # Full wingspan [m]
+    "root_chord": 2.0,  # Root chord [m]
     "span_cos_spacing": 0.0,
     "chord_cos_spacing": 0.0,
 }
@@ -48,9 +49,9 @@ mesh_dict = {
 # We handle both cases here so no code change is needed when switching wing_type.
 _mesh_result = generate_mesh(mesh_dict)
 if isinstance(_mesh_result, tuple):
-    mesh, _crm_twist_cp = _mesh_result   # CRM: unpack both
+    mesh, _crm_twist_cp = _mesh_result  # CRM: unpack both
 else:
-    mesh = _mesh_result                  # rect: single array
+    mesh = _mesh_result  # rect: single array
     _crm_twist_cp = None
 
 # =============================================================================
@@ -89,27 +90,25 @@ surface = {
     "symmetry": True,
     "S_ref_type": "wetted",
     "mesh": mesh,
-
     # --- Aerodynamic solver parameters — always keep these ---
-    "CL0": 0.0,                      # Lift coefficient at zero AoA
-    "CD0": 0.0,                      # Profile drag (zero-lift drag)
-    "with_viscous": True,            # Include viscous drag
-    "with_wave": False,              # Include wave drag (transonic/supersonic only)
-    "k_lam": 0.05,                   # Fraction of laminar flow (0.05 = 5%)
-    "c_max_t": 0.303,                # Chordwise location of max thickness (NACA 4-digit: 0.303)
-    "t_over_c_cp": np.array([0.12]), # Thickness-to-chord ratio — affects viscous drag
-
+    "CL0": 0.0,  # Lift coefficient at zero AoA
+    "CD0": 0.0,  # Profile drag (zero-lift drag)
+    "with_viscous": True,  # Include viscous drag
+    "with_wave": False,  # Include wave drag (transonic/supersonic only)
+    "k_lam": 0.05,  # Fraction of laminar flow (0.05 = 5%)
+    "c_max_t": 0.303,  # Chordwise location of max thickness (NACA 4-digit: 0.303)
+    "t_over_c_cp": np.array([0.12]),  # Thickness-to-chord ratio — affects viscous drag
     # --- Geometry DVs — uncomment each key you want to optimize ---
     # For CRM: use _crm_twist_cp for twist_cp initialization.
     # For rect: use np.zeros(N) or np.array([...]) manually.
     # After uncommenting here, also add the matching add_design_var() call in Section 4.
-    #"twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(3),
-    #"chord_cp": np.ones(3),          # Chord scaling CPs (1.0 = no scaling)
-    #"xshear_cp": np.zeros(3),        # x-shear CPs [m] — generalized sweep
-    #"zshear_cp": np.zeros(3),        # z-shear CPs [m] — generalized dihedral
-    #"taper": 1.0,                    # Taper ratio
-    #"sweep": 0.0,                    # Sweep angle [deg]
-    #"dihedral": 0.0,                 # Dihedral angle [deg]
+    # "twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(3),
+    # "chord_cp": np.ones(3),          # Chord scaling CPs (1.0 = no scaling)
+    # "xshear_cp": np.zeros(3),        # x-shear CPs [m] — generalized sweep
+    # "zshear_cp": np.zeros(3),        # z-shear CPs [m] — generalized dihedral
+    # "taper": 1.0,                    # Taper ratio
+    # "sweep": 0.0,                    # Sweep angle [deg]
+    # "dihedral": 0.0,                 # Dihedral angle [deg]
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -122,9 +121,9 @@ prob = om.Problem()
 # Re is computed as rho * v / 1.81e-5 [1/m] — do NOT use surface["root_chord"].
 # === AGENT EDITABLE SECTION START ===
 Mach_number = 0.5
-rho = 1.225                          # Air density [kg/m^3]
-v = Mach_number * 340.0              # Freestream speed [m/s]
-re = rho * v / 1.81e-5               # Reynolds number per unit length [1/m]
+rho = 1.225  # Air density [kg/m^3]
+v = Mach_number * 340.0  # Freestream speed [m/s]
+re = rho * v / 1.81e-5  # Reynolds number per unit length [1/m]
 # === AGENT EDITABLE SECTION END ===
 
 indep_var_comp = om.IndepVarComp()
@@ -164,7 +163,7 @@ prob.driver = om.ScipyOptimizeDriver()
 recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
-prob.options['work_dir'] = _RUN_OUT_DIR
+prob.options["work_dir"] = _RUN_OUT_DIR
 
 # === AGENT EDITABLE SECTION START ===
 # --- Design Variables ---
@@ -232,9 +231,9 @@ print(f"Final CD:    {prob.get_val(f'{point_name}.wing_perf.CD')[0]:.6f}")
 # 6. PLOTTING
 # =============================================================================
 try:
-    alpha_val = prob.get_val('alpha', units='deg')[0]
-    CL_val = prob.get_val(f'{point_name}.wing_perf.CL')[0]
-    CD_val = prob.get_val(f'{point_name}.wing_perf.CD')[0]
+    alpha_val = prob.get_val("alpha", units="deg")[0]
+    CL_val = prob.get_val(f"{point_name}.wing_perf.CL")[0]
+    CD_val = prob.get_val(f"{point_name}.wing_perf.CD")[0]
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     axes[0].bar(["CL", "CD"], [CL_val, CD_val], color=["steelblue", "tomato"])

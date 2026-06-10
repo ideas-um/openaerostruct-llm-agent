@@ -53,11 +53,12 @@ mesh, twist_cp = generate_mesh(mesh_dict)  # MUST unpack both — mesh is ndarra
 # =============================================================================
 # 2. SURFACE DEFINITION
 # =============================================================================
-# CRITICAL: Any parameter used as a design variable must be declared here first.
-# twist_cp, spar_thickness_cp, skin_thickness_cp, t_over_c_cp are all pre-included.
-# The number of control points in each array determines the DV vector size.
-# DO NOT remove n_point_masses, point_masses, or point_mass_locations — removing
-# them causes a size-0 nodal_weightings array crash during prob.setup().
+# The agent-editable section below contains ONLY the parameters the agent should
+# change: structural DVs (twist_cp, spar/skin thickness, t_over_c), material
+# properties, and Wf_reserve.
+#
+# Everything else (airfoil coords, n_point_masses, distributed_fuel_weight, etc.)
+# is set in the fixed block immediately after and must not be touched.
 #
 # FULL DV CATALOG for aerostructural wingbox FEM (from God Document):
 # -----------------------------------------------
@@ -88,12 +89,6 @@ surf_dict = {
     "mesh": mesh,
     "fem_model_type": "wingbox",
 
-    # Airfoil cross-section data (fixed — do not modify)
-    "data_x_upper": upper_x,
-    "data_x_lower": lower_x,
-    "data_y_upper": upper_y,
-    "data_y_lower": lower_y,
-
     # Structural DVs — number of CPs must match add_design_var() usage
     "twist_cp": np.array([4.0, 5.0, 8.0, 9.0]),                    # Spanwise twist [deg]
     "spar_thickness_cp": np.array([0.004, 0.005, 0.008, 0.01]),     # Spar wall thickness [m]
@@ -106,30 +101,50 @@ surf_dict = {
     #"xshear_cp": np.zeros(4),                                       # x-shear CPs [m]
     #"zshear_cp": np.zeros(4),                                       # z-shear CPs [m]
 
+    # Structural material — modify to match the user's material specification
+    "E": 73.1e9,
+    "G": (73.1e9 / 2 / 1.33),
+    "yield": 420.0e6,
+    "safety_factor": 1.5,
+    "mrho": 2.78e3,
+
+    "Wf_reserve": 15000.0,          # Reserve fuel [kg]
+}
+# === AGENT EDITABLE SECTION END ===
+
+# ---- Fixed infrastructure — DO NOT MODIFY BELOW THIS LINE ----
+# These keys are required by OAS internals and must not be removed or changed.
+surf_dict.update({
+    # Airfoil cross-section coordinates — required by wingbox FEM, fixed for uCRM.
+    # Removing or replacing these causes KeyError: 'data_y_upper' at prob.setup().
+    "data_x_upper": upper_x,
+    "data_x_lower": lower_x,
+    "data_y_upper": upper_y,
+    "data_y_lower": lower_y,
     "original_wingbox_airfoil_t_over_c": 0.12,
+    # Aerodynamic solver parameters — do not remove
     "CL0": 0.0,
     "CD0": 0.0078,
     "with_viscous": True,
     "with_wave": True,
     "k_lam": 0.05,
     "c_max_t": 0.38,
-
-    # Structural material — aluminum
-    "E": 73.1e9,
-    "G": (73.1e9 / 2 / 1.33),
-    "yield": 420.0e6,
-    "safety_factor": 1.5,
-    "mrho": 2.78e3,
+    # Structural bookkeeping — do not remove
     "strength_factor_for_upper_skin": 1.0,
     "wing_weight_ratio": 1.25,
     "exact_failure_constraint": False,
     "struct_weight_relief": True,
+    # distributed_fuel_weight MUST stay True — the fuel loop connections below depend on it.
+    # Setting False silently drops fuel weight relief and breaks the fuel_diff constraint.
     "distributed_fuel_weight": True,
-    "n_point_masses": 1,        # KEEP — removing this causes size-0 crash in setup
+    # n_point_masses MUST stay 1. OAS always instantiates ComputePointMassLoads and
+    # n_point_masses=0 creates a size-0 nodal_weightings array that crashes prob.setup()
+    # with: ValueError: 'nodal_weightings' is an array of size 0.
+    # The dummy point mass below (10 kg, far from wing) satisfies the requirement with
+    # negligible effect on results.
+    "n_point_masses": 1,
     "fuel_density": 803.0,
-    "Wf_reserve": 15000.0,          # Reserve fuel [kg]
-}
-# === AGENT EDITABLE SECTION END ===
+})
 
 surfaces = [surf_dict]
 
@@ -142,13 +157,25 @@ prob = om.Problem()
 
 # === AGENT EDITABLE SECTION START ===
 # Mission and flight condition parameters.
+# Point 0 = cruise, Point 1 = maneuver (sea level by convention).
+# Set altitudes and Mach numbers — v and speed_of_sound are derived from ISA.
+_altitudes    = np.array([11000.0, 0.0 ])   # Altitude per point [m]
+_Mach_numbers = np.array([0.85,    0.64])   # Mach per point
+_rho_vals     = np.array([0.348,   1.225])  # Air density per point [kg/m^3]
+
+def _isa_a(h):
+    T = max(288.15 - 0.0065 * h, 216.65)   # ISA temperature [K], clamped at tropopause
+    return np.sqrt(1.4 * 287.058 * T)       # Speed of sound [m/s]
+
+_a_vals = np.array([_isa_a(h) for h in _altitudes])   # Speed of sound per point [m/s]
+_v_vals = _Mach_numbers * _a_vals                       # Velocity per point [m/s]
+
 indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("Mach_number", val=np.array([0.85, 0.64]))
-indep_var_comp.add_output("v", val=np.array([0.85 * 295.07, 0.64 * 340.294]), units="m/s")
-indep_var_comp.add_output("re", val=np.array([0.348 * 295.07 * 0.85 / (1.43e-5),
-                                               1.225 * 340.294 * 0.64 / (1.81206e-5)]), units="1/m")
-indep_var_comp.add_output("rho", val=np.array([0.348, 1.225]), units="kg/m**3")
-indep_var_comp.add_output("speed_of_sound", val=np.array([295.07, 340.294]), units="m/s")
+indep_var_comp.add_output("Mach_number", val=_Mach_numbers)
+indep_var_comp.add_output("v", val=_v_vals, units="m/s")                           # Derived from ISA
+indep_var_comp.add_output("re", val=_rho_vals * _v_vals / 1.81e-5, units="1/m")   # Derived from ISA
+indep_var_comp.add_output("rho", val=_rho_vals, units="kg/m**3")
+indep_var_comp.add_output("speed_of_sound", val=_a_vals, units="m/s")              # Derived from ISA
 indep_var_comp.add_output("CT", val=0.53 / 3600, units="1/s")       # Thrust-specific fuel consumption
 indep_var_comp.add_output("R", val=14.307e6, units="m")              # Range [m]
 indep_var_comp.add_output("W0_without_point_masses", val=128000 + surf_dict["Wf_reserve"], units="kg")

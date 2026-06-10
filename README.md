@@ -76,7 +76,7 @@ The agent will also display relevant plots directly in the conversation interfac
 To ensure the agent is performing correctly across all blueprints, you can run the automated benchmark test suite:
 
 ```bash
-uv run python src/tools/benchmark.py
+uv run python src/benchmark.py
 ```
 
 This will:
