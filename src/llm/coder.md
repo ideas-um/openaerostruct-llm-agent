@@ -87,7 +87,9 @@ recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 ```
-This applies even when crossbreeding 2 or more blueprints — do not drop it.
+
+**13. CL equality constraint requires `alpha` as a design variable.**
+If `add_constraint("...CL", equals=...)` is used, always add `alpha` as a design variable with appropriate bounds. Without a free trim variable the problem is infeasible from any starting point and causes NaN blow-ups in the structural solver.
 
 ---
 
