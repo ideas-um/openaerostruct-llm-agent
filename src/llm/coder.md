@@ -31,6 +31,16 @@ Only modify code inside these markers. Leave everything else unchanged — inclu
 
 ---
 
+## MANDATORY INLINE COMMENTING (ULTRA IMPORTANT)
+
+Whenever you add a new line, or modify a line of code from the original blueprint, you MUST add an inline comment explaining exactly what you did and why. 
+Format your comment exactly like this: `# I changed/added [X] because [Y]`.
+
+**Example:**
+`prob.driver.options["optimizer"] = "SLSQP"  # I changed the optimizer to SLSQP because the user requested it.`
+
+---
+
 ## CRITICAL RULES
 
 These points are NOT covered inside the blueprints and violating them will crash the script.

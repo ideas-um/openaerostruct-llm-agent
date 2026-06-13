@@ -4,48 +4,8 @@ agent_logic.py — shared backend for app.py and benchmark.py.
 Provides run_agent() which handles:
   - iterative code generation + execution
   - safety scanning
-  - full error history accumulation (all previous errors are passed to the
-    LLM on every retry, not just the most recent one)
+  - full error history accumulation
   - optional streaming via a callback for the Streamlit UI
-
-Public API
-----------
-run_agent(
-    user_prompt,
-    blueprints,
-    model_name,
-    provider,
-    max_retries,
-    stream=False,
-    callback=None,
-) -> AgentResult
-
-AgentResult fields
-------------------
-  success       bool
-  final_code    str
-  final_summary str
-  plots         list[str]
-  attempts      int           # how many attempts were made (1-based)
-  error_logs    list[str]     # one entry per failed attempt
-  converged     str           # "yes" | "no" | "n/a"
-
-Callback protocol
------------------
-callback(event: str, data: dict) is called during execution so the UI can
-update in real time without agent_logic knowing anything about Streamlit.
-
-Events emitted:
-  "attempt_start"   {"attempt": int, "max_retries": int}
-  "code_chunk"      {"chunk": str}          # streaming only
-  "code_ready"      {"code": str, "reasoning": str}
-  "safety_blocked"  {"violations": list[str]}
-  "exec_success"    {"db_summary": str, "plots": list[str]}
-  "exec_error"      {"stderr_tail": str}
-  "no_converge"       {"db_summary": str, "stdout_tail": str}
-  "no_converge_final" {"db_summary": str, "error_logs": list[str], "suggestion": str}
-                      # app mode only (retry_on_no_converge=False)
-  "done"              {"success": bool, "attempts": int}
 """
 
 from __future__ import annotations
@@ -56,23 +16,28 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-# ---------------------------------------------------------------------------
-# Paths — agent_logic.py lives at src/agent_logic.py
-# Generated scripts (blueprints) compute their paths as:
-#   _SCRIPT_DIR = src/          (where generated_run.py lives)
-#   _SRC_DIR    = project_root/ (parent of src/)
-#   _OUT_DIR    = project_root/openaerostruct_out/
-# agent_logic.py must use the same root so DB and plot lookups match.
-# ---------------------------------------------------------------------------
-_SRC_DIR = os.path.dirname(os.path.abspath(__file__))  # src/
-_PROJECT_DIR = os.path.dirname(_SRC_DIR)  # project root
+_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_SRC_DIR)
 _OUT_DIR = os.path.join(_PROJECT_DIR, "openaerostruct_out")
 _PLOTS_DIR = os.path.join(_OUT_DIR, "agent_plots")
 _GEN_RUN_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 _GEN_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
 
+
+def _approx_tokens(text: str) -> int:
+    """Helper to estimate tokens without altering the hidden LLM API layer."""
+    if not text:
+        return 0
+    try:
+        import tiktoken
+
+        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
+    except ImportError:
+        return len(str(text)) // 4
+
+
 # ---------------------------------------------------------------------------
-# Sanitize stderr/stdout before feeding back to the LLM.
+# Sanitize feedback
 # ---------------------------------------------------------------------------
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
 _INJECTION_PATTERN = re.compile(
@@ -197,10 +162,7 @@ def check_script_safety(code: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Artifact helpers
 # ---------------------------------------------------------------------------
-
-
 def cleanup_artifacts():
-    """Delete plots and output files from the previous run."""
     for p in [_OUT_DIR, _PLOTS_DIR, _GEN_RUN_DIR]:
         if os.path.exists(p):
             for filename in os.listdir(p):
@@ -217,7 +179,6 @@ def cleanup_artifacts():
 
 
 def get_generated_plots() -> list[str]:
-    """Return sorted list of image/PDF files produced by the last run."""
     plots = []
     if os.path.exists(_PLOTS_DIR):
         for f in os.listdir(_PLOTS_DIR):
@@ -227,7 +188,6 @@ def get_generated_plots() -> list[str]:
 
 
 def _find_db_summary() -> str:
-    """Look for an optimization DB in the standard locations and return a summary."""
     try:
         from tools.db_reader import summarize_optimization
     except ImportError:
@@ -251,28 +211,25 @@ def _find_db_summary() -> str:
 # ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
-
-
 @dataclass
 class AgentResult:
     success: bool = False
     final_code: str = ""
     final_summary: str = ""
     plots: list[str] = field(default_factory=list)
-    attempts: int = 0  # number of attempts made
+    attempts: int = 0
     error_logs: list[str] = field(default_factory=list)
-    converged: str = "n/a"  # "yes" | "no" | "n/a"
+    converged: str = "n/a"
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
 # Core agent loop
 # ---------------------------------------------------------------------------
-
-
 def _get_relaxation_suggestion(
     user_prompt: str, error_logs: list, model_name: str, provider: str
-) -> str:
-    """Ask the LLM for concrete bound/DV relaxations given the convergence history."""
+) -> tuple[str, int, int]:
     from llm.config import get_llm_response
 
     prompt = (
@@ -287,22 +244,18 @@ def _get_relaxation_suggestion(
         "adjusting flight conditions. Be specific with numbers. Keep the response "
         "under 150 words."
     )
+    in_tok = _approx_tokens(prompt)
     try:
-        return get_llm_response(prompt, model_name, provider=provider)
+        ans = get_llm_response(prompt, model_name, provider=provider)
+        return ans, in_tok, _approx_tokens(ans)
     except Exception:
-        return (
-            "Could not generate a suggestion automatically. Consider: "
-            "widening DV bounds, starting from a feasible initial point, "
-            "or relaxing constraints."
+        fallback = (
+            "Could not generate a suggestion automatically. Consider relaxing bounds."
         )
+        return fallback, in_tok, _approx_tokens(fallback)
 
 
 def _build_feedback(error_history: list[str]) -> str:
-    """
-    Concatenate the full error history into a single feedback string for the LLM.
-    Each entry is labelled with its attempt number so the model can see the
-    progression of failures.
-    """
     if not error_history:
         return "Initial generation"
     parts = []
@@ -327,33 +280,7 @@ def run_agent(
     prior_error_logs: Optional[list[str]] = None,
     retry_on_no_converge: bool = False,
 ) -> AgentResult:
-    """
-    Run the full agent loop: generate code → safety-scan → execute → evaluate.
 
-    Success = script runs without error AND (for optimizations) converges.
-
-    Parameters
-    ----------
-    user_prompt           : The user's design request (and any conversation context).
-    blueprints            : List of blueprint filenames chosen by the router.
-    model_name            : LLM model identifier.
-    provider              : "Gemini API" or "Ollama".
-    max_retries           : Maximum number of generation+execution attempts.
-    prior_error_logs      : Error logs from a previous run.
-                            Pre-populates error_history so the LLM sees what already failed.
-    stream                : If True, use generate_code_stream (yields chunks via callback).
-    callback              : Optional function(event, data) called at each stage for UI updates.
-    gen_script_path       : Override the path where the generated script is written.
-                            Defaults to _GEN_SCRIPT (src/generated_run.py).
-    retry_on_no_converge  : If True, non-convergence is fed back as an error and the loop
-                            retries (benchmark mode). If False (default), non-convergence
-                            stops the loop immediately so the app can offer a relaxation
-                            suggestion (app mode).
-
-    Returns
-    -------
-    AgentResult
-    """
     from llm.coder import generate_code, generate_code_stream
     from tools.executor import execute_run
 
@@ -365,17 +292,12 @@ def run_agent(
 
     result = AgentResult()
     error_history: list[str] = list(prior_error_logs) if prior_error_logs else []
-
     attempt = 0
 
     while attempt < max_retries:
         emit("attempt_start", {"max_retries": max_retries})
-
         feedback = _build_feedback(error_history)
 
-        # ------------------------------------------------------------------
-        # Code generation
-        # ------------------------------------------------------------------
         code, reasoning = "", ""
 
         try:
@@ -388,17 +310,21 @@ def run_agent(
                     provider=provider,
                 ):
                     if isinstance(chunk, tuple):
-                        code, reasoning = chunk
+                        code, reasoning, in_tok, out_tok = chunk
+                        result.input_tokens += in_tok
+                        result.output_tokens += out_tok
                     else:
                         emit("code_chunk", {"chunk": chunk})
             else:
-                code, reasoning = generate_code(
+                code, reasoning, in_tok, out_tok = generate_code(
                     user_prompt,
                     blueprints,
                     feedback,
                     model_name=model_name,
                     provider=provider,
                 )
+                result.input_tokens += in_tok
+                result.output_tokens += out_tok
         except Exception as exc:
             err = f"Code generation error: {sanitize_feedback(str(exc), max_chars=500)}"
             error_history.append(err)
@@ -412,22 +338,16 @@ def run_agent(
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
 
-        # ------------------------------------------------------------------
-        # Safety scan
-        # ------------------------------------------------------------------
         violations = check_script_safety(code)
         if violations:
             violation_text = "\n".join(f"- {v}" for v in violations)
             err = f"Script blocked by safety checker. Violations:\n{violation_text}"
-            error_history.append(err)
+            error_history.append(f"Code:\n```python\n{code}\n```\nError:\n{err}")
             result.error_logs.append(f"[attempt {attempt + 1}] {err}")
             emit("safety_blocked", {"violations": violations})
             attempt += 1
             continue
 
-        # ------------------------------------------------------------------
-        # Execution
-        # ------------------------------------------------------------------
         exec_result = execute_run(script_path, timeout=120)
 
         if exec_result.exit_code == 0:
@@ -438,7 +358,6 @@ def run_agent(
             emit("exec_success", {"db_summary": db_summary, "plots": plots})
 
             is_optimization = "run_driver()" in code
-
             if not is_optimization:
                 result.converged = "n/a"
                 result.success = True
@@ -446,9 +365,7 @@ def run_agent(
                 emit("done", {"success": True, "attempts": result.attempts})
                 return result
 
-            # Convergence detection
             _stdout_lower = exec_result.stdout.lower()
-
             _failed = any(
                 m in _stdout_lower
                 for m in [
@@ -484,47 +401,41 @@ def run_agent(
             else:
                 result.converged = "no"
                 stdout_tail = sanitize_feedback(exec_result.stdout, max_chars=400)
-                err = (
-                    f"Optimization did not converge.\n"
-                    + (
-                        f"DB summary:\n{db_summary}\n\n"
-                        if db_summary and "No optimization" not in db_summary
-                        else ""
-                    )
-                    + f"Stdout tail:\n{stdout_tail}"
-                )
-                result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+                err_msg = f"Optimization did not converge.\n"
+                if db_summary and "No optimization" not in db_summary:
+                    err_msg += f"DB summary:\n{db_summary}\n\n"
+                err_msg += f"Stdout tail:\n{stdout_tail}"
+
+                result.error_logs.append(f"[attempt {attempt + 1}] {err_msg}")
                 emit(
                     "no_converge",
                     {"db_summary": db_summary, "stdout_tail": stdout_tail},
                 )
+
                 if retry_on_no_converge:
-                    # Benchmark mode: feed convergence failure back and retry.
-                    error_history.append(err)
+                    error_history.append(
+                        f"Code:\n```python\n{code}\n```\nError:\n{err_msg}"
+                    )
                 else:
-                    # App mode: stop immediately so the caller can offer a relaxation
-                    # suggestion via _get_relaxation_suggestion.
                     result.attempts = attempt + 1
                     break
-
         else:
             err = f"Python Execution Error:\n{sanitize_feedback(exec_result.stderr, max_chars=1000)}"
-            error_history.append(err)
+            error_history.append(f"Code:\n```python\n{code}\n```\nError:\n{err}")
             result.error_logs.append(f"[attempt {attempt + 1}] {err}")
             emit("exec_error", {"stderr_tail": exec_result.stderr[-500:]})
 
         attempt += 1
 
     result.attempts = attempt
+
+    # Generate relaxation suggestion if it failed to converge
     if result.converged == "no" and not retry_on_no_converge:
-        # App mode: script ran but optimiser never converged — generate a relaxation
-        # suggestion for the UI to display.
-        suggestion = _get_relaxation_suggestion(
-            user_prompt=user_prompt,
-            error_logs=result.error_logs,
-            model_name=model_name,
-            provider=provider,
+        suggestion, s_in, s_out = _get_relaxation_suggestion(
+            user_prompt, result.error_logs, model_name, provider
         )
+        result.input_tokens += s_in
+        result.output_tokens += s_out
         emit(
             "no_converge_final",
             {
@@ -533,5 +444,6 @@ def run_agent(
                 "suggestion": suggestion,
             },
         )
+
     emit("done", {"success": False, "attempts": result.attempts})
     return result
