@@ -43,7 +43,7 @@ def _load_system_prompt() -> str:
     if os.path.exists(_SKILLS_PATH):
         with open(_SKILLS_PATH, "r") as f:
             return f.read()
-    return "Select an OpenAeroStruct blueprint. Return JSON: {'blueprints': [], 'reason': ''}"
+    return "Select an OpenAeroStruct blueprint."
 
 
 def _parse_routing_response(response: str) -> dict:
@@ -63,19 +63,24 @@ def _parse_routing_response(response: str) -> dict:
         data["blueprints"] = validated if validated else ["aero_opt.py"]
         return data
     except Exception as e:
-        return {
-            "blueprints": ["aero_opt.py"],
-            "reason": f"Fallback due to parsing error: {e}",
-        }
+        return {"blueprints": ["aero_opt.py"], "reason": f"Error: {e}"}
 
 
 def route_intent(
     user_prompt: str, model_name: str = "gemini-2.0-flash", provider: str = "Gemini API"
 ) -> dict:
     system_prompt = _load_system_prompt()
+    logger.info(
+        f"========== NEW LLM REQUEST (router) ({model_name} via {provider}) =========="
+    )
+    logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
+    logger.info(f"--- USER PROMPT ---\n{user_prompt}")
+
     response = get_llm_response(
         user_prompt, model_name, system_prompt, provider=provider
     )
+    logger.info(f"--- LLM RESPONSE ---\n{response}")
+
     data = _parse_routing_response(response)
     data["input_tokens"] = _approx_tokens(system_prompt + "\n" + user_prompt)
     data["output_tokens"] = _approx_tokens(response)
@@ -86,7 +91,6 @@ def route_intent_stream(
     user_prompt: str, model_name: str = "gemini-2.0-flash", provider: str = "Gemini API"
 ):
     system_prompt = _load_system_prompt()
-
     try:
         client = get_llm_client(provider, model_name)
     except Exception:
@@ -103,6 +107,12 @@ def route_intent_stream(
         yield data
         return
 
+    logger.info(
+        f"========== NEW LLM REQUEST (stream/router) ({model_name} via {provider}) =========="
+    )
+    logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
+    logger.info(f"--- USER PROMPT ---\n{user_prompt}")
+
     from google.genai import types as _types
 
     stream_config = _types.GenerateContentConfig(
@@ -110,12 +120,8 @@ def route_intent_stream(
     )
 
     input_tokens, output_tokens = 0, 0
-
     for gemini_attempt in range(GEMINI_STREAM_MAX_RETRIES):
-        full_response = ""
-        last_chunk = None
-        transient_hit = False
-
+        full_response, last_chunk, transient_hit = "", None, False
         try:
             for chunk in client.models.generate_content_stream(
                 model=model_name, contents=user_prompt, config=stream_config
@@ -130,7 +136,7 @@ def route_intent_stream(
                 and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1
             ):
                 transient_hit = True
-                yield f"\n\n⚠️ Gemini API overloaded — retrying in {GEMINI_STREAM_RETRY_WAIT}s...\n"
+                yield f"\n\n⚠️ Gemini API overloaded — retrying...\n"
                 time.sleep(GEMINI_STREAM_RETRY_WAIT)
             else:
                 if not full_response:
@@ -138,10 +144,11 @@ def route_intent_stream(
                         user_prompt, model_name, system_prompt, provider=provider
                     )
                     yield full_response
-
         if transient_hit:
             continue
         break
+
+    logger.info(f"--- LLM RESPONSE ---\n{full_response}")
 
     try:
         if (
@@ -152,6 +159,9 @@ def route_intent_stream(
             usage = last_chunk.usage_metadata
             input_tokens = getattr(usage, "prompt_token_count", 0)
             output_tokens = getattr(usage, "candidates_token_count", 0)
+            logger.info(
+                f"Tokens (router) — input: {input_tokens}, output: {output_tokens}"
+            )
     except Exception:
         pass
 
@@ -161,5 +171,4 @@ def route_intent_stream(
     )
     data["output_tokens"] = output_tokens or _approx_tokens(full_response)
     log_token_usage(provider, model_name, input_tokens, output_tokens)
-
     yield data

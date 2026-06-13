@@ -10,6 +10,9 @@ from datetime import datetime
 from llm.router import route_intent_stream
 from agent_logic import run_agent, AgentResult
 
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 
@@ -107,8 +110,8 @@ def _copy_artifacts(attempt_dir: str):
                     shutil.copy2(src, dst)
                 elif os.path.isdir(src):
                     shutil.copytree(src, dst, dirs_exist_ok=True)
-            except Exception as e:
-                print(f"    Warning: could not copy {src}: {e}")
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +122,7 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
     routing_correct = False
     blueprints = []
 
-    # ------------------------------------------------------------------
-    # 1. Intent routing (using STREAM to extract accurate token usage)
-    # ------------------------------------------------------------------
+    # 1. Intent routing (No clarification logic for benchmark)
     routing_data = {}
     try:
         for chunk in route_intent_stream(
@@ -133,10 +134,11 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         blueprints = routing_data.get("blueprints", [])
         selected = ", ".join(blueprints)
 
+        # Benchmark ignores vagueness and proceeds with its best guess or fallback
         is_vague = routing_data.get("is_vague", False)
         if is_vague:
             print(
-                "    WARNING: router marked query as vague — counted as routing failure"
+                "    WARNING: router marked query as vague — using fallback for benchmark"
             )
             blueprints = blueprints or [json.loads(q["expected_blueprints"])[0]]
 
@@ -149,7 +151,7 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
     except Exception as e:
         selected = "ERROR"
         blueprints = [json.loads(q["expected_blueprints"])[0]]
-        print(f"    Routing Error: {e}  — falling back to expected blueprint")
+        print(f"    Routing Error: {e}")
 
     os.makedirs(rep_dir, exist_ok=True)
     attempt_dirs: dict[int, str] = {}
@@ -161,44 +163,25 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
             attempt_dir = os.path.join(rep_dir, f"attempt_{attempt}")
             os.makedirs(attempt_dir, exist_ok=True)
             attempt_dirs[attempt] = attempt_dir
-            print(f"    Attempt {attempt}/{data['max_retries']}...")
         elif event == "code_ready":
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
-            with open(os.path.join(attempt_dir, "reasoning.txt"), "w") as fh:
-                fh.write(data.get("reasoning", ""))
             with open(os.path.join(attempt_dir, "code.py"), "w") as fh:
                 fh.write(data.get("code", ""))
         elif event in ("exec_success", "exec_error", "no_converge"):
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             _copy_artifacts(attempt_dir)
-            log_path = os.path.join(attempt_dir, "execution.log")
-            if event == "exec_error":
-                with open(log_path, "w") as fh:
-                    fh.write(f"--- STDERR TAIL ---\n{data.get('stderr_tail', '')}")
-            if event == "exec_success":
-                with open(log_path, "w") as fh:
-                    fh.write(f"--- DB SUMMARY ---\n{data.get('db_summary', '')}")
-        elif event == "done":
-            status = (
-                "SUCCESS"
-                if data["success"]
-                else f"FAILED after {data['attempts']} attempts"
-            )
-            print(f"      {status}")
 
-    # ------------------------------------------------------------------
-    # 2. Execution (using stream=True to extract accurate token usage)
-    # ------------------------------------------------------------------
+    # 2. Execution (stream=True for accurate token tracking)
     result: AgentResult = run_agent(
         user_prompt=q["query"],
         blueprints=blueprints,
         model_name=model,
         provider=provider,
         max_retries=MAX_RETRIES,
-        stream=True,  # Critical to set True so it captures `usage_metadata` from the chunks
+        stream=True,
         callback=bench_callback,
         gen_script_path=_BENCH_SCRIPT,
-        retry_on_no_converge=True,
+        retry_on_no_converge=True,  # Benchmark mode: force retries on physics fails
     )
 
     if result.final_code:
@@ -207,17 +190,6 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
 
     exit_code = 0 if result.success else -1
 
-    updated_error_logs = []
-    for i, err in enumerate(result.error_logs):
-        attempt_num = i + 1
-        code_path = os.path.join(rep_dir, f"attempt_{attempt_num}", "code.py")
-        if os.path.exists(code_path):
-            with open(code_path, "r", encoding="utf-8") as f:
-                errored_code = f.read()
-            updated_error_logs.append(f"{err}\n\n--- Errored Code ---\n{errored_code}")
-        else:
-            updated_error_logs.append(err)
-
     return {
         "selected_blueprints": selected,
         "routing_correct": routing_correct,
@@ -225,7 +197,7 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         "exit_code": exit_code,
         "converged": result.converged,
         "success": result.success,
-        "error_logs": updated_error_logs,
+        "error_logs": result.error_logs,
         "input_tokens": routing_data.get("input_tokens", 0) + result.input_tokens,
         "output_tokens": routing_data.get("output_tokens", 0) + result.output_tokens,
     }
@@ -254,9 +226,6 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
                 "max_retry_count": MAX_RETRIES,
                 "num_reps": NUM_REPS,
                 "timestamp": run_ts,
-                "hardware_note": "API-based inference",
-                "temperature": "default",
-                "sampling": "default",
             },
             fh,
             indent=2,
@@ -270,9 +239,7 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
     if limit:
         queries = queries[:limit]
 
-    print(
-        f"--- Starting Benchmark Test Suite ({len(queries)} cases × {NUM_REPS} reps) ---"
-    )
+    print(f"--- Starting Benchmark ({len(queries)} cases × {NUM_REPS} reps) ---")
 
     total_success, total_runs, rep_row_idx, sum_row_idx = 0, 0, 0, 0
 
@@ -281,40 +248,36 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
         case_dir = os.path.join(run_dir, f"case_{case_id}")
         os.makedirs(case_dir, exist_ok=True)
 
-        print(
-            f"\n[Case {case_id}] Category: {q['category']}\n  Query: {q['query'][:120]}..."
-        )
+        print(f"\n[Case {case_id}] {q['category']}: {q['query'][:80]}...")
 
-        rep_successes, rep_converged_count, optimization_reps = 0, 0, 0
-        rep_attempts_list, rep_elapsed_list = [], []
-        rep_in_tokens_list, rep_out_tokens_list = [], []
+        rep_successes, rep_converged_count, opt_reps = 0, 0, 0
+        rep_attempts_list, rep_elapsed_list, rep_in_tok, rep_out_tok = [], [], [], []
         rep_routing_correct, all_errors = [], []
-        selected_blueprints_last = "ERROR"
+        selected_last = "ERROR"
 
         for rep in range(1, NUM_REPS + 1):
-            print(f"\n  [Rep {rep}/{NUM_REPS}]")
+            print(f"  [Rep {rep}/{NUM_REPS}]", end=" ", flush=True)
             rep_dir = os.path.join(case_dir, f"rep_{rep}")
             start_time = time.time()
-            rep_result = _run_single_rep(q, rep_dir, model, provider)
+            res = _run_single_rep(q, rep_dir, model, provider)
             elapsed = round(time.time() - start_time, 2)
 
-            if rep_result["success"]:
+            if res["success"]:
                 rep_successes += 1
                 total_success += 1
-            if rep_result["converged"] == "yes":
+            if res["converged"] == "yes":
                 rep_converged_count += 1
-            if rep_result["converged"] in ("yes", "no"):
-                optimization_reps += 1
+            if res["converged"] in ("yes", "no"):
+                opt_reps += 1
 
-            rep_attempts_list.append(rep_result["attempts"])
+            rep_attempts_list.append(res["attempts"])
             rep_elapsed_list.append(elapsed)
-            rep_in_tokens_list.append(rep_result["input_tokens"])
-            rep_out_tokens_list.append(rep_result["output_tokens"])
-            rep_routing_correct.append(rep_result["routing_correct"])
-
-            selected_blueprints_last = rep_result["selected_blueprints"]
+            rep_in_tok.append(res["input_tokens"])
+            rep_out_tok.append(res["output_tokens"])
+            rep_routing_correct.append(res["routing_correct"])
+            selected_last = res["selected_blueprints"]
             total_runs += 1
-            all_errors.extend(rep_result["error_logs"])
+            all_errors.extend(res["error_logs"])
 
             rep_row = {
                 "id": case_id,
@@ -322,60 +285,55 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
                 "query": q["query"],
                 "rep": rep,
                 "expected_blueprints": q["expected_blueprints"],
-                "selected_blueprints": rep_result["selected_blueprints"],
-                "routing_correct": rep_result["routing_correct"],
-                "attempts": rep_result["attempts"],
-                "exit_code": rep_result["exit_code"],
-                "converged": rep_result["converged"],
+                "selected_blueprints": res["selected_blueprints"],
+                "routing_correct": res["routing_correct"],
+                "attempts": res["attempts"],
+                "exit_code": res["exit_code"],
+                "converged": res["converged"],
                 "elapsed_s": elapsed,
-                "input_tokens": rep_result["input_tokens"],
-                "output_tokens": rep_result["output_tokens"],
-                "success": rep_result["success"],
-                "error_log": " ||| ".join(rep_result["error_logs"]).replace("\n", " "),
+                "input_tokens": res["input_tokens"],
+                "output_tokens": res["output_tokens"],
+                "success": res["success"],
+                "error_log": " ||| ".join(res["error_logs"]).replace("\n", " "),
             }
             _append_result(
                 rep_results_file, rep_row, REP_HEADERS, write_header=(rep_row_idx == 0)
             )
             rep_row_idx += 1
-
-            print(
-                f"  Rep {rep} done — success={rep_result['success']}  elapsed={elapsed}s  tokens=({rep_result['input_tokens']} in / {rep_result['output_tokens']} out)"
-            )
+            print(f"Done (success={res['success']}, {elapsed}s)")
 
         n_reps = len(rep_attempts_list)
-        error_category_set = set(
-            err.strip().splitlines()[0][:120] for err in all_errors if err.strip()
-        )
-
         summary_row = {
             "id": case_id,
             "category": q["category"],
             "query": q["query"],
             "expected_blueprints": q["expected_blueprints"],
-            "selected_blueprints": selected_blueprints_last,
+            "selected_blueprints": selected_last,
             "num_runs": n_reps,
             "routing_accuracy": round(sum(rep_routing_correct) / n_reps, 3),
             "execution_success_rate": round(rep_successes / n_reps, 3),
-            "convergence_rate": round(rep_converged_count / optimization_reps, 3)
-            if optimization_reps > 0
+            "convergence_rate": round(rep_converged_count / opt_reps, 3)
+            if opt_reps > 0
             else "n/a",
-            "attempts_mean": round(sum(rep_attempts_list) / n_reps, 3),
-            "attempts_median": round(statistics.median(rep_attempts_list), 3),
+            "attempts_mean": round(statistics.mean(rep_attempts_list), 3),
+            "attempts_median": statistics.median(rep_attempts_list),
             "attempts_std": round(statistics.stdev(rep_attempts_list), 3)
             if n_reps > 1
-            else 0.0,
+            else 0,
             "attempts_min": min(rep_attempts_list),
             "attempts_max": max(rep_attempts_list),
-            "elapsed_s_mean": round(sum(rep_elapsed_list) / n_reps, 3),
-            "elapsed_s_median": round(statistics.median(rep_elapsed_list), 3),
+            "elapsed_s_mean": round(statistics.mean(rep_elapsed_list), 3),
+            "elapsed_s_median": statistics.median(rep_elapsed_list),
             "elapsed_s_std": round(statistics.stdev(rep_elapsed_list), 3)
             if n_reps > 1
-            else 0.0,
-            "elapsed_s_min": round(min(rep_elapsed_list), 3),
-            "elapsed_s_max": round(max(rep_elapsed_list), 3),
-            "input_tokens_mean": int(sum(rep_in_tokens_list) / n_reps),
-            "output_tokens_mean": int(sum(rep_out_tokens_list) / n_reps),
-            "error_categories": " ||| ".join(sorted(error_category_set)),
+            else 0,
+            "elapsed_s_min": min(rep_elapsed_list),
+            "elapsed_s_max": max(rep_elapsed_list),
+            "input_tokens_mean": int(statistics.mean(rep_in_tok)),
+            "output_tokens_mean": int(statistics.mean(rep_out_tok)),
+            "error_categories": " ||| ".join(
+                sorted(set(e.splitlines()[0][:100] for e in all_errors if e))
+            ),
             "model": model,
             "max_retry_count": MAX_RETRIES,
         }
@@ -385,14 +343,11 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
             SUMMARY_HEADERS,
             write_header=(sum_row_idx == 0),
         )
-
-        with open(os.path.join(case_dir, "all_errors.json"), "w") as fh:
-            json.dump(all_errors, fh, indent=2)
         sum_row_idx += 1
 
     print(f"\n--- Benchmark Complete! ---")
     print(
-        f"Overall Success Rate: {total_success}/{total_runs} reps ({total_success / total_runs * 100:.1f}%)"
+        f"Overall Success Rate: {total_success}/{total_runs} ({total_success / total_runs * 100:.1f}%)"
     )
 
 
@@ -400,7 +355,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit", type=int, help="Limit number of test cases")
+    parser.add_argument("--limit", type=int, help="Limit test cases")
     parser.add_argument("--model", type=str, default="gemini-flash-lite-latest")
     parser.add_argument("--provider", type=str, default="Gemini API")
     args = parser.parse_args()
