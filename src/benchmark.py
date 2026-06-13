@@ -4,6 +4,7 @@ import sys
 import time
 import json
 import shutil
+import logging
 import statistics
 from datetime import datetime
 
@@ -118,11 +119,25 @@ def _copy_artifacts(attempt_dir: str):
 # Single Repetition Runner
 # ---------------------------------------------------------------------------
 def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
+    os.makedirs(rep_dir, exist_ok=True)
+
+    # Setup Dedicated File Logger for this repetition
+    log_file_path = os.path.join(rep_dir, "agent_backend.log")
+    file_handler = logging.FileHandler(log_file_path, mode="w", encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    file_handler.setFormatter(file_formatter)
+
+    backend_logger = logging.getLogger("LLM_Backend")
+    backend_logger.addHandler(file_handler)
+
     selected = "ERROR"
     routing_correct = False
     blueprints = []
 
-    # 1. Intent routing (No clarification logic for benchmark)
+    # 1. Intent routing
     routing_data = {}
     try:
         for chunk in route_intent_stream(
@@ -134,7 +149,6 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         blueprints = routing_data.get("blueprints", [])
         selected = ", ".join(blueprints)
 
-        # Benchmark ignores vagueness and proceeds with its best guess or fallback
         is_vague = routing_data.get("is_vague", False)
         if is_vague:
             print(
@@ -153,7 +167,6 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         blueprints = [json.loads(q["expected_blueprints"])[0]]
         print(f"    Routing Error: {e}")
 
-    os.makedirs(rep_dir, exist_ok=True)
     attempt_dirs: dict[int, str] = {}
 
     def bench_callback(event: str, data: dict):
@@ -171,7 +184,7 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             _copy_artifacts(attempt_dir)
 
-    # 2. Execution (stream=True for accurate token tracking)
+    # 2. Execution
     result: AgentResult = run_agent(
         user_prompt=q["query"],
         blueprints=blueprints,
@@ -181,7 +194,7 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         stream=True,
         callback=bench_callback,
         gen_script_path=_BENCH_SCRIPT,
-        retry_on_no_converge=True,  # Benchmark mode: force retries on physics fails
+        retry_on_no_converge=True,
     )
 
     if result.final_code:
@@ -189,6 +202,10 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
             fh.write(result.final_code)
 
     exit_code = 0 if result.success else -1
+
+    # Cleanup and release current repetition log handler
+    backend_logger.removeHandler(file_handler)
+    file_handler.close()
 
     return {
         "selected_blueprints": selected,
