@@ -2,6 +2,7 @@ import json
 import os
 import time
 import logging
+import re
 from .config import (
     get_llm_response,
     get_llm_client,
@@ -47,23 +48,50 @@ def _load_system_prompt() -> str:
 
 
 def _parse_routing_response(response: str) -> dict:
+    """
+    Extracts JSON from <routing> tags using regex.
+    """
     try:
-        cleaned = response.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned[7:]
-        if cleaned.startswith("```"):
-            cleaned = cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        data = json.loads(cleaned.strip())
+        # 1. Try to find content between <routing> tags
+        match = re.search(r"<routing>(.*?)</routing>", response, re.DOTALL)
+
+        if match:
+            json_str = match.group(1).strip()
+        else:
+            # Fallback: find the first { and last } if tags are missing
+            # This is a 'safety net' for conversational LLMs
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start != -1 and end != 0:
+                json_str = response[start:end]
+            else:
+                json_str = response.strip()
+
+        # 2. Clean up any markdown code fencing that might be inside the tags
+        json_str = re.sub(r"^```json\s*|^```\s*", "", json_str, flags=re.MULTILINE)
+        json_str = re.sub(r"```$", "", json_str, flags=re.MULTILINE).strip()
+
+        # 3. Parse the JSON
+        data = json.loads(json_str)
+
+        # 4. Standardize 'blueprint' vs 'blueprints'
         if "blueprint" in data and "blueprints" not in data:
             data["blueprints"] = [data["blueprint"]]
+
+        # 5. Validate blueprint selection
         raw = data.get("blueprints", [])
         validated = [b for b in raw if b in VALID_BLUEPRINTS][:1]
         data["blueprints"] = validated if validated else ["aero_opt.py"]
+
         return data
+
     except Exception as e:
-        return {"blueprints": ["aero_opt.py"], "reason": f"Error: {e}"}
+        logger.error(f"Routing parse error: {e}. Raw response: {response}")
+        return {
+            "blueprints": ["aero_opt.py"],
+            "is_vague": False,
+            "reason": f"Parsing failure: {str(e)}",
+        }
 
 
 def route_intent(

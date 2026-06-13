@@ -93,6 +93,12 @@ prob.driver.recording_options["includes"] = ["*"]
 **13. CL equality constraint requires `alpha` as a design variable.**
 If `add_constraint("...CL", equals=...)` is used, always add `alpha` as a design variable with appropriate bounds. Without a free trim variable the problem is infeasible from any starting point and causes NaN blow-ups in the structural solver.
 
+**14. Numerical Scaling is Mandatory.**
+Optimizers fail if Design Variables (DVs) and Objectives have mismatched scales. Always try to normalize values to an **order of magnitude of ~1.0**.
+- **Design Variables (ref):** Use `ref` to tell the optimizer what a "typical" value is. If thickness is ~0.01m, use `ref=1e-2`. If span is ~10m, use `ref=10`. This scales the optimizer's internal input to 1.0.
+- **Objectives (scaler):** Use `scaler` as a multiplier to shrink the objective. If the structural mass is ~500kg, use `scaler=1e-2` so the optimizer "sees" a value of 5.0.
+- **Why?** Unscaled gradients cause "Positive directional derivative" errors (Exit Mode 8) because the optimizer cannot find a consistent "slope" to follow.
+
 ---
 
 ## PATHS — ABSOLUTE PATHS ONLY

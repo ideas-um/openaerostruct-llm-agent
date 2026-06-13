@@ -1,6 +1,8 @@
 import os
 import time
 import logging
+import re  # 1. Added re for regex parsing
+
 from .config import (
     get_llm_response,
     get_llm_client,
@@ -40,7 +42,6 @@ def _build_prompt(
     with open(os.path.join(_LLM_DIR, "coder.md"), "r") as f:
         system_prompt = f.read()
 
-    # THE CORE FIX: Providing context of the previous turn
     prompt = f"User Request: {user_prompt}\n\n"
 
     if prior_code:
@@ -60,20 +61,43 @@ def _build_prompt(
 
 
 def _parse_response(response: str) -> tuple[str, str]:
-    delimiter = "##### REASONING ENDS #####"
-    if delimiter in response:
-        res, code = response.split(delimiter, 1)
-        reasoning = res.replace("REASONING:", "").strip()
-        code = code.strip()
-    else:
-        reasoning = "Parsing warning."
-        code = response.strip()
+    """
+    Extracts reasoning and code, supporting both the new XML format
+    and the legacy ##### delimiter format.
+    """
+    # 1. Extract Reasoning (XML and legacy fallback)
+    reasoning_match = re.search(r"<reasoning>(.*?)</reasoning>", response, re.S | re.I)
+    if not reasoning_match:
+        reasoning_match = re.search(r"<reasoning>(.*?)$", response, re.S | re.I)
 
-    if "```python" in code:
-        code = code.split("```python")[-1].split("```")[0]
-    elif "```" in code:
-        code = code.split("```")[1].split("```")[0]
-    return reasoning, code.strip()
+    if reasoning_match:
+        reasoning = reasoning_match.group(1).strip()
+    elif "REASONING:" in response:
+        # Legacy fallback for reasoning
+        raw_parts = response.split("##### REASONING ENDS #####")[0]
+        reasoning = raw_parts.replace("REASONING:", "").strip()
+    else:
+        reasoning = "Reasoning details parsed from turn."
+
+    # 2. Extract Code (XML and legacy fallback)
+    code_match = re.search(r"<code>(.*?)</code>", response, re.S | re.I)
+    if not code_match:
+        code_match = re.search(r"<code>(.*?)$", response, re.S | re.I)
+
+    if code_match:
+        code = code_match.group(1).strip()
+    else:
+        # Legacy fallback for code
+        if "##### REASONING ENDS #####" in response:
+            code = response.split("##### REASONING ENDS #####")[-1].strip()
+        else:
+            code = response.strip()
+
+    # Cleanup any residual markdown markers
+    code = re.sub(r"^```python\s*|^```\s*", "", code, flags=re.MULTILINE)
+    code = re.sub(r"```$", "", code, flags=re.MULTILINE).strip()
+
+    return reasoning, code
 
 
 def generate_code(

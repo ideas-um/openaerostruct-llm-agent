@@ -80,15 +80,18 @@ Aerostructural: minimise fuel burn, minimise total aircraft weight.
 ---
 
 ## RESPONSE FORMAT
-```json
+Your response must be a valid JSON object wrapped in `<routing>` tags.
+
+Example:
+<routing>
 {
-  "blueprints": ["blueprint_name.py"],
+  "blueprints": ["aero_opt.py"],
   "is_vague": false,
-  "missing_info": "Only populated when is_vague is true. Name what is missing and give specific examples from the tables above.",
+  "missing_info": "",
   "parameters": {
-    "intent": "Analysis or Optimisation",
-    "mapped_vars": ["identified DVs, objectives, constraints, and flight conditions from the request"]
+    "intent": "Optimisation",
+    "mapped_vars": ["drag", "twist", "Mach 0.8"]
   },
-  "reason": "One sentence explaining the blueprint selection."
+  "reason": "Single-point aerodynamic optimization for drag."
 }
-```
+</routing>

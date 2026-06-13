@@ -132,10 +132,16 @@ class AgentResult:
 
 
 def _find_db_summary() -> str:
+    """Safely attempts to load the database reader module."""
     try:
         from tools.db_reader import summarize_optimization
     except ImportError:
-        return "No optimization database found."
+        try:
+            # Fallback path if the execution root is the project base
+            from src.tools.db_reader import summarize_optimization
+        except ImportError:
+            return "No optimization database found."
+
     paths = [
         os.path.join(_GEN_RUN_DIR, "aero.db"),
         os.path.join(_OUT_DIR, "aero.db"),
