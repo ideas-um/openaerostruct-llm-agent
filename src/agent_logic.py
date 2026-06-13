@@ -167,7 +167,6 @@ def _get_relaxation_suggestion(
 
 
 def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
-    """Explicitly separates the successful Turn 1 baseline from the Turn 2 retry errors."""
     parts = []
     if prior_code:
         parts.append(
@@ -178,7 +177,7 @@ def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
         )
 
     if error_history:
-        parts.append("### RECENT ERRORS IN CURRENT TURN ###")
+        parts.append("### RECENT ERRORS AND FEEDBACK ###")
         for i, err in enumerate(error_history, start=1):
             parts.append(f"--- Attempt {i} error ---\n{err}")
 
@@ -209,12 +208,11 @@ def run_agent(
             callback(event, {"attempt": attempt + 1, **data})
 
     result = AgentResult()
-    error_history = []
+    error_history = prior_error_logs or []
     attempt = 0
 
     while attempt < max_retries:
         emit("attempt_start", {"max_retries": max_retries})
-        # Use prior_code to create a baseline for the LLM
         feedback = _build_feedback(error_history, prior_code)
 
         try:
@@ -267,6 +265,7 @@ def run_agent(
             result.final_summary = db_sum
             result.plots = get_generated_plots()
             emit("exec_success", {"db_summary": db_sum, "plots": result.plots})
+
             converged = any(
                 k in exec_res.stdout.lower()
                 for k in ["successfully", "complete", "exit mode 0"]
@@ -283,6 +282,8 @@ def run_agent(
                 err = f"Optimizer failed to converge. Stdout tail:\n{sanitize_feedback(exec_res.stdout, 400)}"
                 result.error_logs.append(err)
                 emit("no_converge", {"db_summary": db_sum, "stdout_tail": err})
+
+                # FIX: In Benchmark mode, feed this back and keep going. In App mode, stop.
                 if retry_on_no_converge:
                     error_history.append(f"Code:\n{code}\nError:\n{err}")
                 else:
@@ -291,11 +292,16 @@ def run_agent(
 
         elif _is_solver_fail:
             result.converged = "no"
-            err = f"Solver Error: {sanitize_feedback(exec_res.stderr, 400)}"
+            err = f"Solver Error (Physics Failure): {sanitize_feedback(exec_res.stderr, 400)}"
             result.error_logs.append(err)
             emit("no_converge", {"db_summary": _find_db_summary(), "stdout_tail": err})
-            result.attempts = attempt + 1
-            break
+
+            # FIX: In Benchmark mode, feed physics crash back and keep going.
+            if retry_on_no_converge:
+                error_history.append(f"Code:\n{code}\nError:\n{err}")
+            else:
+                result.attempts = attempt + 1
+                break
 
         else:
             err = f"Python error:\n{sanitize_feedback(exec_res.stderr)}"
@@ -305,6 +311,7 @@ def run_agent(
 
         attempt += 1
 
+    # Only provide suggestion if we didn't succeed and are in non-retry (App) mode
     if result.converged == "no" and not retry_on_no_converge:
         suggestion, s_in, s_out = _get_relaxation_suggestion(
             user_prompt, result.error_logs, model_name, provider
@@ -320,5 +327,6 @@ def run_agent(
             },
         )
 
+    result.attempts = attempt
     emit("done", {"success": False, "attempts": attempt})
     return result
