@@ -272,6 +272,36 @@ def run_agent(
             result.plots = get_generated_plots()
             emit("exec_success", {"db_summary": db_sum, "plots": result.plots})
 
+            # Guard 1: Verify code is not empty or truncated
+            if not code or len(code.strip()) < 100:
+                err = "Python error: Generated script was empty or incomplete."
+                error_history.append(err)
+                result.error_logs.append(err)
+                attempt += 1
+                continue
+
+            # Guard 2: Enforce optimization convergence for optimization tasks
+            is_opt_blueprint = any(
+                b
+                in [
+                    "aero_opt.py",
+                    "aero_multipoint.py",
+                    "struct_optimization.py",
+                    "aerostruct_tube.py",
+                    "aerostruct_wingbox.py",
+                ]
+                for b in blueprints
+            )
+
+            # If the blueprint is optimization but 'run_driver()' is omitted,
+            # the result would incorrectly be set to converged = 'n/a'.
+            if is_opt_blueprint and "run_driver()" not in code:
+                err = "The task requires optimization, but no convergence was caught."
+                error_history.append(err)
+                result.error_logs.append(err)
+                attempt += 1
+                continue
+
             converged = any(
                 k in exec_res.stdout.lower()
                 for k in ["successfully", "complete", "exit mode 0"]
@@ -283,18 +313,6 @@ def run_agent(
                 result.attempts = attempt + 1
                 emit("done", {"success": True, "attempts": result.attempts})
                 return result
-            else:
-                result.converged = "no"
-                err = f"Optimizer failed to converge. Stdout tail:\n{sanitize_feedback(exec_res.stdout, 400)}"
-                result.error_logs.append(err)
-                emit("no_converge", {"db_summary": db_sum, "stdout_tail": err})
-
-                # FIX: In Benchmark mode, feed this back and keep going. In App mode, stop.
-                if retry_on_no_converge:
-                    error_history.append(f"Code:\n{code}\nError:\n{err}")
-                else:
-                    result.attempts = attempt + 1
-                    break
 
         elif _is_solver_fail:
             result.converged = "no"
