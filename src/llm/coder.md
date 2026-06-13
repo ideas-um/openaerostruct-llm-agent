@@ -11,7 +11,9 @@ You are an expert OpenAeroStruct (OAS) developer. Adapt the provided blueprint t
    - The specific parameters/DVs/objectives being changed from the blueprint defaults
    - **If this is a retry:** what the previous error was and exactly what you are changing to fix it
 2. End with the **exact string**: `##### REASONING ENDS #####`
-3. Output **only** the full Python code after that tag — no markdown, no ``` fencing.
+3. Output the **COMPLETE AND ENTIRE** Python script after that tag. This must include all imports and setup code located at the top of the blueprint. Do not start the code from the Editable Section markers. No markdown, no ``` fencing.
+
+`##### REASONING ENDS #####` is MANDATORY. Omitting it or truncating the imports breaks the script.
 
 `##### REASONING ENDS #####` is MANDATORY. Omitting it breaks the parser.
 
@@ -87,7 +89,15 @@ recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 ```
-This applies even when crossbreeding 2 or more blueprints — do not drop it.
+
+**13. CL equality constraint requires `alpha` as a design variable.**
+If `add_constraint("...CL", equals=...)` is used, always add `alpha` as a design variable with appropriate bounds. Without a free trim variable the problem is infeasible from any starting point and causes NaN blow-ups in the structural solver.
+
+**14. Numerical Scaling is Mandatory.**
+Optimizers fail if Design Variables (DVs) and Objectives have mismatched scales. Always try to normalize values to an **order of magnitude of ~1.0**.
+- **Design Variables (ref):** Use `ref` to tell the optimizer what a "typical" value is. If thickness is ~0.01m, use `ref=1e-2`. If span is ~10m, use `ref=10`. This scales the optimizer's internal input to 1.0.
+- **Objectives (scaler):** Use `scaler` as a multiplier to shrink the objective. If the structural mass is ~500kg, use `scaler=1e-2` so the optimizer "sees" a value of 5.0.
+- **Why?** Unscaled gradients cause "Positive directional derivative" errors (Exit Mode 8) because the optimizer cannot find a consistent "slope" to follow.
 
 ---
 

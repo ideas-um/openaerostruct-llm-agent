@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 
 from llm.router import route_intent_stream
@@ -14,8 +15,13 @@ from agent_logic import (
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 _LOG_FILE = os.path.join(_SRC_DIR, "agent_backend.log")
 
+if "current_routing_data" not in st.session_state:
+    st.session_state["current_routing_data"] = {}
+if "active_attempts" not in st.session_state:
+    st.session_state["active_attempts"] = []
+
 # ---------------------------------------------------------------------------
-# Design variable reference card (shown when router flags is_vague)
+# Design variable reference card
 # ---------------------------------------------------------------------------
 _DV_REFERENCE = """
 **Available design variables you can specify:**
@@ -40,10 +46,8 @@ _DV_REFERENCE = """
 
 **Example well-formed requests:**
 - *"Minimize drag on a rect wing with span=12m, root_chord=2m, at Mach 0.5. DVs: alpha and twist_cp. Constraint: CL=0.5."*
-- *"Compute CL/CD polars for a CRM wing at Mach 0.3–0.8, alpha -5 to 15 deg."*
 - *"Aerostructural tube optimization on a CRM wing at Mach 0.84, minimize fuelburn. DVs: twist_cp, thickness_cp. Constraints: failure≤0, L=W."*
 """
-
 
 # ---------------------------------------------------------------------------
 # Display helpers
@@ -52,7 +56,8 @@ _DV_REFERENCE = """
 
 def show_plot(plot_path: str):
     """Display a plot image inline."""
-    st.image(plot_path)
+    if os.path.exists(plot_path):
+        st.image(plot_path)
 
 
 def show_vagueness_card(missing_info: str):
@@ -85,12 +90,8 @@ if "messages" not in st.session_state:
 if "stop_run" not in st.session_state:
     st.session_state["stop_run"] = False
 if "pending_relaxation" not in st.session_state:
-    # Stores {"suggestion": str, "user_prompt": str, "blueprints": list}
-    # when the user needs to approve a relaxation retry
     st.session_state["pending_relaxation"] = None
 if "relaxation_prompt" not in st.session_state:
-    # Set by the approval card; picked up by the main loop to run the agent
-    # without adding a visible user message to the chat history
     st.session_state["relaxation_prompt"] = None
 
 # ---------------------------------------------------------------------------
@@ -102,26 +103,27 @@ model_name = st.sidebar.selectbox(
     "Model Selection",
     [
         "gemini-flash-lite-latest",
-        "gemma-4-26b-a4b-it",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "llama3.2:latest",
+        "gemini-2.0-flash",
     ],
 )
 max_retries = st.sidebar.slider("Max retries", min_value=1, max_value=6, value=3)
-st.sidebar.markdown("Requires Ollama running locally or `GEMINI_API_KEY`.")
 
 if st.sidebar.button("Clear Conversation"):
     st.session_state.messages = []
     st.session_state["stop_run"] = True
     st.session_state["pending_relaxation"] = None
+    st.session_state["active_attempts"] = []
     cleanup_artifacts()
+    # Truncate/clear backend log
+    if os.path.exists(_LOG_FILE):
+        with open(_LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("")
     st.rerun()
 
 st.title("OpenAeroStruct — LLM Agent")
 
 # ---------------------------------------------------------------------------
-# Shared agent UI helpers (used by both main loop and relaxation retry)
+# Shared agent UI helpers
 # ---------------------------------------------------------------------------
 
 
@@ -135,20 +137,92 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
 
         if event == "attempt_start":
             st.markdown(f"**Attempt {data['attempt']} of {data['max_retries']}**")
-            stream_state[attempt] = {"placeholder": st.empty(), "text": ""}
+            stream_state[attempt] = {
+                "placeholder": st.empty(),
+                "reasoning_placeholder": st.empty(),
+                "code_placeholder": st.empty(),
+                "text": "",
+            }
+            # Record start of attempt for state preservation
+            attempt_info = {
+                "attempt": attempt,
+                "max_retries": data["max_retries"],
+                "reasoning": "",
+                "code": "",
+                "status": "running",
+                "logs": "",
+                "db_summary": "",
+                "plots": [],
+            }
+            st.session_state["active_attempts"].append(attempt_info)
 
         elif event == "code_chunk":
             state = stream_state.get(attempt, {})
             state["text"] = state.get("text", "") + data["chunk"]
-            state.get("placeholder", st.empty()).markdown(f"```\n{state['text']}\n```")
+            txt = state["text"]
+
+            # Robust live extraction supporting both XML and legacy headers
+            r_match = re.search(r"<reasoning>(.*?)(?:</reasoning>|$)", txt, re.S | re.I)
+            c_match = re.search(r"<code>(.*?)(?:</code>|$)", txt, re.S | re.I)
+
+            if not r_match and not c_match and "REASONING:" not in txt:
+                state.get("placeholder", st.empty()).markdown(f"```text\n{txt}\n```")
+            else:
+                if "placeholder" in state and state["placeholder"]:
+                    state["placeholder"].empty()
+
+                if "reasoning_placeholder" not in state:
+                    state["reasoning_placeholder"] = st.empty()
+                if "code_placeholder" not in state:
+                    state["code_placeholder"] = st.empty()
+
+                if r_match:
+                    content = r_match.group(1).strip()
+                    if content:
+                        state["reasoning_placeholder"].info(f"**Thinking:** {content}")
+                elif "REASONING:" in txt:
+                    legacy_text = (
+                        txt.split("##### REASONING ENDS #####")[0]
+                        .replace("REASONING:", "")
+                        .strip()
+                    )
+                    if legacy_text:
+                        state["reasoning_placeholder"].info(
+                            f"**Thinking:** {legacy_text}"
+                        )
+
+                if c_match:
+                    code_content = re.sub(
+                        r"^```python\s*|^```\s*",
+                        "",
+                        c_match.group(1).strip(),
+                        flags=re.M,
+                    )
+                    state["code_placeholder"].markdown(
+                        f"```python\n{code_content}\n```"
+                    )
+                elif "##### REASONING ENDS #####" in txt:
+                    legacy_code = txt.split("##### REASONING ENDS #####")[-1].strip()
+                    legacy_code = re.sub(
+                        r"^```python\s*|^```\s*", "", legacy_code, flags=re.M
+                    )
+                    state["code_placeholder"].markdown(f"```python\n{legacy_code}\n```")
 
         elif event == "code_ready":
             state = stream_state.get(attempt, {})
-            if "placeholder" in state:
-                state["placeholder"].empty()
-            st.info(f"**Coder's Reasoning:** {data['reasoning']}")
+            for key in ["placeholder", "reasoning_placeholder", "code_placeholder"]:
+                if key in state and state[key]:
+                    state[key].empty()
+
+            reasoning_val = data.get("reasoning", "No reasoning found.")
+            st.info(f"**Coder's Reasoning:** {reasoning_val}")
             with st.expander(f"Generated Code (Attempt {attempt})", expanded=False):
                 st.code(data["code"], language="python")
+
+            # Log Code and Reasoning to current attempt state
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["reasoning"] = reasoning_val
+                st.session_state["active_attempts"][-1]["code"] = data["code"]
 
         elif event == "safety_blocked":
             violation_text = "\n".join(f"- {v}" for v in data["violations"])
@@ -156,25 +230,52 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 f"**Safety check failed — script blocked.**\n\n"
                 f"Dangerous patterns detected:\n{violation_text}"
             )
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["status"] = "blocked"
+                st.session_state["active_attempts"][-1]["logs"] = violation_text
 
         elif event == "exec_success":
             st.success("✅ Execution completed successfully.")
-            st.markdown(data["db_summary"])
-            if data["plots"]:
+            db_sum = data.get("db_summary", "")
+            if db_sum and db_sum != "No optimization database found.":
+                st.markdown(db_sum)
+
+            if data.get("plots"):
                 st.write("#### Results")
                 for plot_path in data["plots"]:
                     show_plot(plot_path)
             else:
                 st.info("No plots were generated by this run.")
 
+            # Log success to current attempt state
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["status"] = "success"
+                st.session_state["active_attempts"][-1]["db_summary"] = db_sum
+                st.session_state["active_attempts"][-1]["plots"] = data.get("plots", [])
+
         elif event == "exec_error":
             st.error("❌ Python error occurred.")
             st.code(data["stderr_tail"], language="text")
 
+            # Log error to current attempt state
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["status"] = "error"
+                st.session_state["active_attempts"][-1]["logs"] = data["stderr_tail"]
+
         elif event == "no_converge":
-            st.warning(
-                "Optimiser did not converge — stopping (setup issue, not a code error)."
-            )
+            st.warning("⚠️ Optimiser did not converge — stopping (setup issue).")
+            db_sum = data.get("db_summary", "")
+            if db_sum and db_sum != "No optimization database found.":
+                st.markdown(db_sum)
+            if data.get("plots"):
+                for plot_path in data["plots"]:
+                    show_plot(plot_path)
+
+            # Log non-convergence to current attempt state
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["status"] = "no_converge"
+                st.session_state["active_attempts"][-1]["db_summary"] = db_sum
+                st.session_state["active_attempts"][-1]["plots"] = data.get("plots", [])
 
         elif event == "no_converge_final":
             no_converge_store.update(data)
@@ -183,9 +284,15 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
 
 
 def _handle_agent_result(
-    result, no_converge_data: dict, conversation_context: str, blueprints: list
+    result,
+    no_converge_data: dict,
+    conversation_context: str,
+    blueprints: list,
+    routing_json: dict,
 ):
     """Render the final status card and save the assistant message to history."""
+    attempts_history = list(st.session_state.get("active_attempts", []))
+
     if result.success:
         is_opt = "run_driver()" in result.final_code
         task_word = "Optimization" if is_opt else "Analysis"
@@ -193,7 +300,6 @@ def _handle_agent_result(
             f"### ✅ {task_word} Complete\n"
             "The script ran successfully. Results and plots are shown above."
         )
-        st.markdown(content)
         st.session_state.messages.append(
             {
                 "role": "assistant",
@@ -201,17 +307,17 @@ def _handle_agent_result(
                 "code": result.final_code,
                 "summary": result.final_summary,
                 "plots": get_generated_plots(),
+                "routing_json": routing_json,
+                "attempts_history": attempts_history,
             }
         )
+        st.rerun()
 
     elif no_converge_data:
         content = (
             "### ⚠️ Optimization did not converge\n"
-            "The script ran without errors but the optimiser could not find a solution. "
-            "See the relaxation suggestions below."
+            "The script ran without errors but the optimiser could not find a solution."
         )
-        st.warning(content)
-        # Save to history BEFORE rerun so it appears when the page re-renders
         st.session_state.messages.append(
             {
                 "role": "assistant",
@@ -219,6 +325,8 @@ def _handle_agent_result(
                 "code": result.final_code,
                 "summary": result.final_summary,
                 "plots": get_generated_plots(),
+                "routing_json": routing_json,
+                "attempts_history": attempts_history,
             }
         )
         st.session_state["pending_relaxation"] = {
@@ -234,11 +342,8 @@ def _handle_agent_result(
     else:
         content = (
             f"### ❌ Agent could not complete the task\n"
-            f"Failed after {result.attempts} attempt(s). "
-            "Check the error output above."
+            f"Failed after {result.attempts} attempt(s)."
         )
-        st.error(content)
-        # Append to history (non-converge branch handles its own append before rerun)
         st.session_state.messages.append(
             {
                 "role": "assistant",
@@ -246,8 +351,11 @@ def _handle_agent_result(
                 "code": result.final_code,
                 "summary": result.final_summary,
                 "plots": get_generated_plots(),
+                "routing_json": routing_json,
+                "attempts_history": attempts_history,
             }
         )
+        st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -256,40 +364,81 @@ def _handle_agent_result(
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+
+        # Reconstruct the "Agent Thought Process" expander (kept open by default on replay)
+        if "attempts_history" in message:
+            with st.expander("Agent Thought Process", expanded=True):
+                # 1. Routing Replay
+                st.write("### 1. Intent Routing")
+                blueprints = message.get("routing_json", {}).get("blueprints", [])
+                reason = message.get("routing_json", {}).get(
+                    "reason", "No reason provided"
+                )
+                st.info(
+                    f"**Selected Blueprint(s):** `{', '.join(blueprints)}`\n\n**Reason:** {reason}"
+                )
+
+                # Nested Routing JSON block inside the Intent Routing section
+                if "routing_json" in message and message["routing_json"]:
+                    with st.expander("Show Routing Logic (JSON)", expanded=False):
+                        st.json(message["routing_json"])
+
+                # 2. Generation Replay
+                st.write("### 2. Iterative Generation & Execution")
+                for att in message["attempts_history"]:
+                    st.markdown(f"**Attempt {att['attempt']} of {att['max_retries']}**")
+                    if att.get("reasoning"):
+                        st.info(f"**Coder's Reasoning:** {att['reasoning']}")
+
+                    # Only show code inside the attempts history loop if the attempt was a failure
+                    # (this prevents duplicating the final successful code shown at the bottom)
+                    if att.get("code") and att["status"] != "success":
+                        with st.expander(
+                            f"Generated Code (Attempt {att['attempt']})", expanded=False
+                        ):
+                            st.code(att["code"], language="python")
+
+                    if att["status"] == "success":
+                        st.success("✅ Execution completed successfully.")
+                        # Database summary and plots for the successful run are shown once at the bottom
+                    elif att["status"] == "error":
+                        st.error("❌ Python error occurred.")
+                        st.code(att["logs"], language="text")
+                    elif att["status"] == "no_converge":
+                        st.warning("⚠️ Optimiser did not converge.")
+                        if (
+                            att.get("db_summary")
+                            and att["db_summary"] != "No optimization database found."
+                        ):
+                            st.markdown(att["db_summary"])
+                        if att.get("plots"):
+                            for plot_path in att["plots"]:
+                                show_plot(plot_path)
+
         if "code" in message:
             with st.expander("Show Generated Code", expanded=False):
                 st.code(message["code"], language="python")
-        if "summary" in message:
+        if (
+            message.get("summary")
+            and message["summary"] != "No optimization database found."
+        ):
             st.markdown(message["summary"])
-        if "plots" in message:
+        if message.get("plots"):
             for plot_path in message["plots"]:
-                if os.path.exists(plot_path):
-                    show_plot(plot_path)
+                show_plot(plot_path)
 
 # ---------------------------------------------------------------------------
 # Pending relaxation approval card
-# Shown between conversation history and the chat input when the user needs
-# to approve an auto-relaxation retry.
 # ---------------------------------------------------------------------------
 if st.session_state["pending_relaxation"]:
     pr = st.session_state["pending_relaxation"]
     with st.container(border=True):
         st.warning("### ⚠️ Optimization did not converge — this is a setup issue")
-        st.markdown(
-            "The code ran without errors but the optimiser could not find a solution. "
-            "This usually means the problem is over-constrained or the DV bounds are too tight.\n\n"
-            "**Suggested relaxations:**"
-        )
         st.markdown(pr["suggestion"])
-
         st.markdown("**Or describe your own fix:**")
         user_override = st.text_area(
             label="Custom instructions (optional)",
-            placeholder=(
-                "e.g. Change thickness_cp bounds to 0.001–0.3 m, "
-                "relax failure constraint to <= 0.05, "
-                "reduce span to 8 m..."
-            ),
+            placeholder="e.g. Change thickness_cp bounds to 0.001–0.3 m...",
             key="relaxation_override",
             height=90,
             label_visibility="collapsed",
@@ -300,17 +449,11 @@ if st.session_state["pending_relaxation"]:
             if st.button("✅ Apply and retry", key="approve_relaxation"):
                 if user_override.strip():
                     extra = (
-                        "The previous optimization did not converge. "
                         "Apply the following user-specified changes and retry:\n"
                         + user_override.strip()
                     )
                 else:
-                    extra = (
-                        "The previous optimization did not converge. "
-                        "Apply these relaxations and retry:\n" + pr["suggestion"]
-                    )
-                # Store the relaxation prompt separately — main loop will run the
-                # agent without adding a visible chat bubble for the retry prompt
+                    extra = "Apply these relaxations and retry:\n" + pr["suggestion"]
                 st.session_state["relaxation_prompt"] = (
                     pr["user_prompt"] + "\n\n" + extra
                 )
@@ -328,14 +471,14 @@ if st.session_state["pending_relaxation"]:
 # ---------------------------------------------------------------------------
 user_prompt = st.chat_input("Enter your design request...")
 
-# Handle relaxation retry — approved from the card above, runs agent silently
-# without adding a new visible user message to the chat history
 _relaxation_prompt = st.session_state.pop("relaxation_prompt", None)
 _relaxation_blueprints = st.session_state.pop("relaxation_blueprints", None)
 _relaxation_error_logs = st.session_state.pop("relaxation_error_logs", None)
+
 if _relaxation_prompt:
     cleanup_artifacts()
     st.session_state["stop_run"] = False
+    st.session_state["active_attempts"] = []  # Clear for retry
 
     with st.chat_message("assistant"):
         thought_expander = st.expander(
@@ -356,13 +499,21 @@ if _relaxation_prompt:
                 callback=_make_ui_callback(_rs, _rn),
                 prior_error_logs=_relaxation_error_logs,
             )
+        # Pull latest available routing to satisfy 5-param signature
+        prev_routing = next(
+            (
+                m["routing_json"]
+                for m in reversed(st.session_state.messages)
+                if "routing_json" in m
+            ),
+            {},
+        )
         _handle_agent_result(
-            result, _rn, _relaxation_prompt, _relaxation_blueprints or []
+            result, _rn, _relaxation_prompt, _relaxation_blueprints or [], prev_routing
         )
 
 if user_prompt:
     cleanup_artifacts()
-
     st.session_state.messages.append({"role": "user", "content": user_prompt})
     with st.chat_message("user"):
         st.markdown(user_prompt)
@@ -371,52 +522,40 @@ if user_prompt:
         f.write("")
 
     st.session_state["stop_run"] = False
-
+    st.session_state["active_attempts"] = []  # Reset active history for the new run
     conversation_context = build_conversation_context(st.session_state.messages)
 
     with st.chat_message("assistant"):
         thought_expander = st.expander("Agent Thought Process", expanded=True)
-
         with thought_expander:
-            # ------------------------------------------------------------------
-            # Step 1 — Intent routing (streamed)
-            # ------------------------------------------------------------------
             st.write("### 1. Intent Routing")
             router_placeholder = st.empty()
             router_streamed = ""
             routing_data = {}
 
             for chunk in route_intent_stream(
-                conversation_context,
-                model_name=model_name,
-                provider=provider,
+                conversation_context, model_name=model_name, provider=provider
             ):
                 if isinstance(chunk, dict):
                     routing_data = chunk
                 else:
                     router_streamed += chunk
-                    router_placeholder.markdown(f"```\n{router_streamed}\n```")
+                    clean_router = re.sub(r"</?routing>", "", router_streamed).strip()
+                    router_placeholder.markdown(f"```\n{clean_router}\n```")
 
             router_placeholder.empty()
+            st.session_state["current_routing_data"] = routing_data
 
             blueprints = routing_data.get("blueprints", ["aero_opt.py"])
             reason = routing_data.get("reason", "No reason provided")
 
-            is_vague = routing_data.get("is_vague", False)
-            if is_vague:
-                missing_info = routing_data.get(
-                    "missing_info",
-                    "Please provide more detail about your design request.",
-                )
+            if routing_data.get("is_vague", False):
+                missing_info = routing_data.get("missing_info", "Details missing.")
                 show_vagueness_card(missing_info)
-                clarification_msg = (
-                    f"#### Clarification needed\n\n{missing_info}\n\n"
-                    "_Please reply with the missing details._"
-                )
                 st.session_state.messages.append(
                     {
                         "role": "assistant",
-                        "content": clarification_msg,
+                        "content": f"#### Clarification needed\n\n{missing_info}",
                     }
                 )
                 st.stop()
@@ -425,9 +564,10 @@ if user_prompt:
                 f"**Selected Blueprint(s):** `{', '.join(blueprints)}`\n\n**Reason:** {reason}"
             )
 
-            # ------------------------------------------------------------------
-            # Step 2 — Iterative code generation and execution
-            # ------------------------------------------------------------------
+            # Show active Routing JSON expander within the Intent Routing section
+            with st.expander("Show Routing Logic (JSON)", expanded=False):
+                st.json(routing_data)
+
             st.write("### 2. Iterative Generation & Execution")
             _ss: dict[int, dict] = {}
             _nc: dict = {}
@@ -441,7 +581,6 @@ if user_prompt:
                 callback=_make_ui_callback(_ss, _nc),
             )
 
-        # ------------------------------------------------------------------
-        # Final status (outside the thought expander)
-        # ------------------------------------------------------------------
-        _handle_agent_result(result, _nc, conversation_context, blueprints)
+        _handle_agent_result(
+            result, _nc, conversation_context, blueprints, routing_data
+        )
