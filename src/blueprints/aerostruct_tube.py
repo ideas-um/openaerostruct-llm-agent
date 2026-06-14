@@ -120,6 +120,12 @@ prob = om.Problem()
 # === AGENT EDITABLE SECTION START ===
 # Mission and flight condition parameters — modify to match the user's scenario.
 # CT = thrust-specific fuel consumption [1/s] = grav_constant * TSFC_in_per_hour * (1/3600)
+#
+# CRITICAL WARNING: Never set CT to 0.0. A zero thrust-specific fuel consumption rate
+# forces fuel burn calculations to evaluate as exactly 0.0. This flattens the 
+# optimization landscape, removing all gradients and causing Line Search failures.
+# Keep CT set to a realistic non-zero value (e.g. grav_constant * 17.0e-6).
+#
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("v", val=248.136, units="m/s")  # Cruise speed [m/s]
 indep_var_comp.add_output("alpha", val=5.0, units="deg")  # Initial AoA [deg]
@@ -128,7 +134,7 @@ indep_var_comp.add_output("re", val=1.0e6, units="1/m")
 indep_var_comp.add_output("rho", val=0.38, units="kg/m**3")  # Cruise altitude density
 indep_var_comp.add_output(
     "CT", val=grav_constant * 17.0e-6, units="1/s"
-)  # Thrust-specific fuel consumption
+)  # Thrust-specific fuel consumption (CRITICAL: NEVER SET TO 0.0!)
 indep_var_comp.add_output("R", val=11.165e6, units="m")  # Range [m]
 indep_var_comp.add_output(
     "W0", val=0.4 * 3e5, units="kg"
