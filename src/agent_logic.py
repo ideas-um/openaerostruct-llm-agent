@@ -214,7 +214,7 @@ def run_agent(
         try:
             if stream and callback:
                 for chunk in generate_code_stream(
-                    user_prompt, blueprints, feedback, model_name, provider
+                    user_prompt, blueprints, feedback, model_name, provider, prior_code=prior_code
                 ):
                     if isinstance(chunk, tuple):
                         code, reasoning, in_tok, out_tok = chunk
@@ -224,7 +224,7 @@ def run_agent(
                         emit("code_chunk", {"chunk": chunk})
             else:
                 code, reasoning, in_tok, out_tok = generate_code(
-                    user_prompt, blueprints, feedback, model_name, provider
+                    user_prompt, blueprints, feedback, model_name, provider, prior_code=prior_code
                 )
                 result.input_tokens += in_tok
                 result.output_tokens += out_tok

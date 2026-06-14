@@ -336,6 +336,7 @@ def _handle_agent_result(
             "user_prompt": conversation_context,
             "blueprints": blueprints,
             "error_logs": no_converge_data.get("error_logs", []),
+            "prior_code": result.final_code,
         }
         st.rerun()
 
@@ -459,6 +460,7 @@ if st.session_state["pending_relaxation"]:
                 )
                 st.session_state["relaxation_blueprints"] = pr["blueprints"]
                 st.session_state["relaxation_error_logs"] = pr.get("error_logs", [])
+                st.session_state["relaxation_prior_code"] = pr.get("prior_code", "")
                 st.session_state["pending_relaxation"] = None
                 st.rerun()
         with col2:
@@ -491,13 +493,14 @@ if _relaxation_prompt:
             _rn: dict = {}
             result = run_agent(
                 user_prompt=_relaxation_prompt,
-                blueprints=_relaxation_blueprints or ["aerostruct_tube.py"],
+                blueprints=_relaxation_blueprints,
                 model_name=model_name,
                 provider=provider,
                 max_retries=max_retries,
                 stream=True,
                 callback=_make_ui_callback(_rs, _rn),
                 prior_error_logs=_relaxation_error_logs,
+                prior_code=st.session_state.pop("relaxation_prior_code", ""),
             )
         # Pull latest available routing to satisfy 5-param signature
         prev_routing = next(
