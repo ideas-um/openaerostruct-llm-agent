@@ -9,6 +9,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+from llm.relaxer import suggest_relaxation
 
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SRC_DIR)
@@ -158,18 +159,7 @@ def _find_db_summary() -> str:
 def _get_relaxation_suggestion(
     user_prompt: str, error_logs: list, model_name: str, provider: str
 ) -> tuple[str, int, int]:
-    from llm.config import get_llm_response
-
-    prompt = (
-        f"An OpenAeroStruct optimization ran but failed to converge...\nUser request: {user_prompt}\n"
-        f"History: {error_logs}\nSuggest 2-3 concrete relaxations under 150 words."
-    )
-    in_t = _approx_tokens(prompt)
-    try:
-        ans = get_llm_response(prompt, model_name, provider=provider)
-        return ans, in_t, _approx_tokens(ans)
-    except Exception:
-        return "Relax bounds.", in_t, 5
+    return suggest_relaxation(user_prompt, error_logs, model_name, provider)
 
 
 def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
@@ -271,7 +261,7 @@ def run_agent(
             result.final_summary = db_sum
             result.plots = get_generated_plots()
             emit("exec_success", {"db_summary": db_sum, "plots": result.plots})
-
+            
             # Guard 1: Verify code is not empty or truncated
             if not code or len(code.strip()) < 100:
                 err = "Python error: Generated script was empty or incomplete."
@@ -282,19 +272,12 @@ def run_agent(
 
             # Guard 2: Enforce optimization convergence for optimization tasks
             is_opt_blueprint = any(
-                b
-                in [
-                    "aero_opt.py",
-                    "aero_multipoint.py",
-                    "struct_optimization.py",
-                    "aerostruct_tube.py",
-                    "aerostruct_wingbox.py",
-                ]
+                b in ["aero_opt.py", "aero_multipoint.py", "struct_optimization.py", "aerostruct_tube.py", "aerostruct_wingbox.py"]
                 for b in blueprints
             )
-
+            
             # If the blueprint is optimization but 'run_driver()' is omitted,
-            # the result would incorrectly be set to converged = 'n/a'.
+            # we force a retry with a clear warning message.
             if is_opt_blueprint and "run_driver()" not in code:
                 err = "The task requires optimization, but no convergence was caught."
                 error_history.append(err)
@@ -302,9 +285,10 @@ def run_agent(
                 attempt += 1
                 continue
 
+            # CRITICAL FIX: Removed "complete" to prevent false-positives from "Setup complete."
             converged = any(
                 k in exec_res.stdout.lower()
-                for k in ["successfully", "complete", "exit mode 0"]
+                for k in ["successfully", "exit mode 0", "optimization converged"]
             )
 
             if converged or "run_driver()" not in code:
@@ -313,19 +297,16 @@ def run_agent(
                 result.attempts = attempt + 1
                 emit("done", {"success": True, "attempts": result.attempts})
                 return result
-
-        elif _is_solver_fail:
-            result.converged = "no"
-            err = f"Solver Error (Physics Failure): {sanitize_feedback(exec_res.stderr, 400)}"
-            result.error_logs.append(err)
-            emit("no_converge", {"db_summary": _find_db_summary(), "stdout_tail": err})
-
-            # FIX: In Benchmark mode, feed physics crash back and keep going.
-            if retry_on_no_converge:
-                error_history.append(f"Code:\n{code}\nError:\n{err}")
             else:
-                result.attempts = attempt + 1
-                break
+                result.converged = "no"
+                err = f"Optimizer failed to converge. Stdout tail:\n{sanitize_feedback(exec_res.stdout, 400)}"
+                result.error_logs.append(err)
+                emit("no_converge", {"db_summary": db_sum, "stdout_tail": err})
+                if retry_on_no_converge:
+                    error_history.append(f"Code:\n{code}\nError:\n{err}")
+                else:
+                    result.attempts = attempt + 1
+                    break
 
         else:
             err = f"Python error:\n{sanitize_feedback(exec_res.stderr)}"
