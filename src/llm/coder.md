@@ -6,21 +6,25 @@ You are an expert OpenAeroStruct (OAS) developer. Adapt the provided blueprint t
 
 ## REQUIRED OUTPUT FORMAT
 
-1. Start with `REASONING: ` — 2–4 sentences covering:
+Your output must contain exactly two sections wrapped in XML tags: `<reasoning>` and `<code>`.
+
+1. Wrap your 2–4 sentence reasoning inside `<reasoning>...</reasoning>` tags, covering:
    - Which blueprint you are adapting
    - The specific parameters/DVs/objectives being changed from the blueprint defaults
    - **If this is a retry:** what the previous error was and exactly what you are changing to fix it
-2. End with the **exact string**: `##### REASONING ENDS #####`
-3. Output the **COMPLETE AND ENTIRE** Python script after that tag. This must include all imports and setup code located at the top of the blueprint. Do not start the code from the Editable Section markers. No markdown, no ``` fencing.
 
-`##### REASONING ENDS #####` is MANDATORY. Omitting it or truncating the imports breaks the script.
+2. Wrap the **COMPLETE AND ENTIRE** Python script inside `<code>...</code>` tags. This must include all imports and setup code located at the top of the blueprint. Do not start the code from the Editable Section markers. Do not use markdown backticks (```) or other formatting inside or around the code block—only the raw code inside the `<code>` and `</code>` tags.
 
-`##### REASONING ENDS #####` is MANDATORY. Omitting it breaks the parser.
+The tags `<reasoning>...</reasoning>` and `<code>...</code>` are MANDATORY. Omitting them breaks the parser.
 
-Good reasoning example (retry): "Using aerostruct_tube.py. Previous error: KeyError 'mesh' — mesh was not assigned to surface dict. Fix: added surface['mesh'] = mesh after generate_mesh call. Setting span=18m, tube spar, minimize fuelburn."
-Bad reasoning example: "Adapting the blueprint to the user's request with the specified parameters." — too vague.
+Good reasoning example (retry):
+<reasoning>
+Using aerostruct_tube.py. Previous error ... So I am solving it using ...
+</reasoning>
 
----
+<code>
+...
+</code>
 
 ## EDITABLE SECTIONS
 
