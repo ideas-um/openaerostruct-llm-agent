@@ -42,10 +42,20 @@ The system uses a specialized agent pipeline and a blueprint-based approach:
 
 ## Installation
 ### 1. Environment Setup
-We recommend using `uv` for dependency management:
+You can use either `uv` or Anaconda/Miniconda.
+
+Using `uv`:
 
 ```bash
 uv sync --python-preference only-managed
+```
+
+Using Conda:
+
+```bash
+conda create -n openaerostruct-agent python=3.12
+conda activate openaerostruct-agent
+pip install -e .
 ```
 
 ### 2. API Configuration
@@ -72,8 +82,79 @@ GOOGLE_API_KEY="YOUR_GOOGLE_GEMINI_KEY"
 
 ### Running the Agent
 
+With `uv`:
+
 ```bash
 uv run streamlit run src/app.py
+```
+
+With Conda:
+
+```bash
+conda activate openaerostruct-agent
+streamlit run src/app.py
+```
+
+### Optional Docker Sandbox Execution
+The generated OpenAeroStruct script can be executed inside a Docker sandbox instead of directly on the host Python process.
+
+Build the sandbox image:
+
+```bash
+docker build -f docker/sandbox.Dockerfile -t openaerostruct-sandbox:latest .
+```
+
+Make sure the Docker daemon is running before building the image or enabling the sandbox backend.
+By default, temporary Docker staging is created under `.docker_stage/` in the project root so Docker Desktop can mount it without extra macOS file-sharing changes.
+
+Enable the Docker backend:
+
+With `uv`:
+
+```bash
+export OAS_EXECUTION_BACKEND=docker
+uv run streamlit run src/app.py
+```
+
+With Conda:
+
+```bash
+conda activate openaerostruct-agent
+export OAS_EXECUTION_BACKEND=docker
+streamlit run src/app.py
+```
+
+Execution backend options:
+- `OAS_EXECUTION_BACKEND=host`: always run on the host interpreter
+- `OAS_EXECUTION_BACKEND=docker`: require the Docker sandbox
+- `OAS_EXECUTION_BACKEND=auto`: use Docker when the sandbox image is available locally, otherwise fall back to host execution
+
+The Docker sandbox is configured with:
+- no network access
+- dropped Linux capabilities
+- `no-new-privileges`
+- a custom seccomp profile at `docker/seccomp-openaerostruct.json`
+- a read-only root filesystem
+- a read-only bind mount for the generated script
+- a writable bind mount only for `openaerostruct_out/`
+- non-root execution inside the container
+
+The default sandbox image name is `openaerostruct-sandbox:latest`. You can override it with:
+
+```bash
+OAS_SANDBOX_IMAGE=my-custom-image:tag
+```
+
+You can also override the seccomp profile path if needed:
+
+```bash
+export OAS_DOCKER_SECCOMP_PROFILE=/absolute/path/to/seccomp-profile.json
+```
+
+You can override the Docker staging directory too:
+
+```bash
+export OAS_DOCKER_STAGE_DIR=/absolute/path/to/shared/staging-dir
 ```
 
 ### Example Prompts
@@ -84,9 +165,26 @@ uv run streamlit run src/app.py
 ## Benchmarking
 To evaluate routing and execution performance across the built-in test set:
 
+With `uv`:
+
 ```bash
 uv run python src/benchmark.py
 ```
+
+With Conda:
+
+```bash
+conda activate openaerostruct-agent
+python src/benchmark.py
+```
+
+The benchmark uses the same execution backend as the app. To run benchmark executions inside Docker, set:
+
+```bash
+export OAS_EXECUTION_BACKEND=docker
+```
+
+before launching the benchmark command.
 
 By default, the benchmark runner:
 1. Loads test queries from `src/tools/test_queries.csv`.
