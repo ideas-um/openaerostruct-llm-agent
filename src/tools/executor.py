@@ -5,13 +5,28 @@ import ast
 import ctypes
 import platform
 import struct
+import shutil
+import tempfile
+import uuid
 
 # ---------------------------------------------------------------------------
 # __file__-relative base paths
 # ---------------------------------------------------------------------------
 _TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR = os.path.dirname(_TOOLS_DIR)
+_PROJECT_DIR = os.path.dirname(_SRC_DIR)
 _DEFAULT_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
+_DOCKER_IMAGE_ENV = "OAS_SANDBOX_IMAGE"
+_DOCKER_BACKEND_ENV = "OAS_EXECUTION_BACKEND"
+_DEFAULT_DOCKER_IMAGE = "openaerostruct-sandbox:latest"
+_DOCKER_STAGE_DIR_ENV = "OAS_DOCKER_STAGE_DIR"
+_DOCKER_SECCOMP_ENV = "OAS_DOCKER_SECCOMP_PROFILE"
+_DEFAULT_DOCKER_STAGE_DIR = os.path.join(_PROJECT_DIR, ".docker_stage")
+_DEFAULT_DOCKER_SECCOMP = os.path.join(
+    _PROJECT_DIR,
+    "docker",
+    "seccomp-openaerostruct.json",
+)
 
 # ---------------------------------------------------------------------------
 # Static-analysis whitelist
@@ -232,6 +247,288 @@ class ExecutionResult:
         self.stderr = stderr
 
 
+def _decode_timeout_output(value) -> str:
+    if not value:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _detect_docker_backend() -> tuple[bool, str]:
+    """Return whether Docker is usable and a short diagnostic string."""
+    try:
+        proc = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return False, "docker CLI not found"
+    except Exception as exc:
+        return False, f"Docker probe failed: {exc}"
+
+    if proc.returncode != 0:
+        msg = proc.stderr.strip() or proc.stdout.strip() or "unknown Docker error"
+        return False, f"Docker unavailable: {msg}"
+
+    return True, proc.stdout.strip() or "Docker available"
+
+
+def _docker_image_name() -> str:
+    return os.getenv(_DOCKER_IMAGE_ENV, _DEFAULT_DOCKER_IMAGE)
+
+
+def _docker_seccomp_profile() -> str:
+    return os.getenv(_DOCKER_SECCOMP_ENV, _DEFAULT_DOCKER_SECCOMP)
+
+
+def _docker_image_ready(image: str) -> tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as exc:
+        return False, f"Unable to inspect Docker image '{image}': {exc}"
+
+    if proc.returncode != 0:
+        return (
+            False,
+            f"Docker image '{image}' is not available locally. Build it first.",
+        )
+    return True, "Docker image is ready"
+
+
+def _resolve_execution_backend() -> tuple[str, str]:
+    """
+    Resolve execution backend from env vars.
+
+    `host`   → always use direct subprocess execution.
+    `docker` → require Docker and the configured sandbox image.
+    `auto`   → prefer Docker when the image is ready; otherwise fall back to host.
+    """
+    requested = os.getenv(_DOCKER_BACKEND_ENV, "auto").strip().lower()
+    if requested not in {"auto", "host", "docker"}:
+        requested = "auto"
+
+    if requested == "host":
+        return "host", "Host execution requested"
+
+    docker_ok, docker_msg = _detect_docker_backend()
+    if not docker_ok:
+        if requested == "docker":
+            return "error", docker_msg
+        return "host", f"{docker_msg}; falling back to host execution"
+
+    image = _docker_image_name()
+    image_ok, image_msg = _docker_image_ready(image)
+    if not image_ok:
+        if requested == "docker":
+            return "error", image_msg
+        return "host", f"{image_msg}; falling back to host execution"
+
+    seccomp_profile = _docker_seccomp_profile()
+    if not os.path.isfile(seccomp_profile):
+        msg = f"Docker seccomp profile '{seccomp_profile}' is missing."
+        if requested == "docker":
+            return "error", msg
+        return "host", f"{msg}; falling back to host execution"
+
+    return "docker", f"Using Docker sandbox image '{image}'"
+
+
+def _host_output_dir_for(script_path: str) -> str:
+    script_dir = os.path.dirname(os.path.abspath(script_path))
+    project_dir = os.path.dirname(script_dir)
+    return os.path.join(project_dir, "openaerostruct_out")
+
+
+def _copy_tree_contents(src_dir: str, dst_dir: str) -> None:
+    os.makedirs(dst_dir, exist_ok=True)
+    for name in os.listdir(src_dir):
+        src = os.path.join(src_dir, name)
+        dst = os.path.join(dst_dir, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
+
+
+def _docker_stage_root() -> str:
+    """
+    Return a host temp directory that is more likely to be bind-mountable by Docker.
+
+    By default, stage under the project directory so Docker Desktop can mount it
+    without extra file-sharing configuration on macOS. Users can override this
+    with `OAS_DOCKER_STAGE_DIR` if they prefer another already-shared location.
+    """
+    configured = os.getenv(_DOCKER_STAGE_DIR_ENV, "").strip()
+    if configured:
+        os.makedirs(configured, exist_ok=True)
+        return configured
+
+    os.makedirs(_DEFAULT_DOCKER_STAGE_DIR, exist_ok=True)
+    return _DEFAULT_DOCKER_STAGE_DIR
+
+
+def _stage_container_workspace(script_path: str) -> tuple[str, str]:
+    """
+    Stage the generated script into an isolated temporary workspace.
+
+    Layout inside the temp workspace mirrors the project:
+    - <tmp>/src/<script>
+    - <tmp>/openaerostruct_out/
+    """
+    tmp_root = tempfile.mkdtemp(
+        prefix="oas-sandbox-",
+        dir=_docker_stage_root(),
+    )
+    staged_src_dir = os.path.join(tmp_root, "src")
+    staged_out_dir = os.path.join(tmp_root, "openaerostruct_out")
+    staged_src_run_out_dir = os.path.join(staged_src_dir, "generated_run_out")
+    os.makedirs(staged_src_dir, exist_ok=True)
+    os.makedirs(staged_out_dir, exist_ok=True)
+    os.makedirs(staged_src_run_out_dir, exist_ok=True)
+
+    staged_script_path = os.path.join(staged_src_dir, os.path.basename(script_path))
+    shutil.copy2(script_path, staged_script_path)
+    return tmp_root, staged_script_path
+
+
+def _execute_on_host(script_path: str, timeout: int) -> ExecutionResult:
+    """Run the validated script directly on the host Python interpreter."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            preexec_fn=_SECCOMP_PREEXEC,  # None → no-op; non-None → apply filter
+        )
+        return ExecutionResult(proc.returncode, proc.stdout, proc.stderr)
+    except subprocess.TimeoutExpired as exc:
+        stdout = _decode_timeout_output(exc.stdout)
+        stderr = _decode_timeout_output(exc.stderr)
+        stderr += f"\nTimeoutError: Script execution exceeded {timeout} seconds."
+        return ExecutionResult(-1, stdout, stderr)
+    except Exception as exc:
+        return ExecutionResult(-1, "", f"ExecutionException: {str(exc)}")
+
+
+def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
+    """
+    Run the validated script inside an isolated Docker container.
+
+    The container receives only a temporary workspace containing the generated
+    script and a writable output directory. After the run, the output tree is
+    copied back into the host project's `openaerostruct_out/` directory.
+    """
+    image = _docker_image_name()
+    host_output_dir = _host_output_dir_for(script_path)
+    staged_root, staged_script_path = _stage_container_workspace(script_path)
+    staged_out_dir = os.path.join(staged_root, "openaerostruct_out")
+    staged_src_run_out_dir = os.path.join(staged_root, "src", "generated_run_out")
+    seccomp_profile = os.path.abspath(_docker_seccomp_profile())
+    container_name = f"oas-sandbox-{uuid.uuid4().hex[:12]}"
+
+    try:
+        uid = os.getuid() if hasattr(os, "getuid") else None
+        gid = os.getgid() if hasattr(os, "getgid") else None
+
+        cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            container_name,
+            "--network",
+            "none",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--security-opt",
+            f"seccomp={seccomp_profile}",
+            "--pids-limit",
+            "256",
+            "--memory",
+            "4g",
+            "--cpus",
+            "2",
+            "--read-only",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=512m",
+            "--tmpfs",
+            "/var/tmp:rw,noexec,nosuid,size=256m",
+            "--tmpfs",
+            "/run:rw,nosuid,nodev,size=16m",
+            "--tmpfs",
+            "/dev/shm:rw,nosuid,nodev,size=256m",
+            "--mount",
+            (
+                "type=bind,"
+                f"source={staged_script_path},"
+                "target=/workspace/src/generated_run.py,"
+                "readonly"
+            ),
+            "--mount",
+            (
+                "type=bind,"
+                f"source={staged_src_run_out_dir},"
+                "target=/workspace/src/generated_run_out"
+            ),
+            "--mount",
+            (
+                "type=bind,"
+                f"source={staged_out_dir},"
+                "target=/workspace/openaerostruct_out"
+            ),
+            "-w",
+            "/workspace/src",
+        ]
+        if uid is not None and gid is not None:
+            cmd.extend(["--user", f"{uid}:{gid}"])
+
+        cmd.extend([image, "python", f"/workspace/src/{os.path.basename(staged_script_path)}"])
+
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+        if os.path.exists(staged_out_dir):
+            _copy_tree_contents(staged_out_dir, host_output_dir)
+
+        stderr = proc.stderr
+        if stderr:
+            stderr = f"[docker sandbox]\n{stderr}"
+        else:
+            stderr = "[docker sandbox]"
+        return ExecutionResult(proc.returncode, proc.stdout, stderr)
+
+    except subprocess.TimeoutExpired as exc:
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        stdout = _decode_timeout_output(exc.stdout)
+        stderr = _decode_timeout_output(exc.stderr)
+        stderr += f"\nTimeoutError: Docker sandbox execution exceeded {timeout} seconds."
+        return ExecutionResult(-1, stdout, stderr)
+    except Exception as exc:
+        return ExecutionResult(-1, "", f"DockerSandboxException: {str(exc)}")
+    finally:
+        shutil.rmtree(staged_root, ignore_errors=True)
+
+
 def execute_run(script_path=_DEFAULT_SCRIPT, timeout=120):
     """
     Validate and execute the generated OpenAeroStruct script.
@@ -260,23 +557,20 @@ def execute_run(script_path=_DEFAULT_SCRIPT, timeout=120):
             f"SecurityError: Generated code was rejected by static analysis – {reason}",
         )
 
-    # ── Subprocess execution ───────────────────────────────────────────────
-    try:
-        proc = subprocess.run(
-            [sys.executable, script_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            preexec_fn=_SECCOMP_PREEXEC,  # None → no-op; non-None → apply filter
-        )
-        return ExecutionResult(proc.returncode, proc.stdout, proc.stderr)
-    except subprocess.TimeoutExpired as e:
-        stdout = e.stdout.decode("utf-8") if e.stdout else ""
-        stderr = e.stderr.decode("utf-8") if e.stderr else ""
-        stderr += f"\nTimeoutError: Script execution exceeded {timeout} seconds."
-        return ExecutionResult(-1, stdout, stderr)
-    except Exception as e:
-        return ExecutionResult(-1, "", f"ExecutionException: {str(e)}")
+    backend, backend_msg = _resolve_execution_backend()
+    if backend == "error":
+        return ExecutionResult(-1, "", f"SandboxConfigurationError: {backend_msg}")
+
+    if backend == "docker":
+        res = _execute_in_docker(script_path, timeout)
+        if backend_msg:
+            res.stderr = f"{backend_msg}\n{res.stderr}".strip()
+        return res
+
+    res = _execute_on_host(script_path, timeout)
+    if backend_msg:
+        res.stderr = f"{backend_msg}\n{res.stderr}".strip()
+    return res
 
 
 if __name__ == "__main__":

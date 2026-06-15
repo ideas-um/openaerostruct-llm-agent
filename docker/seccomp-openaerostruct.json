@@ -1,0 +1,100 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "defaultErrnoRet": 1,
+  "archMap": [
+    {
+      "architecture": "SCMP_ARCH_X86_64",
+      "subArchitectures": [
+        "SCMP_ARCH_X86",
+        "SCMP_ARCH_X32"
+      ]
+    },
+    {
+      "architecture": "SCMP_ARCH_AARCH64",
+      "subArchitectures": [
+        "SCMP_ARCH_ARM"
+      ]
+    }
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "socket",
+        "socketpair",
+        "connect",
+        "accept",
+        "accept4",
+        "bind",
+        "listen",
+        "shutdown",
+        "sendto",
+        "recvfrom",
+        "sendmsg",
+        "recvmsg",
+        "sendmmsg",
+        "recvmmsg",
+        "getsockname",
+        "getpeername",
+        "setsockopt",
+        "getsockopt"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    },
+    {
+      "names": [
+        "fork",
+        "vfork"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    },
+    {
+      "names": [
+        "mount",
+        "umount2",
+        "pivot_root",
+        "move_mount",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "fspick",
+        "open_tree",
+        "mount_setattr"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    },
+    {
+      "names": [
+        "setns",
+        "unshare",
+        "bpf",
+        "perf_event_open",
+        "ptrace",
+        "process_vm_readv",
+        "process_vm_writev",
+        "kexec_load",
+        "kexec_file_load",
+        "delete_module",
+        "init_module",
+        "finit_module",
+        "reboot",
+        "swapon",
+        "swapoff",
+        "sethostname",
+        "setdomainname",
+        "userfaultfd",
+        "iopl",
+        "ioperm",
+        "add_key",
+        "request_key",
+        "keyctl",
+        "open_by_handle_at",
+        "name_to_handle_at"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    }
+  ]
+}

@@ -78,7 +78,7 @@ if __name__ == "__main__":
     # =============================================================================
     # 3. SURFACE DEFINITION
     # =============================================================================
-    # This script performs ANALYSIS (run_model), not optimization (run_driver).
+    # This script performs ANALYSIS (run_model).
     # Geometry parameters declared here define the fixed wing shape for the sweep.
     # To test a different geometry, activate the desired keys below and set values.
     #

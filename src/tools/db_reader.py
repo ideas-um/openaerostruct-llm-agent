@@ -6,6 +6,23 @@ except ImportError:
     om = None
 
 
+def _clean_val(val, max_len=60) -> str:
+    """
+    Collapses multi-line NumPy arrays into a single clean line 
+    and truncates long outputs to prevent Markdown table breaks.
+    """
+    if val is None:
+        return "n/a"
+    # Convert to string, replace newlines with spaces, and collapse multiple spaces
+    s = str(val).replace("\n", " ")
+    s = " ".join(s.split())
+    
+    # Truncate if too long
+    if len(s) > max_len:
+        s = s[:max_len - 3] + "..."
+    return s
+
+
 def summarize_optimization(db_path="aero.db"):
     """
     Parses OpenMDAO case database to extract initial and final states
@@ -39,8 +56,8 @@ def summarize_optimization(db_path="aero.db"):
     markdown_output += "| Objective | Initial Value | Final Value |\n"
     markdown_output += "|---|---|---|\n"
     for k in objectives.keys():
-        init_val = initial_case.get_val(k)
-        final_val = final_case.get_val(k)
+        init_val = _clean_val(initial_case.get_val(k))
+        final_val = _clean_val(final_case.get_val(k))
         markdown_output += f"| `{k}` | {init_val} | {final_val} |\n"
 
     # Constraints
@@ -48,8 +65,8 @@ def summarize_optimization(db_path="aero.db"):
     markdown_output += "| Constraint | Initial Value | Final Value |\n"
     markdown_output += "|---|---|---|\n"
     for k in constraints.keys():
-        init_val = initial_case.get_val(k)
-        final_val = final_case.get_val(k)
+        init_val = _clean_val(initial_case.get_val(k))
+        final_val = _clean_val(final_case.get_val(k))
         markdown_output += f"| `{k}` | {init_val} | {final_val} |\n"
 
     # Design Variables
@@ -57,18 +74,9 @@ def summarize_optimization(db_path="aero.db"):
     markdown_output += "| Design Variable | Initial Value | Final Value |\n"
     markdown_output += "|---|---|---|\n"
     for k in desvars.keys():
-        init_val = initial_case.get_val(k)
-        final_val = final_case.get_val(k)
-
-        # Convert to string and truncate for arrays
-        inv = str(init_val).replace("\n", " ")
-        fnv = str(final_val).replace("\n", " ")
-        if len(inv) > 60:
-            inv = inv[:57] + "..."
-        if len(fnv) > 60:
-            fnv = fnv[:57] + "..."
-
-        markdown_output += f"| `{k}` | {inv} | {fnv} |\n"
+        init_val = _clean_val(initial_case.get_val(k))
+        final_val = _clean_val(final_case.get_val(k))
+        markdown_output += f"| `{k}` | {init_val} | {final_val} |\n"
 
     return markdown_output
 
