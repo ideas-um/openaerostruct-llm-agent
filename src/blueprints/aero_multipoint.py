@@ -49,7 +49,7 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # declared here in the surface dict BEFORE it can be added via add_design_var().
 # twist_cp is pre-included (initialized from CRM geometry) — do not remove it.
 #
-# FULL GEOMETRY DV CATALOG (from God Document):
+# FULL GEOMETRY DV CATALOG:
 # -----------------------------------------------
 #   KEY           TYPE    DESCRIPTION
 #   twist_cp      array   Spanwise twist B-spline CPs [deg]. Shape=(n_cp,).
