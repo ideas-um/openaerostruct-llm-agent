@@ -1,9 +1,6 @@
 import os
 import csv
 import logging
-from google import genai
-from google.genai import types
-import ollama
 from dotenv import load_dotenv
 import time as _time
 import threading as _threading
@@ -108,8 +105,18 @@ logging.basicConfig(
 logger = logging.getLogger("LLM_Backend")
 
 
-def _make_gemini_client() -> genai.Client:
+def is_gemini_provider(provider: str) -> bool:
+    return "gemini" in (provider or "").lower()
+
+
+def is_ollama_provider(provider: str) -> bool:
+    return "ollama" in (provider or "").lower()
+
+
+def _make_gemini_client():
     """Create and return a Gemini client using the API key from the environment."""
+    from google import genai
+
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError(
@@ -124,7 +131,7 @@ def get_llm_client(provider: str, model_name: str):
     Return a raw SDK client for the given provider so callers can use
     streaming APIs directly. Returns None for providers that don't support it.
     """
-    if "Gemini" in provider:
+    if is_gemini_provider(provider):
         _gemini_rate_limit()
         return _make_gemini_client()
     return None
@@ -178,8 +185,9 @@ def get_llm_response(
         logger.info(f"--- SYSTEM PROMPT ---\n{system_prompt}")
     logger.info(f"--- USER PROMPT ---\n{prompt}")
 
-    if "Gemini" in provider:
+    if is_gemini_provider(provider):
         import time
+        from google.genai import types
 
         _gemini_rate_limit()
         client = _make_gemini_client()
@@ -226,9 +234,11 @@ def get_llm_response(
         logger.info(f"--- LLM RESPONSE ---\n{response.text}")
         return response.text
 
-    else:
+    elif is_ollama_provider(provider):
         # Ollama path
         try:
+            import ollama
+
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
@@ -255,3 +265,7 @@ def get_llm_response(
             )
             logger.error(error_msg)
             return error_msg
+    else:
+        raise ValueError(
+            f"Unsupported provider '{provider}'. Expected Gemini API or Ollama."
+        )

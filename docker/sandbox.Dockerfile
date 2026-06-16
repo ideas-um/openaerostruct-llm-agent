@@ -1,5 +1,8 @@
 FROM python:3.12-slim
 
+# This image is only for sandboxed execution of generated OpenAeroStruct code.
+# It does not need Gemini or Ollama credentials because LLM calls stay in the
+# host application process.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg

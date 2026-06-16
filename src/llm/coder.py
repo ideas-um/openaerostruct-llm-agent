@@ -8,6 +8,7 @@ from .config import (
     get_llm_client,
     log_token_usage,
     is_gemini_transient_error,
+    is_gemini_provider,
     GEMINI_STREAM_RETRY_WAIT,
     GEMINI_STREAM_MAX_RETRIES,
 )
@@ -117,7 +118,7 @@ def generate_code_stream(
     sys, p = _build_prompt(user_prompt, blueprints, feedback, prior_code)
     client = get_llm_client(provider, model_name)
 
-    if not client or provider != "Gemini API":
+    if not client or not is_gemini_provider(provider):
         resp = get_llm_response(p, model_name, sys, provider=provider)
         yield resp
         reasoning, code = _parse_response(resp)
