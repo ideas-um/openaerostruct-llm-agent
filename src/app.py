@@ -1,5 +1,7 @@
 import os
 import re
+import shutil
+import uuid
 import streamlit as st
 
 from llm.router import route_intent_stream
@@ -14,7 +16,9 @@ from agent_logic import (
 # Resolve absolute paths relative to this file
 # ---------------------------------------------------------------------------
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_DIR = os.path.dirname(_SRC_DIR)
 _LOG_FILE = os.path.join(_SRC_DIR, "agent_backend.log")
+_PLOT_ARCHIVE_DIR = os.path.join(_PROJECT_DIR, ".plot_history")
 
 if "current_routing_data" not in st.session_state:
     st.session_state["current_routing_data"] = {}
@@ -59,6 +63,34 @@ def show_plot(plot_path: str):
     """Display a plot image inline."""
     if os.path.exists(plot_path):
         st.image(plot_path)
+
+
+def _snapshot_plot_files(plot_paths: list[str], scope: str) -> list[str]:
+    """
+    Copy generated plots to a stable archive path so older chat messages
+    keep their original figures even after later runs overwrite filenames.
+    """
+    if not plot_paths:
+        return []
+
+    os.makedirs(_PLOT_ARCHIVE_DIR, exist_ok=True)
+    snapshot_dir = os.path.join(
+        _PLOT_ARCHIVE_DIR, f"{scope}_{uuid.uuid4().hex[:10]}"
+    )
+    os.makedirs(snapshot_dir, exist_ok=True)
+
+    snap_paths = []
+    for idx, plot_path in enumerate(plot_paths, start=1):
+        if not os.path.exists(plot_path):
+            continue
+        name = os.path.basename(plot_path)
+        base, ext = os.path.splitext(name)
+        snap_name = f"{idx:02d}_{base}{ext}"
+        dst = os.path.join(snapshot_dir, snap_name)
+        shutil.copy2(plot_path, dst)
+        snap_paths.append(dst)
+
+    return snap_paths
 
 
 def show_vagueness_card(missing_info: str):
@@ -293,7 +325,11 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "success"
                 st.session_state["active_attempts"][-1]["db_summary"] = db_sum
-                st.session_state["active_attempts"][-1]["plots"] = data.get("plots", [])
+                st.session_state["active_attempts"][-1]["plots"] = (
+                    _snapshot_plot_files(
+                        data.get("plots", []), f"attempt_{attempt}_success"
+                    )
+                )
 
         elif event == "exec_error":
             st.error("❌ Python error occurred.")
@@ -317,7 +353,11 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "no_converge"
                 st.session_state["active_attempts"][-1]["db_summary"] = db_sum
-                st.session_state["active_attempts"][-1]["plots"] = data.get("plots", [])
+                st.session_state["active_attempts"][-1]["plots"] = (
+                    _snapshot_plot_files(
+                        data.get("plots", []), f"attempt_{attempt}_no_converge"
+                    )
+                )
 
         elif event == "no_converge_final":
             no_converge_store.update(data)
@@ -334,6 +374,7 @@ def _handle_agent_result(
 ):
     """Render the final status card and save the assistant message to history."""
     attempts_history = list(st.session_state.get("active_attempts", []))
+    archived_plots = _snapshot_plot_files(get_generated_plots(), "message")
 
     if result.success:
         is_opt = "run_driver()" in result.final_code
@@ -348,7 +389,7 @@ def _handle_agent_result(
                 "content": content,
                 "code": result.final_code,
                 "summary": result.final_summary,
-                "plots": get_generated_plots(),
+                "plots": archived_plots,
                 "routing_json": routing_json,
                 "attempts_history": attempts_history,
             }
@@ -366,7 +407,7 @@ def _handle_agent_result(
                 "content": content,
                 "code": result.final_code,
                 "summary": result.final_summary,
-                "plots": get_generated_plots(),
+                "plots": archived_plots,
                 "routing_json": routing_json,
                 "attempts_history": attempts_history,
             }
@@ -393,7 +434,7 @@ def _handle_agent_result(
                 "content": content,
                 "code": result.final_code,
                 "summary": result.final_summary,
-                "plots": get_generated_plots(),
+                "plots": archived_plots,
                 "routing_json": routing_json,
                 "attempts_history": attempts_history,
             }
