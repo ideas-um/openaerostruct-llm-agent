@@ -93,6 +93,12 @@ def _snapshot_plot_files(plot_paths: list[str], scope: str) -> list[str]:
     return snap_paths
 
 
+def _clear_plot_history():
+    """Remove archived plot snapshots created for prior chat messages."""
+    if os.path.exists(_PLOT_ARCHIVE_DIR):
+        shutil.rmtree(_PLOT_ARCHIVE_DIR, ignore_errors=True)
+
+
 def show_vagueness_card(missing_info: str):
     """Render a structured clarification card in the chat."""
     st.warning("#### The agent needs more information before it can run.")
@@ -188,6 +194,7 @@ if st.sidebar.button("Clear Conversation"):
     st.session_state["pending_relaxation"] = None
     st.session_state["active_attempts"] = []
     cleanup_artifacts()
+    _clear_plot_history()
     # Truncate/clear backend log
     if os.path.exists(_LOG_FILE):
         with open(_LOG_FILE, "w", encoding="utf-8") as f:
