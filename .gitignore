@@ -199,3 +199,5 @@ src/benchmark_run.py
 src/tools/test_queries_prev.csv
 
 .docker_stage/
+paper_tests/
+
