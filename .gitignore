@@ -201,3 +201,5 @@ src/tools/test_queries_prev.csv
 .docker_stage/
 paper_tests/
 
+.plot_history/
+.uv-cache/ 
