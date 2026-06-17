@@ -8,6 +8,7 @@ import openmdao.api as om
 import matplotlib
 
 matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
@@ -82,7 +83,7 @@ if __name__ == "__main__":
     # Geometry parameters declared here define the fixed wing shape for the sweep.
     # To test a different geometry, activate the desired keys below and set values.
     #
-    # FULL GEOMETRY DV CATALOG (from God Document):
+    # FULL GEOMETRY DV CATALOG:
     # -----------------------------------------------
     # Any key declared here becomes part of the wing geometry passed to the Geometry
     # group. For analysis sweeps these are fixed values, not optimized.

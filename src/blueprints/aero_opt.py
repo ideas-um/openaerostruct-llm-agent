@@ -65,7 +65,7 @@ else:
 # For CRM wings: twist_cp should be initialized from the CRM geometry (_crm_twist_cp).
 # For rect wings: twist_cp should be set manually, e.g. np.zeros(3).
 #
-# FULL GEOMETRY DV CATALOG (from God Document):
+# FULL GEOMETRY DV CATALOG:
 # -----------------------------------------------
 #   KEY           TYPE    DESCRIPTION
 #   twist_cp      array   Spanwise twist B-spline CPs [deg]. Shape=(n_cp,).

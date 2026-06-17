@@ -3,6 +3,7 @@ import re
 import streamlit as st
 
 from llm.router import route_intent_stream
+from llm.config import is_ollama_provider
 from agent_logic import (
     run_agent,
     cleanup_artifacts,
@@ -79,6 +80,32 @@ def build_conversation_context(messages: list) -> str:
     return "\n".join(lines)
 
 
+def _get_ollama_model_names() -> tuple[list[str], str | None]:
+    """
+    Return installed Ollama model names plus an optional warning message.
+    """
+    try:
+        import ollama
+
+        response = ollama.list()
+        raw_models = response.get("models", [])
+        names = []
+        for model in raw_models:
+            if isinstance(model, dict):
+                name = model.get("model") or model.get("name")
+            else:
+                name = getattr(model, "model", None) or getattr(model, "name", None)
+            if name:
+                names.append(name)
+
+        names = sorted(dict.fromkeys(names))
+        if names:
+            return names, None
+        return [], "Ollama is reachable, but no local models are installed yet."
+    except Exception as exc:
+        return [], f"Could not load Ollama models: {exc}"
+
+
 # ---------------------------------------------------------------------------
 # Streamlit app setup
 # ---------------------------------------------------------------------------
@@ -99,13 +126,28 @@ if "relaxation_prompt" not in st.session_state:
 # ---------------------------------------------------------------------------
 st.sidebar.title("Configuration")
 provider = st.sidebar.selectbox("Provider", ["Gemini API", "Ollama"])
-model_name = st.sidebar.selectbox(
-    "Model Selection",
-    [
-        "gemini-flash-lite-latest",
-        "gemini-2.0-flash",
-    ],
-)
+
+if is_ollama_provider(provider):
+    ollama_models, ollama_warning = _get_ollama_model_names()
+    if ollama_models:
+        model_name = st.sidebar.selectbox("Ollama Model", ollama_models)
+    else:
+        model_name = st.sidebar.text_input(
+            "Ollama Model",
+            value="gemini-2.0-flash",
+            help="Enter the exact local Ollama model name to use.",
+        )
+        if ollama_warning:
+            st.sidebar.warning(ollama_warning)
+else:
+    model_name = st.sidebar.selectbox(
+        "Gemini Model",
+        [
+            "gemini-flash-lite-latest",
+            "gemini-2.0-flash",
+        ],
+    )
+
 max_retries = st.sidebar.slider("Max retries", min_value=1, max_value=6, value=3)
 
 if st.sidebar.button("Clear Conversation"):

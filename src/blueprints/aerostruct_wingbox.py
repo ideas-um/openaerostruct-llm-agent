@@ -286,7 +286,7 @@ mesh, twist_cp = generate_mesh(
 # Everything else (airfoil coords, n_point_masses, distributed_fuel_weight, etc.)
 # is set in the fixed block immediately after and must not be touched.
 #
-# FULL DV CATALOG for aerostructural wingbox FEM (from God Document):
+# FULL DV CATALOG for aerostructural wingbox FEM:
 # -----------------------------------------------
 # GEOMETRY DVs (all require matching key here AND add_design_var() below):
 #   KEY           TYPE    DESCRIPTION

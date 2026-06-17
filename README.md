@@ -59,7 +59,7 @@ pip install -e .
 ```
 
 ### 2. API Configuration
-Create a `.env` file in the project root.
+Copy `.env.example` to `.env` in the project root and fill in the values you need.
 
 For Gemini:
 
@@ -71,6 +71,19 @@ The code also accepts:
 
 ```bash
 GOOGLE_API_KEY="YOUR_GOOGLE_GEMINI_KEY"
+```
+
+For Ollama:
+
+- No API key is required for the default local setup.
+- Make sure the Ollama daemon is running locally.
+- Make sure the model name you select in the app already exists in your local Ollama instance.
+
+Example:
+
+```bash
+ollama pull gemini-2.0-flash
+ollama list
 ```
 
 ### 3. System Requirements
@@ -106,6 +119,7 @@ docker build -f docker/sandbox.Dockerfile -t openaerostruct-sandbox:latest .
 
 Make sure the Docker daemon is running before building the image or enabling the sandbox backend.
 By default, temporary Docker staging is created under `.docker_stage/` in the project root so Docker Desktop can mount it without extra macOS file-sharing changes.
+The Docker sandbox is only used for executing generated OpenAeroStruct scripts. LLM calls still happen in the host app process, so your Gemini key stays in the host `.env` and does not need to be copied into the container.
 
 Enable the Docker backend:
 

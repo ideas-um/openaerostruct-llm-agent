@@ -49,7 +49,7 @@ mesh, twist_cp = generate_mesh(mesh_dict)
 # be declared here first. twist_cp and thickness_cp are pre-included.
 # Do NOT remove twist_cp — it is initialized from the CRM geometry above.
 #
-# FULL DV CATALOG for aerostructural tube FEM (from God Document):
+# FULL DV CATALOG for aerostructural tube FEM:
 # -----------------------------------------------
 # GEOMETRY DVs (all require matching key here AND add_design_var() below):
 #   KEY           TYPE    DESCRIPTION

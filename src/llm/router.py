@@ -8,6 +8,7 @@ from .config import (
     get_llm_client,
     log_token_usage,
     is_gemini_transient_error,
+    is_gemini_provider,
     GEMINI_STREAM_RETRY_WAIT,
     GEMINI_STREAM_MAX_RETRIES,
 )
@@ -124,7 +125,7 @@ def route_intent_stream(
     except Exception:
         client = None
 
-    if client is None or provider != "Gemini API":
+    if client is None or not is_gemini_provider(provider):
         response = get_llm_response(
             user_prompt, model_name, system_prompt, provider=provider
         )
