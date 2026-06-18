@@ -8,6 +8,7 @@ import struct
 import shutil
 import tempfile
 import uuid
+from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
 # __file__-relative base paths
@@ -27,6 +28,21 @@ _DEFAULT_DOCKER_SECCOMP = os.path.join(
     "docker",
     "seccomp-openaerostruct.json",
 )
+
+
+def _load_env_file() -> None:
+    """Load a local .env file so execution backend settings work cross-platform."""
+    for env_candidate in [
+        os.path.join(_PROJECT_DIR, ".env"),
+        os.path.join(_SRC_DIR, ".env"),
+        os.path.join(os.getcwd(), ".env"),
+    ]:
+        if os.path.exists(env_candidate):
+            load_dotenv(env_candidate, override=True, encoding="utf-8")
+            break
+
+
+_load_env_file()
 
 # ---------------------------------------------------------------------------
 # Static-analysis whitelist

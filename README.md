@@ -92,15 +92,15 @@ If you want generated OpenAeroStruct scripts to run in Docker instead of the loc
 docker build -f docker/sandbox.Dockerfile -t openaerostruct-sandbox:latest .
 ```
 
-Then set:
+Then set the backend in your local `.env` file:
 
 ```bash
-export OAS_EXECUTION_BACKEND=docker
+OAS_EXECUTION_BACKEND="docker"
 ```
 
 Backend options:
-- `OAS_EXECUTION_BACKEND=host`
-- `OAS_EXECUTION_BACKEND=docker`
+- `OAS_EXECUTION_BACKEND=host` #On local machine
+- `OAS_EXECUTION_BACKEND=docker` #In Docker (More safe, recommended)
 - `OAS_EXECUTION_BACKEND=auto`
 
 
