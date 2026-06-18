@@ -24,7 +24,7 @@ _GEN_RUN_DIR = os.path.join(_OAS_OUT_DIR, "generated_run_out")
 _BENCH_OUT_DIR = os.path.join(_PROJECT_DIR, "benchmark_run_out")
 _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 
-MAX_RETRIES = 5
+DEFAULT_MAX_RETRIES = 5
 NUM_REPS = 10
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,9 @@ def _copy_artifacts(attempt_dir: str):
 # ---------------------------------------------------------------------------
 # Single Repetition Runner
 # ---------------------------------------------------------------------------
-def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
+def _run_single_rep(
+    q: dict, rep_dir: str, model: str, provider: str, max_retries: int
+) -> dict:
     os.makedirs(rep_dir, exist_ok=True)
 
     # Setup Dedicated File Logger for this repetition
@@ -190,7 +192,7 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
         blueprints=blueprints,
         model_name=model,
         provider=provider,
-        max_retries=MAX_RETRIES,
+        max_retries=max_retries,
         stream=True,
         callback=bench_callback,
         gen_script_path=_BENCH_SCRIPT,
@@ -223,7 +225,12 @@ def _run_single_rep(q: dict, rep_dir: str, model: str, provider: str) -> dict:
 # ---------------------------------------------------------------------------
 # Main Benchmark Runner
 # ---------------------------------------------------------------------------
-def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini API"):
+def run_benchmark(
+    limit=None,
+    model="gemini-flash-lite-latest",
+    provider="Gemini API",
+    max_retries=DEFAULT_MAX_RETRIES,
+):
     os.makedirs(_OAS_OUT_DIR, exist_ok=True)
     os.makedirs(_BENCH_OUT_DIR, exist_ok=True)
 
@@ -240,7 +247,7 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
             {
                 "model": model,
                 "provider": provider,
-                "max_retry_count": MAX_RETRIES,
+                "max_retry_count": max_retries,
                 "num_reps": NUM_REPS,
                 "timestamp": run_ts,
             },
@@ -276,7 +283,7 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
             print(f"  [Rep {rep}/{NUM_REPS}]", end=" ", flush=True)
             rep_dir = os.path.join(case_dir, f"rep_{rep}")
             start_time = time.time()
-            res = _run_single_rep(q, rep_dir, model, provider)
+            res = _run_single_rep(q, rep_dir, model, provider, max_retries)
             elapsed = round(time.time() - start_time, 2)
 
             if res["success"]:
@@ -352,7 +359,7 @@ def run_benchmark(limit=None, model="gemini-flash-lite-latest", provider="Gemini
                 sorted(set(e.splitlines()[0][:100] for e in all_errors if e))
             ),
             "model": model,
-            "max_retry_count": MAX_RETRIES,
+            "max_retry_count": max_retries,
         }
         _append_result(
             summary_results_file,
@@ -375,5 +382,16 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, help="Limit test cases")
     parser.add_argument("--model", type=str, default="gemini-flash-lite-latest")
     parser.add_argument("--provider", type=str, default="Gemini API")
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=DEFAULT_MAX_RETRIES,
+        help="Maximum number of coder retry attempts per benchmark case",
+    )
     args = parser.parse_args()
-    run_benchmark(limit=args.limit, model=args.model, provider=args.provider)
+    run_benchmark(
+        limit=args.limit,
+        model=args.model,
+        provider=args.provider,
+        max_retries=args.max_retries,
+    )
