@@ -25,12 +25,9 @@ for _env_candidate in [
         _env_loaded_from = _env_candidate
         break
 
-# DEBUG — remove once API key issue is resolved
 _api_key_found = bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
 print(f"[config] .env loaded from: {_env_loaded_from}")
-print(
-    f"[config] API key found: {_api_key_found}  (GOOGLE_API_KEY={bool(os.getenv('GOOGLE_API_KEY'))}, GEMINI_API_KEY={bool(os.getenv('GEMINI_API_KEY'))})"
-)
+print(f"[config] Gemini API key configured: {_api_key_found}")
 
 # ---------------------------------------------------------------------------
 # Resolve paths relative to this file.
