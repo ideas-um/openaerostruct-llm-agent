@@ -164,13 +164,6 @@ def _get_relaxation_suggestion(
 
 def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
     parts = []
-    if prior_code:
-        parts.append(
-            "### BASELINE WORKING CODE (DO NOT BREAK THIS STRUCTURE) ###\n"
-            "The following code is syntactically correct and includes necessary imports. "
-            "Use it as your template and only make surgical changes:\n"
-            f"```python\n{prior_code}\n```"
-        )
 
     if error_history:
         parts.append("### RECENT ERRORS AND FEEDBACK ###")
