@@ -2,7 +2,7 @@
 
 A multi-agent framework for running OpenAeroStruct wing analysis and optimization from natural-language prompts.
 
-[Open architecture diagram (PDF)](./.github/workflows/Architecture.pdf)
+![OpenAeroStruct architecture](./.github/workflows/Architecture.png)
 
 ## Contributors
 
@@ -12,13 +12,13 @@ A multi-agent framework for running OpenAeroStruct wing analysis and optimizatio
 
 ## License
 
-Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab  
-[University of Michigan IDEAS Lab](https://ideas.engin.umich.edu)  
+Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab
+[University of Michigan IDEAS Lab](https://ideas.engin.umich.edu)
 [LICENSE](./LICENSE)
 
 ## What It Does
 
-The agent takes a natural-language aircraft design request, routes it to the most appropriate OpenAeroStruct blueprint, edits a validated bluepruint in `src/blueprints/`, runs the generated script, retries when execution fails, and saves both plots and optimization summaries for review. In other words, the user can describe the analysis or optimization problem in plain language, while the system handles workflow selection, code adaptation, execution, and result packaging in a more controlled way than writing a brand-new script from scratch each time.
+The agent takes a natural-language aircraft design request, routes it to the most appropriate OpenAeroStruct blueprint, edits a validated blueprint in `src/blueprints/`, runs the generated script, retries when execution fails, and saves both plots and optimization summaries for review. In practice, this means a user can describe an analysis or optimization problem in plain language while the system handles workflow selection, code adaptation, execution, and result packaging in a more controlled and repeatable way than writing a brand-new script from scratch each time.
 
 Supported workflows:
 - Aerodynamic analysis
@@ -57,13 +57,13 @@ cp .env.example .env
 
 ### Choose a Provider and Model
 
-The project reads provider credentials from a local `.env` file in the repository root. A starter template is provided in [.env.example](./.env.example). If you have not already created the file during installation, run:
+The project reads provider credentials from a local `.env` file in the repository root. A starter template is provided in [.env.example](./.env.example), and if you have not already created the file during installation you can create it with:
 
 ```bash
 cp .env.example .env
 ```
 
-This creates a local copy that you can edit without changing the tracked example file.
+This creates a local copy that you can edit without changing the tracked example file in the repository.
 
 Gemini:
 
@@ -71,7 +71,7 @@ Gemini:
 GEMINI_API_KEY="YOUR_GOOGLE_GEMINI_KEY"
 ```
 
-If you want to use Gemini, you first need to create a Gemini API key through Google AI Studio. Google’s official documentation for key creation and management is here: [Using Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key). The direct page for creating or viewing a key is here: [Google AI Studio API keys](https://aistudio.google.com/apikey). After creating a key, paste it into your local `.env` file as `GEMINI_API_KEY="..."`.
+If you want to use Gemini, you first need to create a Gemini API key through Google AI Studio. Google’s official documentation for key creation and management is available at [Using Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key), and the direct page for creating or viewing a key is [Google AI Studio API keys](https://aistudio.google.com/apikey). After creating a key, paste it into your local `.env` file as `GEMINI_API_KEY="..."`.
 
 Ollama:
 - Install Ollama from [ollama.com](https://ollama.com/).
@@ -86,7 +86,7 @@ ollama run gemini-2.0-flash
 
 ### Docker Sandbox (Optional)
 
-If you want generated OpenAeroStruct scripts to run in Docker instead of the local Python subprocess, build the sandbox image once and then set the execution backend before launching the app or benchmark. This changes where the generated OpenAeroStruct scripts run, but it does not change which LLM provider or model you use.
+If you want generated OpenAeroStruct scripts to run in Docker instead of the local Python subprocess, build the sandbox image once and then set the execution backend before launching the app or benchmark. This changes where the generated OpenAeroStruct scripts run, but it does not change which LLM provider or model you use for routing and code generation.
 
 ```bash
 docker build -f docker/sandbox.Dockerfile -t openaerostruct-sandbox:latest .
@@ -123,7 +123,7 @@ When the app starts, provider and model selection happens in the Streamlit sideb
 - `Provider`: `Gemini API` or `Ollama`
 - `Model`: selected from the sidebar after choosing the provider
 
-For Gemini, the sidebar offers the Gemini models currently wired into the UI. For Ollama, the app reads your installed local models and shows them in the dropdown, which means you can switch models without editing project code as long as the model is already installed locally.
+For Gemini, the sidebar offers the Gemini models currently wired into the UI. For Ollama, the app reads your installed local models and shows them in the dropdown, which means you can switch models without editing project code as long as the model is already installed in your local Ollama environment.
 
 ## Example Prompts
 
@@ -164,4 +164,4 @@ Outputs are written under `benchmark_run_out/`.
 
 ## Reference
 
-Related preprint: [Agentic Framework PDF](https://www.gokcincinar.com/publication/pp-2025-agenticframework/pp-2025-AgenticFramework.pdf)
+The related preprint describing this framework can be accessed through the University of Michigan Deep Blue repository at [Link](https://backend.production.deepblue-documents.lib.umich.edu/server/api/core/bitstreams/1986c947-bc2b-4a9b-9a3e-2ee66df5d98c/content), and can also be accessed through [IDEAS Lab Website](https://www.gokcincinar.com/software/openaerostruct/).
