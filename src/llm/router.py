@@ -43,7 +43,7 @@ def _approx_tokens(text: str) -> int:
 
 def _load_system_prompt() -> str:
     if os.path.exists(_SKILLS_PATH):
-        with open(_SKILLS_PATH, "r") as f:
+        with open(_SKILLS_PATH, "r", encoding="utf-8") as f:
             return f.read()
     return "Select an OpenAeroStruct blueprint."
 

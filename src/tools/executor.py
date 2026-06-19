@@ -559,7 +559,7 @@ def execute_run(script_path=_DEFAULT_SCRIPT, timeout=120):
     """
     # ── Read generated code ────────────────────────────────────────────────
     try:
-        with open(script_path, "r") as f:
+        with open(script_path, "r", encoding="utf-8") as f:
             code = f.read()
     except OSError as exc:
         return ExecutionResult(-1, "", f"Cannot read script '{script_path}': {exc}")

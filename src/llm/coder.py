@@ -37,10 +37,10 @@ def _build_prompt(
     for name in blueprint_names:
         p = os.path.join(_BLUEPRINTS_DIR, name)
         if os.path.exists(p):
-            with open(p, "r") as f:
+            with open(p, "r", encoding="utf-8") as f:
                 blueprints_context += f"\n--- BLUEPRINT: {name} ---\n{f.read()}\n"
 
-    with open(os.path.join(_LLM_DIR, "coder.md"), "r") as f:
+    with open(os.path.join(_LLM_DIR, "coder.md"), "r", encoding="utf-8") as f:
         system_prompt = f.read()
 
     prompt = f"User Request: {user_prompt}\n\n"

@@ -225,6 +225,7 @@ def run_agent(
             err = f"Generation error: {sanitize_feedback(str(exc))}"
             error_history.append(err)
             result.error_logs.append(err)
+            emit("generation_error", {"message": err})
             attempt += 1
             continue
 
