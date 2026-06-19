@@ -43,7 +43,6 @@ Using `uv`:
 
 ```bash
 uv sync --python-preference only-managed
-cp .env.example .env
 ```
 
 Using Conda:
@@ -52,7 +51,6 @@ Using Conda:
 conda create -n openaerostruct-agent python=3.12
 conda activate openaerostruct-agent
 pip install -e .
-cp .env.example .env
 ```
 
 ### Choose a Provider and Model
@@ -101,7 +99,7 @@ OAS_EXECUTION_BACKEND="docker"
 Backend options:
 - `OAS_EXECUTION_BACKEND=host` #On local machine
 - `OAS_EXECUTION_BACKEND=docker` #In Docker (More safe, recommended)
-- `OAS_EXECUTION_BACKEND=auto`
+- `OAS_EXECUTION_BACKEND=auto` #Automatically based on what is avaliable
 
 
 ## Run the App
@@ -115,7 +113,6 @@ uv run streamlit run src/app.py
 Using Conda:
 
 ```bash
-conda activate openaerostruct-agent
 streamlit run src/app.py
 ```
 
