@@ -54,16 +54,15 @@ def _parse_relaxation_response(response: str) -> str:
         return f"Suggested relaxations:\n{response}"
 
 
-
 def suggest_relaxation(
     user_prompt: str, error_logs: list, model_name: str, provider: str
 ) -> tuple[str, int, int]:
     """
-    Loads relaxer.md and prompts the LLM to analyze the failure path 
+    Loads relaxer.md and prompts the LLM to analyze the failure path
     and suggest valid physical relaxations.
     """
     _RELAX_PATH = os.path.join(_LLM_DIR, "relaxer.md")
-    
+
     if os.path.exists(_RELAX_PATH):
         with open(_RELAX_PATH, "r", encoding="utf-8") as f:
             system_prompt = f.read()
@@ -72,7 +71,7 @@ def suggest_relaxation(
 
     # Keep only the last two attempts to avoid context bloat and focus on the latest error
     recent_errors = "\n\n".join(error_logs[-2:])
-    
+
     formatted_user_prompt = (
         f"### USER'S DESIGN REQUEST ###\n{user_prompt}\n\n"
         f"### EXECUTION ATTEMPTS & FAILURES ###\n{recent_errors}\n\n"
@@ -80,14 +79,11 @@ def suggest_relaxation(
     )
 
     in_t = _approx_tokens(system_prompt + "\n" + formatted_user_prompt)
-    
+
     try:
         # FIXED: Calling with exact positional arguments matching get_llm_response signature
         ans = get_llm_response(
-            formatted_user_prompt,
-            model_name,
-            system_prompt,
-            provider=provider
+            formatted_user_prompt, model_name, system_prompt, provider=provider
         )
         parsed_suggestion = _parse_relaxation_response(ans)
         return parsed_suggestion, in_t, _approx_tokens(ans)

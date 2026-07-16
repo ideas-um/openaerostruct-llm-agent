@@ -1,6 +1,5 @@
 import os
 import csv
-import sys
 import time
 import json
 import shutil
@@ -132,7 +131,9 @@ def _write_json(path: str, data: dict):
         json.dump(data, fh, indent=2, sort_keys=True)
 
 
-def _write_code_diffs(code: str, blueprints: list[str], out_dir: str, stem: str) -> list[str]:
+def _write_code_diffs(
+    code: str, blueprints: list[str], out_dir: str, stem: str
+) -> list[str]:
     """Save unified and HTML diffs comparing generated code to each blueprint."""
     paths = []
     code_lines = code.splitlines()
@@ -477,7 +478,7 @@ def run_benchmark(
         )
         sum_row_idx += 1
 
-    print(f"\n--- Benchmark Complete! ---")
+    print("\n--- Benchmark Complete! ---")
     print(
         f"Overall Success Rate: {total_success}/{total_runs} ({total_success / total_runs * 100:.1f}%)"
     )

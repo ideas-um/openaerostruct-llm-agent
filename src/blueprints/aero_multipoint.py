@@ -28,6 +28,7 @@ def _plot_path(name: str) -> str:
     safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
     return os.path.join(_PLOTS_DIR, safe + ".png")
 
+
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
@@ -248,9 +249,15 @@ try:
     alpha_vals = prob.get_val("alpha")
     CL_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CL")[0] for i in range(n_points)]
     CD_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CD")[0] for i in range(n_points)]
-    CDi_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CDi")[0] for i in range(n_points)]
-    CDv_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CDv")[0] for i in range(n_points)]
-    CDw_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CDw")[0] for i in range(n_points)]
+    CDi_vals = [
+        prob.get_val(f"aero_point_{i}.wing_perf.CDi")[0] for i in range(n_points)
+    ]
+    CDv_vals = [
+        prob.get_val(f"aero_point_{i}.wing_perf.CDv")[0] for i in range(n_points)
+    ]
+    CDw_vals = [
+        prob.get_val(f"aero_point_{i}.wing_perf.CDw")[0] for i in range(n_points)
+    ]
     twist_cp_vals = prob.get_val("wing_geom.twist_cp")
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
@@ -300,10 +307,14 @@ try:
     ax_drag.set_xticks(x)
     ax_drag.set_xticklabels(point_labels)
     ax_drag.set_ylabel("Drag Coefficient")
-    ax_drag.set_title(f"Drag Breakdown by Flight Condition ({surf_dict['S_ref_type']} S_ref)")
+    ax_drag.set_title(
+        f"Drag Breakdown by Flight Condition ({surf_dict['S_ref_type']} S_ref)"
+    )
     ax_drag.legend(frameon=False)
     fig_drag.tight_layout()
-    fig_drag.savefig(_plot_path("aero_multipoint_drag_breakdown"), bbox_inches="tight", dpi=150)
+    fig_drag.savefig(
+        _plot_path("aero_multipoint_drag_breakdown"), bbox_inches="tight", dpi=150
+    )
     plt.close(fig_drag)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:

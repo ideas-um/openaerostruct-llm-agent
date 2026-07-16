@@ -122,7 +122,7 @@ prob = om.Problem()
 # CT = thrust-specific fuel consumption [1/s] = grav_constant * TSFC_in_per_hour * (1/3600)
 #
 # CRITICAL WARNING: Never set CT to 0.0. A zero thrust-specific fuel consumption rate
-# forces fuel burn calculations to evaluate as exactly 0.0. This flattens the 
+# forces fuel burn calculations to evaluate as exactly 0.0. This flattens the
 # optimization landscape, removing all gradients and causing Line Search failures.
 # Keep CT set to a realistic non-zero value (e.g. grav_constant * 17.0e-6).
 #

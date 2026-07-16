@@ -74,9 +74,7 @@ def _snapshot_plot_files(plot_paths: list[str], scope: str) -> list[str]:
         return []
 
     os.makedirs(_PLOT_ARCHIVE_DIR, exist_ok=True)
-    snapshot_dir = os.path.join(
-        _PLOT_ARCHIVE_DIR, f"{scope}_{uuid.uuid4().hex[:10]}"
-    )
+    snapshot_dir = os.path.join(_PLOT_ARCHIVE_DIR, f"{scope}_{uuid.uuid4().hex[:10]}")
     os.makedirs(snapshot_dir, exist_ok=True)
 
     snap_paths = []
@@ -338,10 +336,8 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "success"
                 st.session_state["active_attempts"][-1]["db_summary"] = db_sum
-                st.session_state["active_attempts"][-1]["plots"] = (
-                    _snapshot_plot_files(
-                        data.get("plots", []), f"attempt_{attempt}_success"
-                    )
+                st.session_state["active_attempts"][-1]["plots"] = _snapshot_plot_files(
+                    data.get("plots", []), f"attempt_{attempt}_success"
                 )
 
         elif event == "exec_error":
@@ -366,10 +362,8 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "no_converge"
                 st.session_state["active_attempts"][-1]["db_summary"] = db_sum
-                st.session_state["active_attempts"][-1]["plots"] = (
-                    _snapshot_plot_files(
-                        data.get("plots", []), f"attempt_{attempt}_no_converge"
-                    )
+                st.session_state["active_attempts"][-1]["plots"] = _snapshot_plot_files(
+                    data.get("plots", []), f"attempt_{attempt}_no_converge"
                 )
 
         elif event == "no_converge_final":

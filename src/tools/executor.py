@@ -507,18 +507,16 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
                 "target=/workspace/src/generated_run_out"
             ),
             "--mount",
-            (
-                "type=bind,"
-                f"source={staged_out_dir},"
-                "target=/workspace/openaerostruct_out"
-            ),
+            (f"type=bind,source={staged_out_dir},target=/workspace/openaerostruct_out"),
             "-w",
             "/workspace/src",
         ]
         if uid is not None and gid is not None:
             cmd.extend(["--user", f"{uid}:{gid}"])
 
-        cmd.extend([image, "python", f"/workspace/src/{os.path.basename(staged_script_path)}"])
+        cmd.extend(
+            [image, "python", f"/workspace/src/{os.path.basename(staged_script_path)}"]
+        )
 
         proc = subprocess.run(
             cmd,
@@ -546,7 +544,9 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
         )
         stdout = _decode_timeout_output(exc.stdout)
         stderr = _decode_timeout_output(exc.stderr)
-        stderr += f"\nTimeoutError: Docker sandbox execution exceeded {timeout} seconds."
+        stderr += (
+            f"\nTimeoutError: Docker sandbox execution exceeded {timeout} seconds."
+        )
         return ExecutionResult(-1, stdout, stderr)
     except Exception as exc:
         return ExecutionResult(-1, "", f"DockerSandboxException: {str(exc)}")

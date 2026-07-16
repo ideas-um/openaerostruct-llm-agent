@@ -6,7 +6,6 @@ import re  # 1. Added re for regex parsing
 from .config import (
     get_llm_response,
     get_llm_client,
-    log_token_usage,
     LLMBackendTransientError,
     is_gemini_transient_error,
     is_gemini_provider,
@@ -68,7 +67,9 @@ def _parse_response(response: str) -> tuple[str, str]:
     """
     reasoning_match = re.search(r"<reasoning>(.*?)</reasoning>", response, re.S | re.I)
     if not reasoning_match:
-        reasoning_match = re.search(r"<reasoning>(.*?)(?:<code>|$)", response, re.S | re.I)
+        reasoning_match = re.search(
+            r"<reasoning>(.*?)(?:<code>|$)", response, re.S | re.I
+        )
     reasoning = (
         reasoning_match.group(1).strip()
         if reasoning_match
@@ -92,7 +93,7 @@ def _parse_response(response: str) -> tuple[str, str]:
 
     starts = [m.start() for m in re.finditer(r"(?m)^(?:import|from)\s+", code)]
     if starts:
-        code = code[min(starts):].strip()
+        code = code[min(starts) :].strip()
 
     return reasoning, code
 

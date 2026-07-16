@@ -21,7 +21,7 @@ def _decompress_json(blob):
 
 def _clean_val(val, max_len=60) -> str:
     """
-    Collapses multi-line NumPy arrays into a single clean line 
+    Collapses multi-line NumPy arrays into a single clean line
     and truncates long outputs to prevent Markdown table breaks.
     """
     if val is None:
@@ -29,10 +29,10 @@ def _clean_val(val, max_len=60) -> str:
     # Convert to string, replace newlines with spaces, and collapse multiple spaces
     s = str(val).replace("\n", " ")
     s = " ".join(s.split())
-    
+
     # Truncate if too long
     if len(s) > max_len:
-        s = s[:max_len - 3] + "..."
+        s = s[: max_len - 3] + "..."
     return s
 
 
@@ -73,19 +73,25 @@ def _render_summary(objectives, constraints, desvars) -> str:
     markdown_output += "| Objective | Initial Value | Final Value |\n"
     markdown_output += "|---|---|---|\n"
     for name, init_val, final_val in objectives:
-        markdown_output += f"| `{name}` | {_clean_val(init_val)} | {_clean_val(final_val)} |\n"
+        markdown_output += (
+            f"| `{name}` | {_clean_val(init_val)} | {_clean_val(final_val)} |\n"
+        )
 
     markdown_output += "\n### Constraints\n"
     markdown_output += "| Constraint | Initial Value | Final Value |\n"
     markdown_output += "|---|---|---|\n"
     for name, init_val, final_val in constraints:
-        markdown_output += f"| `{name}` | {_clean_val(init_val)} | {_clean_val(final_val)} |\n"
+        markdown_output += (
+            f"| `{name}` | {_clean_val(init_val)} | {_clean_val(final_val)} |\n"
+        )
 
     markdown_output += "\n### Design Variables (Truncated)\n"
     markdown_output += "| Design Variable | Initial Value | Final Value |\n"
     markdown_output += "|---|---|---|\n"
     for name, init_val, final_val in desvars:
-        markdown_output += f"| `{name}` | {_clean_val(init_val)} | {_clean_val(final_val)} |\n"
+        markdown_output += (
+            f"| `{name}` | {_clean_val(init_val)} | {_clean_val(final_val)} |\n"
+        )
 
     return markdown_output
 
@@ -187,9 +193,7 @@ def _summarize_with_sqlite(db_path):
     """Fallback reader that parses the OpenMDAO SQLite database directly."""
     with sqlite3.connect(db_path) as con:
         cur = con.cursor()
-        metadata = cur.execute(
-            "SELECT prom2abs, var_settings FROM metadata"
-        ).fetchone()
+        metadata = cur.execute("SELECT prom2abs, var_settings FROM metadata").fetchone()
         if metadata is None:
             return None
 
@@ -222,8 +226,12 @@ def _summarize_with_sqlite(db_path):
             continue
         var_type = setting.get("type")
 
-        init_val = _resolve_case_value(first_inputs, first_outputs, name, setting, prom2abs)
-        final_val = _resolve_case_value(last_inputs, last_outputs, name, setting, prom2abs)
+        init_val = _resolve_case_value(
+            first_inputs, first_outputs, name, setting, prom2abs
+        )
+        final_val = _resolve_case_value(
+            last_inputs, last_outputs, name, setting, prom2abs
+        )
         if init_val is None and final_val is None:
             continue
 
@@ -245,9 +253,7 @@ def _metrics_with_sqlite(db_path):
     """Fallback structured metrics reader for OpenMDAO SQLite databases."""
     with sqlite3.connect(db_path) as con:
         cur = con.cursor()
-        metadata = cur.execute(
-            "SELECT prom2abs, var_settings FROM metadata"
-        ).fetchone()
+        metadata = cur.execute("SELECT prom2abs, var_settings FROM metadata").fetchone()
         if metadata is None:
             return None
 
@@ -277,8 +283,12 @@ def _metrics_with_sqlite(db_path):
             continue
         var_type = setting.get("type")
 
-        init_val = _resolve_case_value(first_inputs, first_outputs, name, setting, prom2abs)
-        final_val = _resolve_case_value(last_inputs, last_outputs, name, setting, prom2abs)
+        init_val = _resolve_case_value(
+            first_inputs, first_outputs, name, setting, prom2abs
+        )
+        final_val = _resolve_case_value(
+            last_inputs, last_outputs, name, setting, prom2abs
+        )
         if init_val is None and final_val is None:
             continue
 

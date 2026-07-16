@@ -164,7 +164,7 @@ def route_intent_stream(
             if is_gemini_transient_error(exc):
                 if gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
                     transient_hit = True
-                    yield f"\n\n⚠️ Gemini API overloaded — retrying...\n"
+                    yield "\n\n⚠️ Gemini API overloaded — retrying...\n"
                     time.sleep(GEMINI_STREAM_RETRY_WAIT)
                 else:
                     raise LLMBackendTransientError(

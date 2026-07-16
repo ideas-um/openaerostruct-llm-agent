@@ -306,7 +306,12 @@ def run_agent(
         try:
             if stream and callback:
                 for chunk in generate_code_stream(
-                    user_prompt, blueprints, feedback, model_name, provider, prior_code=prior_code
+                    user_prompt,
+                    blueprints,
+                    feedback,
+                    model_name,
+                    provider,
+                    prior_code=prior_code,
                 ):
                     if isinstance(chunk, tuple):
                         code, reasoning, in_tok, out_tok = chunk
@@ -316,7 +321,12 @@ def run_agent(
                         emit("code_chunk", {"chunk": chunk})
             else:
                 code, reasoning, in_tok, out_tok = generate_code(
-                    user_prompt, blueprints, feedback, model_name, provider, prior_code=prior_code
+                    user_prompt,
+                    blueprints,
+                    feedback,
+                    model_name,
+                    provider,
+                    prior_code=prior_code,
                 )
                 result.input_tokens += in_tok
                 result.output_tokens += out_tok
@@ -364,7 +374,7 @@ def run_agent(
                     "stdout_tail": sanitize_feedback(exec_res.stdout, 1000),
                 },
             )
-            
+
             # Guard 1: Verify code is not empty or truncated
             if not code or len(code.strip()) < 100:
                 err = "Python error: Generated script was empty or incomplete."
@@ -375,10 +385,17 @@ def run_agent(
 
             # Guard 2: Enforce optimization convergence for optimization tasks
             is_opt_blueprint = any(
-                b in ["aero_opt.py", "aero_multipoint.py", "struct_optimization.py", "aerostruct_tube.py", "aerostruct_wingbox.py"]
+                b
+                in [
+                    "aero_opt.py",
+                    "aero_multipoint.py",
+                    "struct_optimization.py",
+                    "aerostruct_tube.py",
+                    "aerostruct_wingbox.py",
+                ]
                 for b in blueprints
             )
-            
+
             # If the blueprint is optimization but 'run_driver()' is omitted,
             # we force a retry with a clear warning message.
             if is_opt_blueprint and "run_driver()" not in code:
