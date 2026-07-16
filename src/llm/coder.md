@@ -232,8 +232,8 @@ lift_shape = lift_shape[order]
 semi_span = np.max(np.abs(y_full))
 y_ellipse = np.linspace(-semi_span, semi_span, 200)
 ellipse = np.sqrt(np.maximum(0.0, 1.0 - (y_ellipse / semi_span) ** 2))
-lift_shape = lift_shape / np.trapz(lift_shape, y_full)
-ellipse = ellipse / np.trapz(ellipse, y_ellipse)
+lift_shape = lift_shape / np.trapezoid(lift_shape, y_full)
+ellipse = ellipse / np.trapezoid(ellipse, y_ellipse)
 ```
 
 Label this plot as normalized sectional lift shape, not raw `Cl`.

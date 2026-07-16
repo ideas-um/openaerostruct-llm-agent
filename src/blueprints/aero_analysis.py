@@ -332,8 +332,8 @@ if __name__ == "__main__":
 
         y_ellipse = np.linspace(-semi_span, semi_span, 200)
         ellipse = np.sqrt(np.maximum(0.0, 1.0 - (y_ellipse / semi_span) ** 2))
-        lift_area = np.trapz(lift_shape, y_full)
-        ellipse_area = np.trapz(ellipse, y_ellipse)
+        lift_area = np.trapezoid(lift_shape, y_full)
+        ellipse_area = np.trapezoid(ellipse, y_ellipse)
         lift_shape_normalized = lift_shape / lift_area
         ellipse_normalized = ellipse / ellipse_area
 
