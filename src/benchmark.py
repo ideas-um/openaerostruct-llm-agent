@@ -6,8 +6,11 @@ import json
 import shutil
 import logging
 import statistics
+import difflib
+import hashlib
 from datetime import datetime
 
+from llm.config import LLMBackendTransientError
 from llm.router import route_intent_stream
 from agent_logic import run_agent, AgentResult
 
@@ -23,9 +26,11 @@ _PLOTS_DIR = os.path.join(_OAS_OUT_DIR, "agent_plots")
 _GEN_RUN_DIR = os.path.join(_OAS_OUT_DIR, "generated_run_out")
 _BENCH_OUT_DIR = os.path.join(_PROJECT_DIR, "benchmark_run_out")
 _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
+_BLUEPRINTS_DIR = os.path.join(_SRC_DIR, "blueprints")
 
 DEFAULT_MAX_RETRIES = 5
 NUM_REPS = 10
+MAX_BACKEND_RETRIES_PER_REP = int(os.getenv("MAX_BACKEND_RETRIES_PER_REP", "3"))
 
 # ---------------------------------------------------------------------------
 # CSV headers
@@ -45,6 +50,8 @@ REP_HEADERS = [
     "input_tokens",
     "output_tokens",
     "success",
+    "result_metrics",
+    "result_metrics_hash",
     "error_log",
 ]
 
@@ -70,6 +77,7 @@ SUMMARY_HEADERS = [
     "elapsed_s_max",
     "input_tokens_mean",
     "output_tokens_mean",
+    "unique_result_metrics",
     "error_categories",
     "model",
     "max_retry_count",
@@ -113,6 +121,58 @@ def _copy_artifacts(attempt_dir: str):
                     shutil.copytree(src, dst, dirs_exist_ok=True)
             except Exception:
                 pass
+
+
+def _safe_name(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in name)
+
+
+def _write_json(path: str, data: dict):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+
+
+def _write_code_diffs(code: str, blueprints: list[str], out_dir: str, stem: str) -> list[str]:
+    """Save unified and HTML diffs comparing generated code to each blueprint."""
+    paths = []
+    code_lines = code.splitlines()
+    for blueprint in blueprints:
+        blueprint_path = os.path.join(_BLUEPRINTS_DIR, blueprint)
+        if not os.path.exists(blueprint_path):
+            continue
+
+        with open(blueprint_path, "r", encoding="utf-8") as fh:
+            blueprint_text = fh.read()
+        blueprint_lines = blueprint_text.splitlines()
+
+        base = f"{stem}_{_safe_name(blueprint)}"
+        diff_path = os.path.join(out_dir, base + ".diff")
+        html_path = os.path.join(out_dir, base + ".html")
+
+        diff = difflib.unified_diff(
+            blueprint_lines,
+            code_lines,
+            fromfile=f"blueprints/{blueprint}",
+            tofile="generated/code.py",
+            lineterm="",
+        )
+        with open(diff_path, "w", encoding="utf-8") as fh:
+            for line in diff:
+                fh.write(line + "\n")
+
+        html = difflib.HtmlDiff(wrapcolumn=120).make_file(
+            blueprint_text.splitlines(),
+            code.splitlines(),
+            fromdesc=f"blueprints/{blueprint}",
+            todesc="generated/code.py",
+            context=True,
+            numlines=3,
+        )
+        with open(html_path, "w", encoding="utf-8") as fh:
+            fh.write(html)
+
+        paths.extend([diff_path, html_path])
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +224,10 @@ def _run_single_rep(
         expected_set = set(_norm(b) for b in json.loads(q["expected_blueprints"]))
         routing_correct = expected_set == set(blueprints)
         print(f"    Routing: {selected}  (correct={routing_correct})")
+    except LLMBackendTransientError:
+        backend_logger.removeHandler(file_handler)
+        file_handler.close()
+        raise
     except Exception as e:
         selected = "ERROR"
         blueprints = [json.loads(q["expected_blueprints"])[0]]
@@ -180,28 +244,42 @@ def _run_single_rep(
             attempt_dirs[attempt] = attempt_dir
         elif event == "code_ready":
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
-            with open(os.path.join(attempt_dir, "code.py"), "w") as fh:
-                fh.write(data.get("code", ""))
+            code = data.get("code", "")
+            code_path = os.path.join(attempt_dir, "code.py")
+            with open(code_path, "w", encoding="utf-8") as fh:
+                fh.write(code)
         elif event in ("exec_success", "exec_error", "no_converge"):
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             _copy_artifacts(attempt_dir)
 
     # 2. Execution
-    result: AgentResult = run_agent(
-        user_prompt=q["query"],
-        blueprints=blueprints,
-        model_name=model,
-        provider=provider,
-        max_retries=max_retries,
-        stream=True,
-        callback=bench_callback,
-        gen_script_path=_BENCH_SCRIPT,
-        retry_on_no_converge=True,
-    )
+    try:
+        result: AgentResult = run_agent(
+            user_prompt=q["query"],
+            blueprints=blueprints,
+            model_name=model,
+            provider=provider,
+            max_retries=max_retries,
+            stream=True,
+            callback=bench_callback,
+            gen_script_path=_BENCH_SCRIPT,
+            retry_on_no_converge=True,
+        )
+    except LLMBackendTransientError:
+        backend_logger.removeHandler(file_handler)
+        file_handler.close()
+        raise
 
     if result.final_code:
-        with open(os.path.join(rep_dir, "final_code.py"), "w") as fh:
+        with open(os.path.join(rep_dir, "final_code.py"), "w", encoding="utf-8") as fh:
             fh.write(result.final_code)
+        _write_code_diffs(result.final_code, blueprints, rep_dir, "final_vs_blueprint")
+
+    if result.result_metrics:
+        _write_json(
+            os.path.join(rep_dir, "final_result_metrics.json"),
+            result.result_metrics,
+        )
 
     exit_code = 0 if result.success else -1
 
@@ -217,6 +295,7 @@ def _run_single_rep(
         "converged": result.converged,
         "success": result.success,
         "error_logs": result.error_logs,
+        "result_metrics": result.result_metrics,
         "input_tokens": routing_data.get("input_tokens", 0) + result.input_tokens,
         "output_tokens": routing_data.get("output_tokens", 0) + result.output_tokens,
     }
@@ -277,14 +356,30 @@ def run_benchmark(
         rep_successes, rep_converged_count, opt_reps = 0, 0, 0
         rep_attempts_list, rep_elapsed_list, rep_in_tok, rep_out_tok = [], [], [], []
         rep_routing_correct, all_errors = [], []
+        rep_metric_hashes = []
         selected_last = "ERROR"
 
-        for rep in range(1, NUM_REPS + 1):
+        rep = 1
+        backend_retries = 0
+        while rep <= NUM_REPS:
             print(f"  [Rep {rep}/{NUM_REPS}]", end=" ", flush=True)
             rep_dir = os.path.join(case_dir, f"rep_{rep}")
             start_time = time.time()
-            res = _run_single_rep(q, rep_dir, model, provider, max_retries)
+            try:
+                res = _run_single_rep(q, rep_dir, model, provider, max_retries)
+            except LLMBackendTransientError as exc:
+                backend_retries += 1
+                elapsed = round(time.time() - start_time, 2)
+                if backend_retries > MAX_BACKEND_RETRIES_PER_REP:
+                    print(f"Backend retries exhausted after {elapsed}s: {exc}")
+                    raise
+                print(
+                    f"Backend retry {backend_retries}/{MAX_BACKEND_RETRIES_PER_REP} "
+                    f"after {elapsed}s: {exc}"
+                )
+                continue
             elapsed = round(time.time() - start_time, 2)
+            backend_retries = 0
 
             if res["success"]:
                 rep_successes += 1
@@ -302,6 +397,15 @@ def run_benchmark(
             selected_last = res["selected_blueprints"]
             total_runs += 1
             all_errors.extend(res["error_logs"])
+            metrics_json = json.dumps(
+                res["result_metrics"], sort_keys=True, separators=(",", ":")
+            )
+            metrics_hash = (
+                hashlib.sha1(metrics_json.encode("utf-8")).hexdigest()[:12]
+                if metrics_json != "{}"
+                else ""
+            )
+            rep_metric_hashes.append(metrics_hash)
 
             rep_row = {
                 "id": case_id,
@@ -318,6 +422,8 @@ def run_benchmark(
                 "input_tokens": res["input_tokens"],
                 "output_tokens": res["output_tokens"],
                 "success": res["success"],
+                "result_metrics": metrics_json,
+                "result_metrics_hash": metrics_hash,
                 "error_log": " ||| ".join(res["error_logs"]).replace("\n", " "),
             }
             _append_result(
@@ -325,6 +431,7 @@ def run_benchmark(
             )
             rep_row_idx += 1
             print(f"Done (success={res['success']}, {elapsed}s)")
+            rep += 1
 
         n_reps = len(rep_attempts_list)
         summary_row = {
@@ -355,6 +462,7 @@ def run_benchmark(
             "elapsed_s_max": max(rep_elapsed_list),
             "input_tokens_mean": int(statistics.mean(rep_in_tok)),
             "output_tokens_mean": int(statistics.mean(rep_out_tok)),
+            "unique_result_metrics": len(set(h for h in rep_metric_hashes if h)),
             "error_categories": " ||| ".join(
                 sorted(set(e.splitlines()[0][:100] for e in all_errors if e))
             ),

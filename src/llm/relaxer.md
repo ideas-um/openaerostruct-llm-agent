@@ -40,7 +40,9 @@ Analyze the failed run and constraints using this high-level engineering framewo
 ---
 
 ## RESPONSE FORMAT
-Your response must be a valid JSON object wrapped in `<relaxation>` tags. Keep the markdown bullet points in the `suggestion` block concise and practical.
+Your response must be a valid JSON object wrapped in `<relaxation>` tags.
+Do not emit prose or Markdown fences. Keep the markdown bullet points in the
+`suggestion` block concise and practical.
 
 Example:
 <relaxation>

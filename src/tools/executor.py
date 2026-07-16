@@ -19,7 +19,9 @@ _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 _DEFAULT_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
 _DOCKER_IMAGE_ENV = "OAS_SANDBOX_IMAGE"
 _DOCKER_BACKEND_ENV = "OAS_EXECUTION_BACKEND"
+_HOST_PYTHON_ENV = "OAS_HOST_PYTHON"
 _DEFAULT_DOCKER_IMAGE = "openaerostruct-sandbox:latest"
+_DEFAULT_CONDA_PYTHON = "/opt/anaconda3/envs/openaerostruct/bin/python"
 _DOCKER_STAGE_DIR_ENV = "OAS_DOCKER_STAGE_DIR"
 _DOCKER_SECCOMP_ENV = "OAS_DOCKER_SECCOMP_PROFILE"
 _DEFAULT_DOCKER_STAGE_DIR = os.path.join(_PROJECT_DIR, ".docker_stage")
@@ -415,11 +417,21 @@ def _stage_container_workspace(script_path: str) -> tuple[str, str]:
     return tmp_root, staged_script_path
 
 
+def _host_python_executable() -> str:
+    requested = os.getenv(_HOST_PYTHON_ENV)
+    if requested:
+        return requested
+    if os.path.exists(_DEFAULT_CONDA_PYTHON):
+        return _DEFAULT_CONDA_PYTHON
+    return sys.executable
+
+
 def _execute_on_host(script_path: str, timeout: int) -> ExecutionResult:
     """Run the validated script directly on the host Python interpreter."""
     try:
+        python_exe = _host_python_executable()
         proc = subprocess.run(
-            [sys.executable, script_path],
+            [python_exe, script_path],
             capture_output=True,
             text=True,
             timeout=timeout,

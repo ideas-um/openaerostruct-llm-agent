@@ -7,6 +7,7 @@ from .config import (
     get_llm_response,
     get_llm_client,
     log_token_usage,
+    LLMBackendTransientError,
     is_gemini_transient_error,
     is_gemini_provider,
     GEMINI_STREAM_RETRY_WAIT,
@@ -63,40 +64,35 @@ def _build_prompt(
 
 def _parse_response(response: str) -> tuple[str, str]:
     """
-    Extracts reasoning and code, supporting both the new XML format
-    and the legacy ##### delimiter format.
+    Extract XML reasoning/code, with defensive fallbacks for malformed responses.
     """
-    # 1. Extract Reasoning (XML and legacy fallback)
     reasoning_match = re.search(r"<reasoning>(.*?)</reasoning>", response, re.S | re.I)
     if not reasoning_match:
-        reasoning_match = re.search(r"<reasoning>(.*?)$", response, re.S | re.I)
+        reasoning_match = re.search(r"<reasoning>(.*?)(?:<code>|$)", response, re.S | re.I)
+    reasoning = (
+        reasoning_match.group(1).strip()
+        if reasoning_match
+        else "Generated complete Python script."
+    )
 
-    if reasoning_match:
-        reasoning = reasoning_match.group(1).strip()
-    elif "REASONING:" in response:
-        # Legacy fallback for reasoning
-        raw_parts = response.split("##### REASONING ENDS #####")[0]
-        reasoning = raw_parts.replace("REASONING:", "").strip()
-    else:
-        reasoning = "Reasoning details parsed from turn."
-
-    # 2. Extract Code (XML and legacy fallback)
     code_match = re.search(r"<code>(.*?)</code>", response, re.S | re.I)
     if not code_match:
         code_match = re.search(r"<code>(.*?)$", response, re.S | re.I)
 
     if code_match:
         code = code_match.group(1).strip()
+    elif "##### REASONING ENDS #####" in response:
+        code = response.split("##### REASONING ENDS #####")[-1].strip()
     else:
-        # Legacy fallback for code
-        if "##### REASONING ENDS #####" in response:
-            code = response.split("##### REASONING ENDS #####")[-1].strip()
-        else:
-            code = response.strip()
+        fence_match = re.search(r"```(?:python)?\s*(.*?)```", response, re.S | re.I)
+        code = fence_match.group(1).strip() if fence_match else response.strip()
 
-    # Cleanup any residual markdown markers
-    code = re.sub(r"^```python\s*|^```\s*", "", code, flags=re.MULTILINE)
-    code = re.sub(r"```$", "", code, flags=re.MULTILINE).strip()
+    code = re.sub(r"</?(?:reasoning|code)>", "", code, flags=re.I).strip()
+    code = re.sub(r"^```(?:python)?\s*|^```\s*", "", code, flags=re.M).strip()
+
+    starts = [m.start() for m in re.finditer(r"(?m)^(?:import|from)\s+", code)]
+    if starts:
+        code = code[min(starts):].strip()
 
     return reasoning, code
 
@@ -141,9 +137,16 @@ def generate_code_stream(
                 yield txt
             break
         except Exception as e:
-            if gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
+            if (
+                is_gemini_transient_error(e)
+                and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1
+            ):
                 yield f"\n\nRetrying Gemini... {e}"
-                time.sleep(2)
+                time.sleep(GEMINI_STREAM_RETRY_WAIT)
+            elif is_gemini_transient_error(e):
+                raise LLMBackendTransientError(
+                    f"LLM stream failed after retries: {e}"
+                ) from e
             else:
                 yield f"Final error: {e}"
 

@@ -81,6 +81,7 @@ Aerostructural: minimise fuel burn, minimise total aircraft weight.
 
 ## RESPONSE FORMAT
 Your response must be a valid JSON object wrapped in `<routing>` tags.
+Do not emit prose or Markdown fences.
 
 Example:
 <routing>

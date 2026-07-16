@@ -21,11 +21,10 @@ def _approx_tokens(text: str) -> int:
 
 def _parse_relaxation_response(response: str) -> str:
     """
-    Extracts the markdown string from the JSON inside the <relaxation> tags.
-    Handles case-insensitive matching and open-ended tags in case of stream limits.
+    Extract the suggestion markdown from <relaxation> JSON, with fallback.
     """
     try:
-        # Case-insensitive XML matching
+        # Required wrapper first, fallback below for malformed responses.
         match = re.search(
             r"<relaxation>(.*?)</relaxation>", response, re.DOTALL | re.IGNORECASE
         )
@@ -37,7 +36,6 @@ def _parse_relaxation_response(response: str) -> str:
         if match:
             json_str = match.group(1).strip()
         else:
-            # Fallback: find the first { and last } if tags are completely missing
             start = response.find("{")
             end = response.rfind("}") + 1
             if start != -1 and end != 0:
@@ -45,7 +43,7 @@ def _parse_relaxation_response(response: str) -> str:
             else:
                 return response.strip()
 
-        # Clean code fencing if present inside XML tags
+        # Clean code fencing if present.
         json_str = re.sub(r"^```json\s*|^```\s*", "", json_str, flags=re.MULTILINE)
         json_str = re.sub(r"```$", "", json_str, flags=re.MULTILINE).strip()
 

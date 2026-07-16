@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from llm.relaxer import suggest_relaxation
@@ -130,6 +129,7 @@ class AgentResult:
     converged: str = "n/a"
     input_tokens: int = 0
     output_tokens: int = 0
+    result_metrics: dict = field(default_factory=dict)
 
 
 def _find_db_summary() -> str:
@@ -156,6 +156,83 @@ def _find_db_summary() -> str:
     return "No optimization database found."
 
 
+def _find_db_metrics() -> dict:
+    """Return structured optimization metrics when an OpenMDAO DB exists."""
+    try:
+        from tools.db_reader import extract_optimization_metrics
+    except ImportError:
+        try:
+            from src.tools.db_reader import extract_optimization_metrics
+        except ImportError:
+            return {}
+
+    paths = [
+        os.path.join(_GEN_RUN_DIR, "aero.db"),
+        os.path.join(_OUT_DIR, "aero.db"),
+        os.path.join(_OUT_DIR, "aerostruct.db"),
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            metrics = extract_optimization_metrics(p)
+            if metrics:
+                return metrics
+    return {}
+
+
+def _extract_stdout_metrics(stdout: str) -> dict:
+    """Pull compact numeric result lines from generated-script stdout."""
+    interesting = (
+        "cl",
+        "cd",
+        "drag",
+        "lift",
+        "alpha",
+        "twist",
+        "fuel",
+        "mass",
+        "failure",
+        "objective",
+        "s_ref",
+        "l/d",
+    )
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    metrics = {}
+    lines = []
+
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line or not any(token in line.lower() for token in interesting):
+            continue
+        lines.append(line)
+
+        pairs = re.findall(rf"([A-Za-z][A-Za-z0-9_./]*)\s*=\s*({number})", line)
+        for name, val in pairs:
+            metrics[name] = float(val)
+
+        if ":" in line:
+            label, rest = line.split(":", 1)
+            vals = [float(v) for v in re.findall(number, rest)]
+            if vals:
+                key = re.sub(r"[^A-Za-z0-9_]+", "_", label.strip()).strip("_")
+                metrics[key] = vals[0] if len(vals) == 1 else vals
+
+        if len(lines) >= 30:
+            break
+
+    return {"values": metrics, "lines": lines}
+
+
+def _collect_result_metrics(stdout: str) -> dict:
+    metrics = {}
+    db_metrics = _find_db_metrics()
+    if db_metrics:
+        metrics["db"] = db_metrics
+    stdout_metrics = _extract_stdout_metrics(stdout)
+    if stdout_metrics["values"] or stdout_metrics["lines"]:
+        metrics["stdout"] = stdout_metrics
+    return metrics
+
+
 def _get_relaxation_suggestion(
     user_prompt: str, error_logs: list, model_name: str, provider: str
 ) -> tuple[str, int, int]:
@@ -173,6 +250,65 @@ def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
     return "\n\n".join(parts) if parts else "Initial generation"
 
 
+def _is_non_retryable_environment_error(stderr: str) -> bool:
+    """Detect dependency/install failures that code regeneration cannot fix."""
+    text = stderr.lower()
+    if "site-packages" in text and any(
+        marker in text
+        for marker in [
+            "importerror: dlopen",
+            "library not loaded",
+            "symbol not found",
+        ]
+    ):
+        return True
+    return any(
+        marker in text
+        for marker in [
+            "modulenotfounderror: no module named 'openmdao'",
+            "modulenotfounderror: no module named 'openaerostruct'",
+        ]
+    )
+
+
+def _reasoning_has_assumptions(reasoning: str) -> bool:
+    text = reasoning.lower()
+    return "assumptions/defaults" in text or (
+        "assumptions" in text and "defaults" in text
+    )
+
+
+def _multipoint_code_errors(
+    user_prompt: str, code: str, blueprints: list[str]
+) -> list[str]:
+    if "aero_multipoint.py" not in blueprints:
+        return []
+
+    errors = []
+    prompt = user_prompt.lower()
+    if re.search(r"MultiCD\s*\([^)]*weights\s*=", code, re.S):
+        errors.append(
+            "MultiCD does not accept a weights option; use om.ExecComp for weighted CD."
+        )
+
+    if ("weighted" in prompt or "weights" in prompt) and "ExecComp" not in code:
+        errors.append(
+            "Weighted multipoint objectives must be assembled with om.ExecComp."
+        )
+
+    if ("three-point" in prompt or "point 2" in prompt) and re.search(
+        r"\bn_points\s*=\s*2\b", code
+    ):
+        errors.append("The request has three flight points, but n_points is set to 2.")
+
+    if "wing_type" in code and re.search(
+        r"""["']wing_type["']\s*:\s*["']rect["']""", code
+    ) and re.search(r"mesh\s*,\s*twist_cp\s*=\s*generate_mesh\s*\(", code):
+        errors.append("Rectangular generate_mesh returns only mesh; use guarded unpacking.")
+
+    return errors
+
+
 def run_agent(
     user_prompt: str,
     blueprints: list[str],
@@ -188,6 +324,7 @@ def run_agent(
 ) -> AgentResult:
 
     from llm.coder import generate_code, generate_code_stream
+    from llm.config import LLMBackendTransientError
     from tools.executor import execute_run
 
     script_path = gen_script_path or _GEN_SCRIPT
@@ -221,6 +358,8 @@ def run_agent(
                 )
                 result.input_tokens += in_tok
                 result.output_tokens += out_tok
+        except LLMBackendTransientError:
+            raise
         except Exception as exc:
             err = f"Generation error: {sanitize_feedback(str(exc))}"
             error_history.append(err)
@@ -229,6 +368,28 @@ def run_agent(
             continue
 
         result.final_code = code
+        if not _reasoning_has_assumptions(reasoning):
+            err = (
+                "Coder reasoning missing required Assumptions/defaults section. "
+                "Regenerate with explicit omitted/defaulted fields such as CD0, "
+                "CL0, S_ref_type, viscous/wave drag flags, reference area, "
+                "Reynolds/velocity assumptions, and relevant optimizer/material defaults."
+            )
+            error_history.append(err)
+            result.error_logs.append(err)
+            attempt += 1
+            continue
+
+        script_errors = _multipoint_code_errors(user_prompt, code, blueprints)
+        if script_errors:
+            err = "Generated multipoint script is inconsistent: " + " ".join(
+                script_errors
+            )
+            error_history.append(f"Code:\n{code}\nError:\n{err}")
+            result.error_logs.append(err)
+            attempt += 1
+            continue
+
         emit("code_ready", {"code": code, "reasoning": reasoning})
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
@@ -251,9 +412,18 @@ def run_agent(
 
         if exec_res.exit_code == 0:
             db_sum = _find_db_summary()
+            result.result_metrics = _collect_result_metrics(exec_res.stdout)
             result.final_summary = db_sum
             result.plots = get_generated_plots()
-            emit("exec_success", {"db_summary": db_sum, "plots": result.plots})
+            emit(
+                "exec_success",
+                {
+                    "db_summary": db_sum,
+                    "plots": result.plots,
+                    "result_metrics": result.result_metrics,
+                    "stdout_tail": sanitize_feedback(exec_res.stdout, 1000),
+                },
+            )
             
             # Guard 1: Verify code is not empty or truncated
             if not code or len(code.strip()) < 100:
@@ -294,7 +464,14 @@ def run_agent(
                 result.converged = "no"
                 err = f"Optimizer failed to converge. Stdout tail:\n{sanitize_feedback(exec_res.stdout, 400)}"
                 result.error_logs.append(err)
-                emit("no_converge", {"db_summary": db_sum, "stdout_tail": err})
+                emit(
+                    "no_converge",
+                    {
+                        "db_summary": db_sum,
+                        "result_metrics": result.result_metrics,
+                        "stdout_tail": err,
+                    },
+                )
                 if retry_on_no_converge:
                     error_history.append(f"Code:\n{code}\nError:\n{err}")
                 else:
@@ -302,7 +479,18 @@ def run_agent(
                     break
 
         else:
+            result.result_metrics = _collect_result_metrics(exec_res.stdout)
             err = f"Python error:\n{sanitize_feedback(exec_res.stderr)}"
+            if _is_non_retryable_environment_error(exec_res.stderr):
+                err = (
+                    "Non-retryable environment error:\n"
+                    f"{sanitize_feedback(exec_res.stderr)}"
+                )
+                result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+                emit("exec_error", {"stderr_tail": exec_res.stderr[-500:]})
+                result.attempts = attempt + 1
+                emit("done", {"success": False, "attempts": result.attempts})
+                return result
             error_history.append(f"Code:\n{code}\nError:\n{err}")
             result.error_logs.append(f"[attempt {attempt + 1}] {err}")
             emit("exec_error", {"stderr_tail": exec_res.stderr[-500:]})

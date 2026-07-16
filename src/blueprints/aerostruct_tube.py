@@ -266,6 +266,13 @@ print("\n--- Aerostructural Tube Results ---")
 print(f"Final fuel burn:      {prob.get_val('AS_point_0.fuelburn')[0]:.4f} [kg]")
 print(f"Final alpha:          {prob.get_val('alpha')[0]:.4f} [deg]")
 print(f"Final structural mass:{prob.get_val('wing.structural_mass')[0]:.4f} [kg]")
+print("\n--- Aerodynamic Bookkeeping ---")
+print("OAS reports CL = CL1 + CL0 and CD = CDi + CDv + CDw + CD0.")
+print(f"CL0={surface['CL0']:.6f}, CD0={surface['CD0']:.6f}")
+print(
+    f"with_viscous={surface['with_viscous']}, with_wave={surface['with_wave']}, "
+    f"S_ref_type='{surface['S_ref_type']}'"
+)
 
 # =============================================================================
 # 6. PLOTTING
@@ -276,6 +283,12 @@ try:
     alpha_val = prob.get_val("alpha")[0]
     twist_cp_vals = prob.get_val("wing.twist_cp")
     thickness_cp_vals = prob.get_val("wing.thickness_cp")
+    CL_val = prob.get_val("AS_point_0.wing_perf.CL")[0]
+    CD_val = prob.get_val("AS_point_0.wing_perf.CD")[0]
+    CDi_val = prob.get_val("AS_point_0.wing_perf.CDi")[0]
+    CDv_val = prob.get_val("AS_point_0.wing_perf.CDv")[0]
+    CDw_val = prob.get_val("AS_point_0.wing_perf.CDw")[0]
+    Sref_val = prob.get_val("AS_point_0.wing_perf.S_ref", units="m**2")[0]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
@@ -308,6 +321,39 @@ try:
         os.path.join(_PLOTS_DIR, "aerostruct_tube_results.png"), bbox_inches="tight"
     )
     plt.close(fig)
+
+    _mesh_out = prob.get_val("wing.mesh", units="m")
+    fig_wing, ax_wing = plt.subplots(figsize=(8, 4))
+    for i in range(_mesh_out.shape[0]):
+        ax_wing.plot(_mesh_out[i, :, 1], _mesh_out[i, :, 0], color="black", lw=1)
+    for j in range(_mesh_out.shape[1]):
+        ax_wing.plot(_mesh_out[:, j, 1], _mesh_out[:, j, 0], color="black", lw=1)
+    ax_wing.set_aspect("equal")
+    ax_wing.set_xlabel("Spanwise y [m]")
+    ax_wing.set_ylabel("Chordwise x [m]")
+    ax_wing.set_title("Optimized Wing Planform")
+    fig_wing.tight_layout()
+    fig_wing.savefig(
+        os.path.join(_PLOTS_DIR, "aerostruct_tube_wing_planform.png"),
+        bbox_inches="tight",
+    )
+    plt.close(fig_wing)
+
+    fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
+    ax_drag.bar(
+        ["CDi", "CDv", "CDw", "CD0"],
+        [CDi_val, CDv_val, CDw_val, surface["CD0"]],
+        color=["steelblue", "seagreen", "goldenrod", "tomato"],
+    )
+    ax_drag.set_ylabel("Drag Coefficient")
+    ax_drag.set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surface['S_ref_type']})")
+    ax_drag.set_title(f"Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
+    fig_drag.tight_layout()
+    fig_drag.savefig(
+        os.path.join(_PLOTS_DIR, "aerostruct_tube_drag_breakdown.png"),
+        bbox_inches="tight",
+    )
+    plt.close(fig_drag)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:
     print(f"Plotting warning: {e}")

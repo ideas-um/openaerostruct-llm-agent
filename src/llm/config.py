@@ -45,6 +45,7 @@ _STATS_FILE = os.path.join(_SRC_DIR, "usage_stats.csv")
 # ---------------------------------------------------------------------------
 GEMINI_STREAM_RETRY_WAIT = 60  # seconds to wait before retrying a stream
 GEMINI_STREAM_MAX_RETRIES = 3  # maximum stream retries per call
+LLM_REQUEST_TIMEOUT_MS = int(os.getenv("LLM_REQUEST_TIMEOUT_MS", "60000"))
 
 _GEMINI_TRANSIENT_MESSAGES = (
     "resource_exhausted",
@@ -55,12 +56,19 @@ _GEMINI_TRANSIENT_MESSAGES = (
     "429",
     "service unavailable",
     "too many requests",
+    "timeout",
+    "timed out",
+    "deadline",
 )
+
+
+class LLMBackendTransientError(RuntimeError):
+    """Backend transport/rate-limit failure that should not count as model quality."""
 
 
 def is_gemini_transient_error(exc: Exception) -> bool:
     """Return True if the exception looks like a Gemini rate-limit / overload error."""
-    msg = str(exc).lower()
+    msg = f"{type(exc).__name__} {exc}".lower()
     return any(pattern in msg for pattern in _GEMINI_TRANSIENT_MESSAGES)
 
 
@@ -113,6 +121,7 @@ def is_ollama_provider(provider: str) -> bool:
 def _make_gemini_client():
     """Create and return a Gemini client using the API key from the environment."""
     from google import genai
+    from google.genai import types
 
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -120,7 +129,10 @@ def _make_gemini_client():
             "No Gemini API key found. Set GOOGLE_API_KEY or GEMINI_API_KEY "
             "(or add it to a .env file)."
         )
-    return genai.Client(api_key=api_key)
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=LLM_REQUEST_TIMEOUT_MS),
+    )
 
 
 def get_llm_client(provider: str, model_name: str):
@@ -207,7 +219,7 @@ def get_llm_response(
                 break
             except Exception as e:
                 err_str = str(e).lower()
-                if "503" in err_str or "high demand" in err_str or "quota" in err_str:
+                if is_gemini_transient_error(e) or "high demand" in err_str:
                     if i < max_retries - 1:
                         wait_time = wait_times[i]
                         logger.warning(
@@ -216,6 +228,8 @@ def get_llm_response(
                         )
                         time.sleep(wait_time)
                         continue
+                    logger.error(f"Transient LLM error exhausted retries: {e}")
+                    raise LLMBackendTransientError(f"LLM request failed: {e}") from e
                 logger.error(f"Permanent LLM error: {e}")
                 raise Exception(f"LLM request failed: {e}")
 

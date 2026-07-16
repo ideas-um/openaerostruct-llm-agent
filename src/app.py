@@ -242,11 +242,17 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             state["text"] = state.get("text", "") + data["chunk"]
             txt = state["text"]
 
-            # Robust live extraction supporting both XML and legacy headers
+            # Live extraction expects XML, with raw-Python fallback for malformed streams.
             r_match = re.search(r"<reasoning>(.*?)(?:</reasoning>|$)", txt, re.S | re.I)
             c_match = re.search(r"<code>(.*?)(?:</code>|$)", txt, re.S | re.I)
+            raw_code = re.search(r"(?m)^(?:import|from)\s+", txt)
 
-            if not r_match and not c_match and "REASONING:" not in txt:
+            if raw_code and not r_match and not c_match:
+                code_content = txt[raw_code.start() :].strip()
+                state.get("placeholder", st.empty()).markdown(
+                    f"```python\n{code_content}\n```"
+                )
+            elif not r_match and not c_match and "REASONING:" not in txt:
                 state.get("placeholder", st.empty()).markdown(f"```text\n{txt}\n```")
             else:
                 if "placeholder" in state and state["placeholder"]:

@@ -7,6 +7,7 @@ from .config import (
     get_llm_response,
     get_llm_client,
     log_token_usage,
+    LLMBackendTransientError,
     is_gemini_transient_error,
     is_gemini_provider,
     GEMINI_STREAM_RETRY_WAIT,
@@ -50,10 +51,10 @@ def _load_system_prompt() -> str:
 
 def _parse_routing_response(response: str) -> dict:
     """
-    Extracts JSON from <routing> tags using regex.
+    Extract JSON from <routing> tags, with plain-JSON fallback.
     """
     try:
-        # 1. Try to find content between <routing> tags
+        # 1. Try the required <routing> tags first, then plain JSON fallback.
         match = re.search(r"<routing>(.*?)</routing>", response, re.DOTALL)
 
         if match:
@@ -160,19 +161,20 @@ def route_intent_stream(
                 full_response += text
                 yield text
         except Exception as exc:
-            if (
-                is_gemini_transient_error(exc)
-                and gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1
-            ):
-                transient_hit = True
-                yield f"\n\n⚠️ Gemini API overloaded — retrying...\n"
-                time.sleep(GEMINI_STREAM_RETRY_WAIT)
-            else:
-                if not full_response:
-                    full_response = get_llm_response(
-                        user_prompt, model_name, system_prompt, provider=provider
-                    )
-                    yield full_response
+            if is_gemini_transient_error(exc):
+                if gemini_attempt < GEMINI_STREAM_MAX_RETRIES - 1:
+                    transient_hit = True
+                    yield f"\n\n⚠️ Gemini API overloaded — retrying...\n"
+                    time.sleep(GEMINI_STREAM_RETRY_WAIT)
+                else:
+                    raise LLMBackendTransientError(
+                        f"LLM stream failed after retries: {exc}"
+                    ) from exc
+            elif not full_response:
+                full_response = get_llm_response(
+                    user_prompt, model_name, system_prompt, provider=provider
+                )
+                yield full_response
         if transient_hit:
             continue
         break

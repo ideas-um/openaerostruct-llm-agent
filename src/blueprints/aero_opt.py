@@ -226,6 +226,13 @@ print("\n--- Optimization Results ---")
 print(f"Final Alpha: {prob.get_val('alpha', units='deg')[0]:.4f} deg")
 print(f"Final CL:    {prob.get_val(f'{point_name}.wing_perf.CL')[0]:.4f}")
 print(f"Final CD:    {prob.get_val(f'{point_name}.wing_perf.CD')[0]:.6f}")
+print("\n--- Aerodynamic Bookkeeping ---")
+print("OAS reports CL = CL1 + CL0 and CD = CDi + CDv + CDw + CD0.")
+print(f"CL0={surface['CL0']:.6f}, CD0={surface['CD0']:.6f}")
+print(
+    f"with_viscous={surface['with_viscous']}, with_wave={surface['with_wave']}, "
+    f"S_ref_type='{surface['S_ref_type']}'"
+)
 
 # =============================================================================
 # 6. PLOTTING
@@ -234,14 +241,24 @@ try:
     alpha_val = prob.get_val("alpha", units="deg")[0]
     CL_val = prob.get_val(f"{point_name}.wing_perf.CL")[0]
     CD_val = prob.get_val(f"{point_name}.wing_perf.CD")[0]
+    CDi_val = prob.get_val(f"{point_name}.wing_perf.CDi")[0]
+    CDv_val = prob.get_val(f"{point_name}.wing_perf.CDv")[0]
+    CDw_val = prob.get_val(f"{point_name}.wing_perf.CDw")[0]
+    Sref_val = prob.get_val(f"{point_name}.wing_perf.S_ref", units="m**2")[0]
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    axes[0].bar(["CL", "CD"], [CL_val, CD_val], color=["steelblue", "tomato"])
-    axes[0].set_title("Aerodynamic Coefficients")
-    axes[0].set_ylabel("Value")
+    axes[0].bar(
+        ["CDi", "CDv", "CDw", "CD0"],
+        [CDi_val, CDv_val, CDw_val, surface["CD0"]],
+        color=["steelblue", "seagreen", "goldenrod", "tomato"],
+    )
+    axes[0].set_title(f"Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
+    axes[0].set_ylabel("Drag Coefficient")
+    axes[0].set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surface['S_ref_type']})")
 
-    mesh_x = mesh[:, :, 0]
-    mesh_y = mesh[:, :, 1]
+    _mesh_out = prob.get_val(f"{point_name}.wing.def_mesh", units="m")
+    mesh_x = _mesh_out[:, :, 0]
+    mesh_y = _mesh_out[:, :, 1]
     for i in range(mesh_x.shape[0]):
         axes[1].plot(mesh_y[i, :], mesh_x[i, :], color="C0", lw=1)
     for j in range(mesh_x.shape[1]):

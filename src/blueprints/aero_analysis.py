@@ -211,13 +211,24 @@ if __name__ == "__main__":
 
             CL = prob.get_val("flight_condition_0.wing_perf.CL")[0]
             CD = prob.get_val("flight_condition_0.wing_perf.CD")[0]
+            CL1 = prob.get_val("flight_condition_0.wing_perf.CL1")[0]
+            CDi = prob.get_val("flight_condition_0.wing_perf.CDi")[0]
+            CDv = prob.get_val("flight_condition_0.wing_perf.CDv")[0]
+            CDw = prob.get_val("flight_condition_0.wing_perf.CDw")[0]
+            Sref = prob.get_val("flight_condition_0.wing_perf.S_ref", units="m**2")[0]
 
             results.append(
                 {
                     "Mach": round(M, 1),
                     "Alpha": a,
                     "CL": CL,
+                    "CL1": CL1,
                     "CD": CD,
+                    "CDi": CDi,
+                    "CDv": CDv,
+                    "CDw": CDw,
+                    "CD0": surface["CD0"],
+                    "S_ref": Sref,
                     "L/D": CL / CD if CD != 0 else 0,
                 }
             )
@@ -226,6 +237,17 @@ if __name__ == "__main__":
     csv_path = os.path.join(_OUT_DIR, "OptimizedWing_Polars.csv")
     df.to_csv(csv_path, index=False)
     print(f"Analysis complete. Saved data to {csv_path}")
+    print("\n--- Aerodynamic Bookkeeping ---")
+    print("OAS reports CL = CL1 + CL0 and CD = CDi + CDv + CDw + CD0.")
+    print(f"CL0={surface['CL0']:.6f}, CD0={surface['CD0']:.6f}")
+    print(
+        f"with_viscous={surface['with_viscous']}, with_wave={surface['with_wave']}, "
+        f"S_ref_type='{surface['S_ref_type']}'"
+    )
+    print(
+        "Viscous drag uses k_lam, t_over_c, c_max_t, Reynolds number, Mach, "
+        "and the same S_ref convention."
+    )
 
     # =============================================================================
     # 6. PLOTTING — plots must go to _PLOTS_DIR for the app to display them
@@ -251,8 +273,11 @@ if __name__ == "__main__":
             y="CL",
             color="Mach",
             markers=True,
-            title="Drag Polars (CL vs CD)",
-            labels={"CD": "Drag Coefficient (CD)", "CL": "Lift Coefficient (CL)"},
+            title="Drag Polars (Total CL vs Total CD)",
+            labels={
+                "CD": "Total Drag Coefficient (CD)",
+                "CL": "Total Lift Coefficient (CL)",
+            },
         )
         fig_polar.update_layout(template="plotly_white", height=600, width=900)
         fig_polar.write_image(os.path.join(_PLOTS_DIR, "Drag_Polars.png"))
@@ -297,41 +322,44 @@ if __name__ == "__main__":
         chord_edge = prob.get_val("flight_condition_0.wing.chords", units="m")
         chord_center = 0.5 * (chord_edge[:-1] + chord_edge[1:])
 
-        x_center = np.concatenate((y_center, -y_center[::-1]))
-        chord_center = np.concatenate((chord_center, chord_center[::-1]))
-        Cl_full = np.concatenate((Cl, Cl[::-1]))
+        y_full = np.concatenate((y_center, -y_center[::-1]))
+        lift_shape = np.concatenate((Cl * chord_center, (Cl * chord_center)[::-1]))
+        order = np.argsort(y_full)
+        y_full = y_full[order]
+        lift_shape = lift_shape[order]
 
-        CL_total = prob.get_val("flight_condition_0.wing_perf.CL")[0]
-        Sref = prob.get_val("flight_condition_0.wing_perf.S_ref", units="m**2")[0]
-        semi_span = mesh_out[0, -1, 1] - mesh_out[0, 0, 1]
+        semi_span = np.max(np.abs(y_full))
 
-        cl_chord_max = 2 * CL_total * Sref / (np.pi * semi_span)
-        y_ellipse = np.linspace(-semi_span, semi_span, 100)
-        Cl_chord_ellipse = cl_chord_max * np.sqrt(1 - (y_ellipse / semi_span) ** 2)
+        y_ellipse = np.linspace(-semi_span, semi_span, 200)
+        ellipse = np.sqrt(np.maximum(0.0, 1.0 - (y_ellipse / semi_span) ** 2))
+        lift_area = np.trapz(lift_shape, y_full)
+        ellipse_area = np.trapz(ellipse, y_ellipse)
+        lift_shape_normalized = lift_shape / lift_area
+        ellipse_normalized = ellipse / ellipse_area
 
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
                 x=y_ellipse,
-                y=Cl_chord_ellipse,
+                y=ellipse_normalized,
                 mode="lines",
-                name="Elliptical",
+                name="Elliptical (area-normalized)",
                 line=dict(color="red", width=2, dash="dash"),
             )
         )
         fig.add_trace(
             go.Scatter(
-                x=x_center,
-                y=Cl_full,
+                x=y_full,
+                y=lift_shape_normalized,
                 mode="lines",
-                name="Wing Cl",
+                name="OAS Cl * chord (area-normalized)",
                 line=dict(color="green", width=2),
             )
         )
         fig.update_layout(
-            title=f"Spanwise Lift Distribution (Mach {trim_mach}, Alpha {trim_alpha}°)",
+            title=f"Normalized Spanwise Lift Shape (Mach {trim_mach}, Alpha {trim_alpha}°)",
             xaxis_title="Span (m)",
-            yaxis_title="Sectional Lift Coefficient (Cl)",
+            yaxis_title="Area-normalized Cl * chord (1/m)",
             template="plotly_white",
             height=600,
             width=900,
@@ -339,6 +367,27 @@ if __name__ == "__main__":
         fig.write_image(
             os.path.join(_PLOTS_DIR, "Sectional_Lift_Distribution_Trim.png")
         )
+
+        CL_trim = prob.get_val("flight_condition_0.wing_perf.CL")[0]
+        CD_trim = prob.get_val("flight_condition_0.wing_perf.CD")[0]
+        CDi_trim = prob.get_val("flight_condition_0.wing_perf.CDi")[0]
+        CDv_trim = prob.get_val("flight_condition_0.wing_perf.CDv")[0]
+        CDw_trim = prob.get_val("flight_condition_0.wing_perf.CDw")[0]
+        Sref_trim = prob.get_val("flight_condition_0.wing_perf.S_ref", units="m**2")[0]
+        fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
+        ax_drag.bar(
+            ["CDi", "CDv", "CDw", "CD0"],
+            [CDi_trim, CDv_trim, CDw_trim, surface["CD0"]],
+            color=["steelblue", "seagreen", "goldenrod", "tomato"],
+        )
+        ax_drag.set_ylabel("Drag Coefficient")
+        ax_drag.set_xlabel(f"S_ref={Sref_trim:.3f} m^2 ({surface['S_ref_type']})")
+        ax_drag.set_title(f"Trim Drag Breakdown (CD={CD_trim:.5f}, CL={CL_trim:.3f})")
+        fig_drag.tight_layout()
+        fig_drag.savefig(
+            os.path.join(_PLOTS_DIR, "Trim_Drag_Breakdown.png"), bbox_inches="tight"
+        )
+        plt.close(fig_drag)
         print(f"Done! Plots saved to {_PLOTS_DIR}")
     except Exception as e:
         print(f"Spanwise distribution plotting warning: {e}")
