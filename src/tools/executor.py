@@ -21,7 +21,6 @@ _DOCKER_IMAGE_ENV = "OAS_SANDBOX_IMAGE"
 _DOCKER_BACKEND_ENV = "OAS_EXECUTION_BACKEND"
 _HOST_PYTHON_ENV = "OAS_HOST_PYTHON"
 _DEFAULT_DOCKER_IMAGE = "openaerostruct-sandbox:latest"
-_DEFAULT_CONDA_PYTHON = "/opt/anaconda3/envs/openaerostruct/bin/python"
 _DOCKER_STAGE_DIR_ENV = "OAS_DOCKER_STAGE_DIR"
 _DOCKER_SECCOMP_ENV = "OAS_DOCKER_SECCOMP_PROFILE"
 _DEFAULT_DOCKER_STAGE_DIR = os.path.join(_PROJECT_DIR, ".docker_stage")
@@ -421,8 +420,6 @@ def _host_python_executable() -> str:
     requested = os.getenv(_HOST_PYTHON_ENV)
     if requested:
         return requested
-    if os.path.exists(_DEFAULT_CONDA_PYTHON):
-        return _DEFAULT_CONDA_PYTHON
     return sys.executable
 
 

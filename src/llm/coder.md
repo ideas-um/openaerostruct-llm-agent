@@ -86,35 +86,21 @@ Aggregate multiple quantities with `ExecComp` before calling `add_objective`.
 **8. Assign `prob.driver` before `add_design_var`, `add_constraint`, `add_objective`.**
 The blueprint already has this order — do not move these calls above the driver assignment.
 
-**9. Multipoint blueprint: geometry subsystem is `wing_geom`.**
+**9. Keep only requested design variables active.**
+Remove active blueprint `add_design_var(...)` calls unless the user requested that variable or an explicit constraint requires it. Keep required surface dict keys even when their design variable is inactive.
+
+**10. Multipoint blueprint: geometry subsystem is `wing_geom`.**
 DV paths must be `wing_geom.twist_cp`, `wing_geom.taper`, etc. — NOT `wing.<var>`.
 If the user specifies N flight points, set `n_points = N`, provide vector outputs for
 `v`, `alpha`, `Mach_number`, `re`, and `rho`, connect each with `src_indices=[i]`,
 and add one CL constraint for every requested point.
 
-**9a. Multipoint weighted objectives: do not pass weights to `MultiCD`.**
-`MultiCD(n_points=..., weights=...)` is invalid in OpenAeroStruct. For weighted
-drag objectives, use `om.ExecComp`, connect each
-`aero_point_i.wing_perf.CD`, and add the ExecComp output as the objective.
-This three-point example must be resized to match the number of points in the
-user request:
-```python
-prob.model.add_subsystem(
-    "weighted_CD",
-    om.ExecComp("CD = 0.25*CD0 + 0.35*CD1 + 0.40*CD2"),
-)
-prob.model.connect("aero_point_0.wing_perf.CD", "weighted_CD.CD0")
-prob.model.connect("aero_point_1.wing_perf.CD", "weighted_CD.CD1")
-prob.model.connect("aero_point_2.wing_perf.CD", "weighted_CD.CD2")
-prob.model.add_objective("weighted_CD.CD", scaler=1e4)
-```
+**11. `struct_optimization` uses `SpatialBeamAlone` — never substitute `AerostructPoint`.**
 
-**10. `struct_optimization` uses `SpatialBeamAlone` — never substitute `AerostructPoint`.**
-
-**11. Wingbox `t_over_c` path requires `.geometry.`**
+**12. Wingbox `t_over_c` path requires `.geometry.`**
 Use `wing.geometry.t_over_c_cp` — NOT `wing.t_over_c_cp`.
 
-**12. Always attach a `SqliteRecorder` to the driver — never omit it.**
+**13. Always attach a `SqliteRecorder` to the driver — never omit it.**
 This is required for the UI to display optimization results. Place it after `prob.driver` is assigned and before `prob.setup()`:
 ```python
 recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
@@ -122,16 +108,16 @@ prob.driver.add_recorder(recorder)
 prob.driver.recording_options["includes"] = ["*"]
 ```
 
-**13. CL equality constraint requires `alpha` as a design variable.**
+**14. CL equality constraint requires `alpha` as a design variable.**
 If `add_constraint("...CL", equals=...)` is used, always add `alpha` as a design variable with appropriate bounds. Without a free trim variable the problem is infeasible from any starting point and causes NaN blow-ups in the structural solver.
 
-**14. Numerical Scaling is Mandatory.**
+**15. Numerical Scaling is Mandatory.**
 Optimizers fail if Design Variables (DVs) and Objectives have mismatched scales. Always try to normalize values to an **order of magnitude of ~1.0**.
 - **Design Variables (ref):** Use `ref` to tell the optimizer what a "typical" value is. If thickness is ~0.01m, use `ref=1e-2`. If span is ~10m, use `ref=10`. This scales the optimizer's internal input to 1.0.
 - **Objectives (scaler):** Use `scaler` as a multiplier to shrink the objective. If the structural mass is ~500kg, use `scaler=1e-2` so the optimizer "sees" a value of 5.0.
 - **Why?** Unscaled gradients cause "Positive directional derivative" errors (Exit Mode 8) because the optimizer cannot find a consistent "slope" to follow.
 
-**15. Explain OAS aerodynamic bookkeeping in results.**
+**16. Explain OAS aerodynamic bookkeeping in results.**
 OpenAeroStruct's aerodynamic states are VLM-based; the reported surface totals add bookkeeping terms:
 - `CL = CL1 + CL0`
 - `CD = CDi + CDv + CDw + CD0`

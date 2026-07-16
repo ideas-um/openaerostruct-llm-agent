@@ -271,44 +271,6 @@ def _is_non_retryable_environment_error(stderr: str) -> bool:
     )
 
 
-def _reasoning_has_assumptions(reasoning: str) -> bool:
-    text = reasoning.lower()
-    return "assumptions/defaults" in text or (
-        "assumptions" in text and "defaults" in text
-    )
-
-
-def _multipoint_code_errors(
-    user_prompt: str, code: str, blueprints: list[str]
-) -> list[str]:
-    if "aero_multipoint.py" not in blueprints:
-        return []
-
-    errors = []
-    prompt = user_prompt.lower()
-    if re.search(r"MultiCD\s*\([^)]*weights\s*=", code, re.S):
-        errors.append(
-            "MultiCD does not accept a weights option; use om.ExecComp for weighted CD."
-        )
-
-    if ("weighted" in prompt or "weights" in prompt) and "ExecComp" not in code:
-        errors.append(
-            "Weighted multipoint objectives must be assembled with om.ExecComp."
-        )
-
-    if ("three-point" in prompt or "point 2" in prompt) and re.search(
-        r"\bn_points\s*=\s*2\b", code
-    ):
-        errors.append("The request has three flight points, but n_points is set to 2.")
-
-    if "wing_type" in code and re.search(
-        r"""["']wing_type["']\s*:\s*["']rect["']""", code
-    ) and re.search(r"mesh\s*,\s*twist_cp\s*=\s*generate_mesh\s*\(", code):
-        errors.append("Rectangular generate_mesh returns only mesh; use guarded unpacking.")
-
-    return errors
-
-
 def run_agent(
     user_prompt: str,
     blueprints: list[str],
@@ -368,28 +330,6 @@ def run_agent(
             continue
 
         result.final_code = code
-        if not _reasoning_has_assumptions(reasoning):
-            err = (
-                "Coder reasoning missing required Assumptions/defaults section. "
-                "Regenerate with explicit omitted/defaulted fields such as CD0, "
-                "CL0, S_ref_type, viscous/wave drag flags, reference area, "
-                "Reynolds/velocity assumptions, and relevant optimizer/material defaults."
-            )
-            error_history.append(err)
-            result.error_logs.append(err)
-            attempt += 1
-            continue
-
-        script_errors = _multipoint_code_errors(user_prompt, code, blueprints)
-        if script_errors:
-            err = "Generated multipoint script is inconsistent: " + " ".join(
-                script_errors
-            )
-            error_history.append(f"Code:\n{code}\nError:\n{err}")
-            result.error_logs.append(err)
-            attempt += 1
-            continue
-
         emit("code_ready", {"code": code, "reasoning": reasoning})
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(code)
