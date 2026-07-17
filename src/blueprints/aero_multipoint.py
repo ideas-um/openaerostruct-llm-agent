@@ -257,40 +257,7 @@ print(
 # 6. PLOTTING
 # =============================================================================
 try:
-    alpha_vals = prob.get_val("alpha")
-    CL_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CL")[0] for i in range(n_points)]
-    CD_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CD")[0] for i in range(n_points)]
-    CDi_vals = [
-        prob.get_val(f"aero_point_{i}.wing_perf.CDi")[0] for i in range(n_points)
-    ]
-    CDv_vals = [
-        prob.get_val(f"aero_point_{i}.wing_perf.CDv")[0] for i in range(n_points)
-    ]
-    CDw_vals = [
-        prob.get_val(f"aero_point_{i}.wing_perf.CDw")[0] for i in range(n_points)
-    ]
     twist_cp_vals = prob.get_val("wing_geom.twist_cp")
-
-    point_labels = [f"Point {i}" for i in range(n_points)]
-    fig_cl, ax_cl = plt.subplots(figsize=(8, 4))
-    ax_cl.bar(point_labels, CL_vals, color="steelblue")
-    ax_cl.set_ylabel("CL")
-    ax_cl.set_title("CL by Flight Condition")
-    fig_cl.tight_layout()
-    fig_cl.savefig(
-        _plot_path("aero_multipoint_CL_by_point"), bbox_inches="tight", dpi=150
-    )
-    plt.close(fig_cl)
-
-    fig_cd, ax_cd = plt.subplots(figsize=(8, 4))
-    ax_cd.bar(point_labels, CD_vals, color="tomato")
-    ax_cd.set_ylabel("CD")
-    ax_cd.set_title("CD by Flight Condition")
-    fig_cd.tight_layout()
-    fig_cd.savefig(
-        _plot_path("aero_multipoint_CD_by_point"), bbox_inches="tight", dpi=150
-    )
-    plt.close(fig_cd)
 
     cp_indices = np.arange(len(twist_cp_vals))
     fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
@@ -321,31 +288,6 @@ try:
     )
     plt.close(fig_wing)
 
-    x = np.arange(n_points)
-    width = 0.2
-    fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
-    ax_drag.bar(x - 1.5 * width, CDi_vals, width, label="CDi", color="steelblue")
-    ax_drag.bar(x - 0.5 * width, CDv_vals, width, label="CDv", color="seagreen")
-    ax_drag.bar(x + 0.5 * width, CDw_vals, width, label="CDw", color="goldenrod")
-    ax_drag.bar(
-        x + 1.5 * width,
-        np.ones(n_points) * surf_dict["CD0"],
-        width,
-        label="CD0",
-        color="tomato",
-    )
-    ax_drag.set_xticks(x)
-    ax_drag.set_xticklabels(point_labels)
-    ax_drag.set_ylabel("Drag Coefficient")
-    ax_drag.set_title(
-        f"Drag Breakdown by Flight Condition ({surf_dict['S_ref_type']} S_ref)"
-    )
-    ax_drag.legend(frameon=False)
-    fig_drag.tight_layout()
-    fig_drag.savefig(
-        _plot_path("aero_multipoint_drag_breakdown"), bbox_inches="tight", dpi=150
-    )
-    plt.close(fig_drag)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:
     print(f"Plotting warning: {e}")

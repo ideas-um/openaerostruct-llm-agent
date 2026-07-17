@@ -63,7 +63,7 @@ Aggregate multiple quantities with `ExecComp` before calling `add_objective`.
 The blueprint already has this order — do not move these calls above the driver assignment.
 
 **9. Preserve reporting and plotting blocks.**
-Do not delete print/reporting, aerodynamic bookkeeping, result extraction, `savefig`, or `write_image` blocks from the blueprint. If the user requests different plots, modify or add only the necessary plot code.
+Preserve print/reporting, aerodynamic bookkeeping, result extraction, and requested/vector plot exports. If the user requests different plots, modify or add only the necessary plot code. Do not keep scalar-only plots just because they existed in the blueprint.
 
 **10. Keep only requested design variables active.**
 Remove active blueprint `add_design_var(...)` calls unless the user requested that variable or an explicit constraint requires it. Keep required surface dict keys even when their design variable is inactive.
@@ -103,4 +103,4 @@ Always derive output paths from `__file__`. The blueprint already has this — p
 
 The app **only** displays images found in `_PLOTS_DIR`. Any other path will not appear in the UI.
 
-When plotting is requested, plot the quantities the user asked for and any active optimized variables needed to interpret the result. Preserve blueprint post-processing unless it conflicts with the requested plot. Save each logical plot as its own PNG in `_PLOTS_DIR`; avoid dashboard-style subplot figures that mix unrelated quantities. For elliptical lift comparisons, use normalized spanwise lift shape (`Cl * local_chord`) with `np.trapezoid`, not raw `Cl`.
+When plotting is requested, plot the requested quantities and active optimized variables needed to interpret the result. Use plots for sweeps, spanwise distributions, vector design variables, and geometry/mesh views. Do not plot scalar summary values already shown in stdout/UI tables unless the user explicitly asks for a scalar bar chart. Preserve blueprint post-processing unless it conflicts with the requested plot. Save each logical plot as its own PNG in `_PLOTS_DIR`; avoid dashboard-style subplot figures that mix unrelated quantities. For elliptical lift comparisons, use normalized spanwise lift shape (`Cl * local_chord`) with `np.trapezoid`, not raw `Cl`.

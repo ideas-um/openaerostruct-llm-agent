@@ -249,14 +249,6 @@ print(
 # 6. PLOTTING
 # =============================================================================
 try:
-    alpha_val = prob.get_val("alpha", units="deg")[0]
-    CL_val = prob.get_val(f"{point_name}.wing_perf.CL")[0]
-    CD_val = prob.get_val(f"{point_name}.wing_perf.CD")[0]
-    CDi_val = prob.get_val(f"{point_name}.wing_perf.CDi")[0]
-    CDv_val = prob.get_val(f"{point_name}.wing_perf.CDv")[0]
-    CDw_val = prob.get_val(f"{point_name}.wing_perf.CDw")[0]
-    Sref_val = prob.get_val(f"{point_name}.wing_perf.S_ref", units="m**2")[0]
-
     if "twist_cp" in surface:
         twist_cp_vals = prob.get_val("wing.twist_cp")
         fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
@@ -287,21 +279,6 @@ try:
         )
         plt.close(fig_chord)
 
-    fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
-    ax_drag.bar(
-        ["CDi", "CDv", "CDw", "CD0"],
-        [CDi_val, CDv_val, CDw_val, surface["CD0"]],
-        color=["steelblue", "seagreen", "goldenrod", "tomato"],
-    )
-    ax_drag.set_title(f"Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
-    ax_drag.set_ylabel("Drag Coefficient")
-    ax_drag.set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surface['S_ref_type']})")
-    fig_drag.tight_layout()
-    fig_drag.savefig(
-        os.path.join(_PLOTS_DIR, "aero_opt_drag_breakdown.png"), bbox_inches="tight"
-    )
-    plt.close(fig_drag)
-
     _mesh_out = prob.get_val(f"{point_name}.wing.def_mesh", units="m")
     mesh_x = _mesh_out[:, :, 0]
     mesh_y = _mesh_out[:, :, 1]
@@ -313,7 +290,7 @@ try:
     ax_wing.set_aspect("equal")
     ax_wing.set_xlabel("Span (m)")
     ax_wing.set_ylabel("Chord (m)")
-    ax_wing.set_title(f"Wing Mesh  (alpha={alpha_val:.2f} deg)")
+    ax_wing.set_title("Optimized Wing Mesh")
     fig_wing.tight_layout()
     fig_wing.savefig(
         os.path.join(_PLOTS_DIR, "aero_opt_wing_planform.png"), bbox_inches="tight"

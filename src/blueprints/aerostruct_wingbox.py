@@ -632,34 +632,10 @@ print(
 # 6. PLOTTING
 # =============================================================================
 try:
-    fuelburn = prob.get_val("AS_point_0.fuelburn")[0]
-    struct_mass = (
-        prob.get_val("wing.structural_mass")[0] / surf_dict["wing_weight_ratio"]
-    )
     twist_cp_vals = prob.get_val("wing.twist_cp")
     spar_t = prob.get_val("wing.spar_thickness_cp") * 1e3  # convert to mm
     skin_t = prob.get_val("wing.skin_thickness_cp") * 1e3
-    CL_val = prob.get_val("AS_point_0.wing_perf.CL")[0]
-    CD_val = prob.get_val("AS_point_0.wing_perf.CD")[0]
-    CDi_val = prob.get_val("AS_point_0.wing_perf.CDi")[0]
-    CDv_val = prob.get_val("AS_point_0.wing_perf.CDv")[0]
-    CDw_val = prob.get_val("AS_point_0.wing_perf.CDw")[0]
-    Sref_val = prob.get_val("AS_point_0.wing_perf.S_ref", units="m**2")[0]
-
-    fig_results, ax_results = plt.subplots(figsize=(8, 4))
-    ax_results.bar(
-        ["Fuel Burn (kg)", "Struct. Mass (kg)"],
-        [fuelburn, struct_mass],
-        color=["steelblue", "tomato"],
-    )
-    ax_results.set_title("Key Wingbox Results")
-    ax_results.set_ylabel("Value")
-    fig_results.tight_layout()
-    fig_results.savefig(
-        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_key_results.png"),
-        bbox_inches="tight",
-    )
-    plt.close(fig_results)
+    t_over_c = prob.get_val("wing.geometry.t_over_c_cp")
 
     cp_idx = np.arange(len(twist_cp_vals))
     fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
@@ -694,6 +670,19 @@ try:
     )
     plt.close(fig_thickness)
 
+    fig_toc, ax_toc = plt.subplots(figsize=(8, 4))
+    ax_toc.plot(np.arange(len(t_over_c)), t_over_c, "o-", color="teal")
+    ax_toc.set_xlabel("Control Point")
+    ax_toc.set_ylabel("t/c")
+    ax_toc.set_title("Optimized Thickness-to-Chord")
+    ax_toc.grid(True)
+    fig_toc.tight_layout()
+    fig_toc.savefig(
+        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_t_over_c_distribution.png"),
+        bbox_inches="tight",
+    )
+    plt.close(fig_toc)
+
     _mesh_out = prob.get_val("wing.mesh", units="m")
     fig_wing, ax_wing = plt.subplots(figsize=(8, 4))
     for i in range(_mesh_out.shape[0]):
@@ -711,21 +700,6 @@ try:
     )
     plt.close(fig_wing)
 
-    fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
-    ax_drag.bar(
-        ["CDi", "CDv", "CDw", "CD0"],
-        [CDi_val, CDv_val, CDw_val, surf_dict["CD0"]],
-        color=["steelblue", "seagreen", "goldenrod", "tomato"],
-    )
-    ax_drag.set_ylabel("Drag Coefficient")
-    ax_drag.set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surf_dict['S_ref_type']})")
-    ax_drag.set_title(f"Cruise Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
-    fig_drag.tight_layout()
-    fig_drag.savefig(
-        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_drag_breakdown.png"),
-        bbox_inches="tight",
-    )
-    plt.close(fig_drag)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:
     print(f"Plotting warning: {e}")

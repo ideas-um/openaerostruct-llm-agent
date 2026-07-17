@@ -381,26 +381,6 @@ if __name__ == "__main__":
         )
         plt.close(fig_lift)
 
-        CL_trim = prob.get_val("flight_condition_0.wing_perf.CL")[0]
-        CD_trim = prob.get_val("flight_condition_0.wing_perf.CD")[0]
-        CDi_trim = prob.get_val("flight_condition_0.wing_perf.CDi")[0]
-        CDv_trim = prob.get_val("flight_condition_0.wing_perf.CDv")[0]
-        CDw_trim = prob.get_val("flight_condition_0.wing_perf.CDw")[0]
-        Sref_trim = prob.get_val("flight_condition_0.wing_perf.S_ref", units="m**2")[0]
-        fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
-        ax_drag.bar(
-            ["CDi", "CDv", "CDw", "CD0"],
-            [CDi_trim, CDv_trim, CDw_trim, surface["CD0"]],
-            color=["steelblue", "seagreen", "goldenrod", "tomato"],
-        )
-        ax_drag.set_ylabel("Drag Coefficient")
-        ax_drag.set_xlabel(f"S_ref={Sref_trim:.3f} m^2 ({surface['S_ref_type']})")
-        ax_drag.set_title(f"Trim Drag Breakdown (CD={CD_trim:.5f}, CL={CL_trim:.3f})")
-        fig_drag.tight_layout()
-        fig_drag.savefig(
-            os.path.join(_PLOTS_DIR, "Trim_Drag_Breakdown.png"), bbox_inches="tight"
-        )
-        plt.close(fig_drag)
         print(f"Done! Plots saved to {_PLOTS_DIR}")
     except Exception as e:
         print(f"Spanwise distribution plotting warning: {e}")

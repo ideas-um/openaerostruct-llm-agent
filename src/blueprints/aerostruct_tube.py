@@ -289,30 +289,8 @@ print(
 # 6. PLOTTING
 # =============================================================================
 try:
-    fuelburn = prob.get_val("AS_point_0.fuelburn")[0]
-    struct_mass = prob.get_val("wing.structural_mass")[0]
-    alpha_val = prob.get_val("alpha")[0]
     twist_cp_vals = prob.get_val("wing.twist_cp")
     thickness_cp_vals = prob.get_val("wing.thickness_cp")
-    CL_val = prob.get_val("AS_point_0.wing_perf.CL")[0]
-    CD_val = prob.get_val("AS_point_0.wing_perf.CD")[0]
-    CDi_val = prob.get_val("AS_point_0.wing_perf.CDi")[0]
-    CDv_val = prob.get_val("AS_point_0.wing_perf.CDv")[0]
-    CDw_val = prob.get_val("AS_point_0.wing_perf.CDw")[0]
-    Sref_val = prob.get_val("AS_point_0.wing_perf.S_ref", units="m**2")[0]
-
-    labels = ["Fuel Burn (kg)", "Struct. Mass (kg)"]
-    values = [fuelburn, struct_mass]
-    fig_results, ax_results = plt.subplots(figsize=(8, 4))
-    ax_results.bar(labels, values, color=["steelblue", "tomato"])
-    ax_results.set_title(f"Key Results (alpha={alpha_val:.2f} deg)")
-    ax_results.set_ylabel("Value")
-    fig_results.tight_layout()
-    fig_results.savefig(
-        os.path.join(_PLOTS_DIR, "aerostruct_tube_key_results.png"),
-        bbox_inches="tight",
-    )
-    plt.close(fig_results)
 
     cp_idx = np.arange(len(twist_cp_vals))
     fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
@@ -360,21 +338,6 @@ try:
     )
     plt.close(fig_wing)
 
-    fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
-    ax_drag.bar(
-        ["CDi", "CDv", "CDw", "CD0"],
-        [CDi_val, CDv_val, CDw_val, surface["CD0"]],
-        color=["steelblue", "seagreen", "goldenrod", "tomato"],
-    )
-    ax_drag.set_ylabel("Drag Coefficient")
-    ax_drag.set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surface['S_ref_type']})")
-    ax_drag.set_title(f"Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
-    fig_drag.tight_layout()
-    fig_drag.savefig(
-        os.path.join(_PLOTS_DIR, "aerostruct_tube_drag_breakdown.png"),
-        bbox_inches="tight",
-    )
-    plt.close(fig_drag)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:
     print(f"Plotting warning: {e}")
