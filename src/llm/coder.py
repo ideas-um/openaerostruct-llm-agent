@@ -53,7 +53,14 @@ def _build_prompt(
             f"```python\n{prior_code}\n```\n\n"
         )
 
-    prompt += f"### BASE BLUEPRINTS (For Reference) ###\n{blueprints_context}\n"
+    prompt += (
+        "### BASE BLUEPRINTS (SOURCE SCRIPTS TO EDIT) ###\n"
+        "Copy the selected blueprint structure. Do not rewrite or compact it. "
+        "Only change requested quantities and their direct wiring; preserve all "
+        "other values exactly. Keep fixed arrays, comments that identify required "
+        "OAS wiring, reporting, and plotting/post-processing blocks in place.\n"
+        f"{blueprints_context}\n"
+    )
 
     if feedback and feedback != "Initial generation":
         prompt += f"\n### ERROR FEEDBACK FROM PREVIOUS ATTEMPT ###\n{feedback}\nFix the code above."
@@ -157,7 +164,7 @@ def generate_code_stream(
         if last_chunk and last_chunk.usage_metadata:
             in_t = last_chunk.usage_metadata.prompt_token_count
             out_t = last_chunk.usage_metadata.candidates_token_count
-    except:
+    except Exception:
         pass
 
     reasoning, code = _parse_response(full_resp)

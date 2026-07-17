@@ -24,6 +24,17 @@ _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
+matplotlib.rcParams.update(
+    {
+        "font.family": "serif",
+        "axes.titlesize": 16,
+        "axes.labelsize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 12,
+    }
+)
+
 # =============================================================================
 # AIRFOIL COORDINATES (fixed — defines the wingbox cross-section shape)
 # =============================================================================
@@ -635,36 +646,53 @@ try:
     CDw_val = prob.get_val("AS_point_0.wing_perf.CDw")[0]
     Sref_val = prob.get_val("AS_point_0.wing_perf.S_ref", units="m**2")[0]
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-
-    axes[0].bar(
+    fig_results, ax_results = plt.subplots(figsize=(8, 4))
+    ax_results.bar(
         ["Fuel Burn (kg)", "Struct. Mass (kg)"],
         [fuelburn, struct_mass],
         color=["steelblue", "tomato"],
     )
-    axes[0].set_title("Key Wingbox Results")
-    axes[0].set_ylabel("Value")
+    ax_results.set_title("Key Wingbox Results")
+    ax_results.set_ylabel("Value")
+    fig_results.tight_layout()
+    fig_results.savefig(
+        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_key_results.png"),
+        bbox_inches="tight",
+    )
+    plt.close(fig_results)
 
     cp_idx = np.arange(len(twist_cp_vals))
-    axes[1].plot(cp_idx, twist_cp_vals, "o-", color="green")
-    axes[1].set_xlabel("Control Point")
-    axes[1].set_ylabel("Twist (deg)")
-    axes[1].set_title("Optimized Twist")
-    axes[1].grid(True)
-
-    axes[2].plot(np.arange(len(spar_t)), spar_t, "s-", color="purple", label="Spar")
-    axes[2].plot(np.arange(len(skin_t)), skin_t, "^-", color="orange", label="Skin")
-    axes[2].set_xlabel("Control Point")
-    axes[2].set_ylabel("Thickness (mm)")
-    axes[2].set_title("Optimized Thickness")
-    axes[2].legend()
-    axes[2].grid(True)
-
-    fig.tight_layout()
-    fig.savefig(
-        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_results.png"), bbox_inches="tight"
+    fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
+    ax_twist.plot(cp_idx, twist_cp_vals, "o-", color="green")
+    ax_twist.set_xlabel("Control Point")
+    ax_twist.set_ylabel("Twist (deg)")
+    ax_twist.set_title("Optimized Twist")
+    ax_twist.grid(True)
+    fig_twist.tight_layout()
+    fig_twist.savefig(
+        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_twist_distribution.png"),
+        bbox_inches="tight",
     )
-    plt.close(fig)
+    plt.close(fig_twist)
+
+    fig_thickness, ax_thickness = plt.subplots(figsize=(8, 4))
+    ax_thickness.plot(
+        np.arange(len(spar_t)), spar_t, "s-", color="purple", label="Spar"
+    )
+    ax_thickness.plot(
+        np.arange(len(skin_t)), skin_t, "^-", color="orange", label="Skin"
+    )
+    ax_thickness.set_xlabel("Control Point")
+    ax_thickness.set_ylabel("Thickness (mm)")
+    ax_thickness.set_title("Optimized Thickness")
+    ax_thickness.legend()
+    ax_thickness.grid(True)
+    fig_thickness.tight_layout()
+    fig_thickness.savefig(
+        os.path.join(_PLOTS_DIR, "aerostruct_wingbox_thickness_distribution.png"),
+        bbox_inches="tight",
+    )
+    plt.close(fig_thickness)
 
     _mesh_out = prob.get_val("wing.mesh", units="m")
     fig_wing, ax_wing = plt.subplots(figsize=(8, 4))

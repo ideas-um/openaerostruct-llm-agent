@@ -23,6 +23,17 @@ _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
+matplotlib.rcParams.update(
+    {
+        "font.family": "serif",
+        "axes.titlesize": 16,
+        "axes.labelsize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 12,
+    }
+)
+
 
 def _plot_path(name: str) -> str:
     safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
@@ -260,36 +271,55 @@ try:
     ]
     twist_cp_vals = prob.get_val("wing_geom.twist_cp")
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-
     point_labels = [f"Point {i}" for i in range(n_points)]
-    axes[0].bar(point_labels, CL_vals, color="steelblue", label="CL", alpha=0.7)
-    ax2 = axes[0].twinx()
-    ax2.bar(point_labels, CD_vals, color="tomato", label="CD", alpha=0.5, width=0.4)
-    axes[0].set_ylabel("CL", color="steelblue")
-    ax2.set_ylabel("CD", color="tomato")
-    axes[0].set_title("CL and CD per Flight Condition")
+    fig_cl, ax_cl = plt.subplots(figsize=(8, 4))
+    ax_cl.bar(point_labels, CL_vals, color="steelblue")
+    ax_cl.set_ylabel("CL")
+    ax_cl.set_title("CL by Flight Condition")
+    fig_cl.tight_layout()
+    fig_cl.savefig(
+        _plot_path("aero_multipoint_CL_by_point"), bbox_inches="tight", dpi=150
+    )
+    plt.close(fig_cl)
+
+    fig_cd, ax_cd = plt.subplots(figsize=(8, 4))
+    ax_cd.bar(point_labels, CD_vals, color="tomato")
+    ax_cd.set_ylabel("CD")
+    ax_cd.set_title("CD by Flight Condition")
+    fig_cd.tight_layout()
+    fig_cd.savefig(
+        _plot_path("aero_multipoint_CD_by_point"), bbox_inches="tight", dpi=150
+    )
+    plt.close(fig_cd)
 
     cp_indices = np.arange(len(twist_cp_vals))
-    axes[1].plot(cp_indices, twist_cp_vals, "o-", color="green")
-    axes[1].set_xlabel("Control Point Index")
-    axes[1].set_ylabel("Twist (deg)")
-    axes[1].set_title("Optimized Twist Distribution")
-    axes[1].grid(True)
+    fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
+    ax_twist.plot(cp_indices, twist_cp_vals, "o-", color="green")
+    ax_twist.set_xlabel("Control Point Index")
+    ax_twist.set_ylabel("Twist (deg)")
+    ax_twist.set_title("Optimized Twist Distribution")
+    ax_twist.grid(True)
+    fig_twist.tight_layout()
+    fig_twist.savefig(
+        _plot_path("aero_multipoint_twist_distribution"), bbox_inches="tight", dpi=150
+    )
+    plt.close(fig_twist)
 
     _mesh_out = prob.get_val("wing_geom.mesh", units="m")
+    fig_wing, ax_wing = plt.subplots(figsize=(8, 4))
     for i in range(_mesh_out.shape[0]):
-        axes[2].plot(_mesh_out[i, :, 1], _mesh_out[i, :, 0], color="black", lw=1)
+        ax_wing.plot(_mesh_out[i, :, 1], _mesh_out[i, :, 0], color="black", lw=1)
     for j in range(_mesh_out.shape[1]):
-        axes[2].plot(_mesh_out[:, j, 1], _mesh_out[:, j, 0], color="black", lw=1)
-    axes[2].set_aspect("equal")
-    axes[2].set_xlabel("Spanwise y [m]")
-    axes[2].set_ylabel("Chordwise x [m]")
-    axes[2].set_title("Optimized Wing Planform")
-
-    fig.tight_layout()
-    fig.savefig(_plot_path("aero_multipoint_results"), bbox_inches="tight", dpi=150)
-    plt.close(fig)
+        ax_wing.plot(_mesh_out[:, j, 1], _mesh_out[:, j, 0], color="black", lw=1)
+    ax_wing.set_aspect("equal")
+    ax_wing.set_xlabel("Spanwise y [m]")
+    ax_wing.set_ylabel("Chordwise x [m]")
+    ax_wing.set_title("Optimized Wing Planform")
+    fig_wing.tight_layout()
+    fig_wing.savefig(
+        _plot_path("aero_multipoint_wing_planform"), bbox_inches="tight", dpi=150
+    )
+    plt.close(fig_wing)
 
     x = np.arange(n_points)
     width = 0.2

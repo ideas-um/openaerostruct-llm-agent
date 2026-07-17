@@ -7,6 +7,7 @@ import logging
 import statistics
 import difflib
 import hashlib
+import re
 from datetime import datetime
 
 from llm.config import LLMBackendTransientError
@@ -176,6 +177,32 @@ def _write_code_diffs(
     return paths
 
 
+def _plot_preservation_warnings(code: str, blueprints: list[str]) -> list[str]:
+    """Warn when generated code drops blueprint plot exports."""
+    code_saves = len(re.findall(r"\.(?:savefig|write_image)\(", code))
+    warnings = []
+    for blueprint in blueprints:
+        blueprint_path = os.path.join(_BLUEPRINTS_DIR, blueprint)
+        if not os.path.exists(blueprint_path):
+            continue
+        with open(blueprint_path, encoding="utf-8") as fh:
+            blueprint_code = fh.read()
+        blueprint_saves = len(
+            re.findall(r"\.(?:savefig|write_image)\(", blueprint_code)
+        )
+        if blueprint_saves and code_saves == 0:
+            warnings.append(
+                f"[plot_drop] generated code has no plot exports; "
+                f"{blueprint} has {blueprint_saves}"
+            )
+        elif blueprint_saves and code_saves < blueprint_saves:
+            warnings.append(
+                f"[plot_drop] generated code has {code_saves} plot exports; "
+                f"{blueprint} has {blueprint_saves}"
+            )
+    return warnings
+
+
 # ---------------------------------------------------------------------------
 # Single Repetition Runner
 # ---------------------------------------------------------------------------
@@ -271,10 +298,15 @@ def _run_single_rep(
         file_handler.close()
         raise
 
+    quality_warnings = []
+
     if result.final_code:
         with open(os.path.join(rep_dir, "final_code.py"), "w", encoding="utf-8") as fh:
             fh.write(result.final_code)
         _write_code_diffs(result.final_code, blueprints, rep_dir, "final_vs_blueprint")
+        quality_warnings.extend(
+            _plot_preservation_warnings(result.final_code, blueprints)
+        )
 
     if result.result_metrics:
         _write_json(
@@ -295,7 +327,7 @@ def _run_single_rep(
         "exit_code": exit_code,
         "converged": result.converged,
         "success": result.success,
-        "error_logs": result.error_logs,
+        "error_logs": result.error_logs + quality_warnings,
         "result_metrics": result.result_metrics,
         "input_tokens": routing_data.get("input_tokens", 0) + result.input_tokens,
         "output_tokens": routing_data.get("output_tokens", 0) + result.output_tokens,

@@ -1,22 +1,19 @@
 import warnings
-
-warnings.filterwarnings("ignore")
 import os
 import numpy as np
 import pandas as pd
 import openmdao.api as om
 import matplotlib
 
+warnings.filterwarnings("ignore")
 matplotlib.use("Agg")
 
-import matplotlib.pyplot as plt
-import plotly.graph_objects as go
-import plotly.express as px
+import matplotlib.pyplot as plt  # noqa: E402
 
 # import OpenAeroStruct modules
-from openaerostruct.geometry.utils import generate_mesh
-from openaerostruct.geometry.geometry_group import Geometry
-from openaerostruct.aerodynamics.aero_groups import AeroPoint
+from openaerostruct.geometry.utils import generate_mesh  # noqa: E402
+from openaerostruct.geometry.geometry_group import Geometry  # noqa: E402
+from openaerostruct.aerodynamics.aero_groups import AeroPoint  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Absolute output paths — derived from __file__ so they resolve correctly
@@ -29,6 +26,17 @@ _PLOTS_DIR = os.path.join(_OUT_DIR, "agent_plots")
 _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
+
+matplotlib.rcParams.update(
+    {
+        "font.family": "serif",
+        "axes.titlesize": 16,
+        "axes.labelsize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 12,
+    }
+)
 
 # =============================================================================
 # 1. UTILITY FUNCTIONS
@@ -253,46 +261,52 @@ if __name__ == "__main__":
     # 6. PLOTTING — plots must go to _PLOTS_DIR for the app to display them
     # =============================================================================
     try:
-        df["Mach"] = df["Mach"].astype(str)
+        mach_values = sorted(df["Mach"].unique())
 
-        fig_ld = px.line(
-            df,
-            x="Alpha",
-            y="L/D",
-            color="Mach",
-            markers=True,
-            title="Lift-to-Drag Ratio (L/D) vs Angle of Attack",
-            labels={"Alpha": "Angle of Attack (deg)", "L/D": "Lift / Drag"},
-        )
-        fig_ld.update_layout(template="plotly_white", height=600, width=900)
-        fig_ld.write_image(os.path.join(_PLOTS_DIR, "LD_vs_Alpha.png"))
+        fig_ld, ax_ld = plt.subplots(figsize=(8, 5))
+        for mach in mach_values:
+            data = df[df["Mach"] == mach]
+            ax_ld.plot(data["Alpha"], data["L/D"], marker="o", label=f"Mach {mach}")
+        ax_ld.set_xlabel("Angle of Attack [deg]")
+        ax_ld.set_ylabel("Lift / Drag")
+        ax_ld.set_title("Lift-to-Drag Ratio vs Angle of Attack")
+        ax_ld.legend(frameon=False)
+        ax_ld.grid(True)
+        fig_ld.tight_layout()
+        fig_ld.savefig(os.path.join(_PLOTS_DIR, "LD_vs_Alpha.png"), bbox_inches="tight")
+        plt.close(fig_ld)
 
-        fig_polar = px.line(
-            df,
-            x="CD",
-            y="CL",
-            color="Mach",
-            markers=True,
-            title="Drag Polars (Total CL vs Total CD)",
-            labels={
-                "CD": "Total Drag Coefficient (CD)",
-                "CL": "Total Lift Coefficient (CL)",
-            },
+        fig_polar, ax_polar = plt.subplots(figsize=(8, 5))
+        for mach in mach_values:
+            data = df[df["Mach"] == mach]
+            ax_polar.plot(data["CD"], data["CL"], marker="o", label=f"Mach {mach}")
+        ax_polar.set_xlabel("Total Drag Coefficient CD")
+        ax_polar.set_ylabel("Total Lift Coefficient CL")
+        ax_polar.set_title("Drag Polar")
+        ax_polar.legend(frameon=False)
+        ax_polar.grid(True)
+        fig_polar.tight_layout()
+        fig_polar.savefig(
+            os.path.join(_PLOTS_DIR, "Drag_Polars.png"), bbox_inches="tight"
         )
-        fig_polar.update_layout(template="plotly_white", height=600, width=900)
-        fig_polar.write_image(os.path.join(_PLOTS_DIR, "Drag_Polars.png"))
+        plt.close(fig_polar)
 
-        fig_cl_alpha = px.line(
-            df,
-            x="Alpha",
-            y="CL",
-            color="Mach",
-            markers=True,
-            title="Lift Coefficient (CL) vs Angle of Attack",
-            labels={"Alpha": "Angle of Attack (deg)", "CL": "Lift Coefficient (CL)"},
+        fig_cl_alpha, ax_cl_alpha = plt.subplots(figsize=(8, 5))
+        for mach in mach_values:
+            data = df[df["Mach"] == mach]
+            ax_cl_alpha.plot(
+                data["Alpha"], data["CL"], marker="o", label=f"Mach {mach}"
+            )
+        ax_cl_alpha.set_xlabel("Angle of Attack [deg]")
+        ax_cl_alpha.set_ylabel("Lift Coefficient CL")
+        ax_cl_alpha.set_title("Lift Coefficient vs Angle of Attack")
+        ax_cl_alpha.legend(frameon=False)
+        ax_cl_alpha.grid(True)
+        fig_cl_alpha.tight_layout()
+        fig_cl_alpha.savefig(
+            os.path.join(_PLOTS_DIR, "CL_vs_Alpha.png"), bbox_inches="tight"
         )
-        fig_cl_alpha.update_layout(template="plotly_white", height=600, width=900)
-        fig_cl_alpha.write_image(os.path.join(_PLOTS_DIR, "CL_vs_Alpha.png"))
+        plt.close(fig_cl_alpha)
     except Exception as e:
         print(f"Plotting warning: {e}")
 
@@ -337,36 +351,35 @@ if __name__ == "__main__":
         lift_shape_normalized = lift_shape / lift_area
         ellipse_normalized = ellipse / ellipse_area
 
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=y_ellipse,
-                y=ellipse_normalized,
-                mode="lines",
-                name="Elliptical (area-normalized)",
-                line=dict(color="red", width=2, dash="dash"),
-            )
+        fig_lift, ax_lift = plt.subplots(figsize=(8, 5))
+        ax_lift.plot(
+            y_full,
+            lift_shape_normalized,
+            color="black",
+            linewidth=1.5,
+            label="OAS Cl * chord",
         )
-        fig.add_trace(
-            go.Scatter(
-                x=y_full,
-                y=lift_shape_normalized,
-                mode="lines",
-                name="OAS Cl * chord (area-normalized)",
-                line=dict(color="green", width=2),
-            )
+        ax_lift.plot(
+            y_ellipse,
+            ellipse_normalized,
+            color="red",
+            linestyle="--",
+            linewidth=1.5,
+            label="Elliptical",
         )
-        fig.update_layout(
-            title=f"Normalized Spanwise Lift Shape (Mach {trim_mach}, Alpha {trim_alpha}°)",
-            xaxis_title="Span (m)",
-            yaxis_title="Area-normalized Cl * chord (1/m)",
-            template="plotly_white",
-            height=600,
-            width=900,
+        ax_lift.set_xlabel("Span [m]")
+        ax_lift.set_ylabel("Area-normalized Cl * chord [1/m]")
+        ax_lift.set_title(
+            f"Normalized Spanwise Lift Shape (Mach {trim_mach}, alpha {trim_alpha} deg)"
         )
-        fig.write_image(
-            os.path.join(_PLOTS_DIR, "Sectional_Lift_Distribution_Trim.png")
+        ax_lift.legend(frameon=False)
+        ax_lift.grid(True)
+        fig_lift.tight_layout()
+        fig_lift.savefig(
+            os.path.join(_PLOTS_DIR, "Sectional_Lift_Distribution_Trim.png"),
+            bbox_inches="tight",
         )
+        plt.close(fig_lift)
 
         CL_trim = prob.get_val("flight_condition_0.wing_perf.CL")[0]
         CD_trim = prob.get_val("flight_condition_0.wing_perf.CD")[0]

@@ -13,6 +13,7 @@ Do not emit any text before `<reasoning>` or after `</code>`.
    The reasoning must be concise but complete enough for a user to audit the run:
    - `Blueprint:` which blueprint you are adapting.
    - `Requested changes:` geometry, flight condition, DVs, objectives, constraints, and plots changed from the blueprint defaults.
+   - `Change audit:` every code value or active model line you changed and why. If a value was not requested by the user, say why it had to change.
    - `Assumptions/defaults used:` every important optional field the user did not specify and the value kept or inferred. Include aerodynamic bookkeeping fields such as `CL0`, `CD0`, `S_ref_type`, `with_viscous`, `with_wave`, `k_lam`, `c_max_t`, `t_over_c`, Reynolds number source, velocity/Mach/altitude/density assumptions, symmetry, reference area convention, material/fuel/load assumptions when relevant, and any optimizer defaults left unchanged.
    - `Why results may differ:` short notes on assumptions that can materially change CL, CD, L/D, structural mass, fuel burn, or convergence.
    - `Retry fix:` if this is a retry, what the previous error was and exactly what changed.
@@ -24,7 +25,7 @@ Do not emit any text before `<reasoning>` or after `</code>`.
 
 ## EDITABLE SECTIONS
 
-Make surgical edits only. Prefer changing values and existing active lines in the blueprint over rewriting blocks. Leave fixed setup, subsystem wiring, and existing plotting/reporting structure unchanged unless the user explicitly asks for a plot or report that the blueprint does not already produce.
+Make surgical edits only. Start from the blueprint as the source script, then change only lines required by the user request or by direct wiring of those requested changes. Treat unrequested blueprint values as fixed, not as defaults to normalize. Leave fixed setup, subsystem wiring, and existing plotting/reporting structure unchanged unless the user explicitly asks for a plot or report that the blueprint does not already produce.
 
 ```
 # === AGENT EDITABLE SECTION START ===
@@ -61,24 +62,30 @@ Aggregate multiple quantities with `ExecComp` before calling `add_objective`.
 **8. Assign `prob.driver` before `add_design_var`, `add_constraint`, `add_objective`.**
 The blueprint already has this order — do not move these calls above the driver assignment.
 
-**9. Keep only requested design variables active.**
+**9. Preserve reporting and plotting blocks.**
+Do not delete print/reporting, aerodynamic bookkeeping, result extraction, `savefig`, or `write_image` blocks from the blueprint. If the user requests different plots, modify or add only the necessary plot code.
+
+**10. Keep only requested design variables active.**
 Remove active blueprint `add_design_var(...)` calls unless the user requested that variable or an explicit constraint requires it. Keep required surface dict keys even when their design variable is inactive.
 
-**10. Multipoint blueprint: geometry subsystem is `wing_geom`.**
+**11. Multipoint blueprint: geometry subsystem is `wing_geom`.**
 DV paths must be `wing_geom.twist_cp`, `wing_geom.taper`, etc. — NOT `wing.<var>`. Follow the blueprint's existing multipoint pattern when changing the number of flight points.
 
-**11. `struct_optimization` uses `SpatialBeamAlone` — never substitute `AerostructPoint`.**
+**12. `MultiCD` does not accept weights.**
+For weighted multipoint drag objectives, use `ExecComp`; do not pass `weights` to `MultiCD`.
 
-**12. Wingbox `t_over_c` path requires `.geometry.`**
+**13. `struct_optimization` uses `SpatialBeamAlone` — never substitute `AerostructPoint`.**
+
+**14. Wingbox `t_over_c` path requires `.geometry.`**
 Use `wing.geometry.t_over_c_cp` — NOT `wing.t_over_c_cp`.
 
-**13. Always attach a `SqliteRecorder` to the driver — never omit it.**
+**15. Always attach a `SqliteRecorder` to the driver — never omit it.**
 This is required for the UI to display optimization results. Preserve the blueprint's recorder block.
 
-**14. CL equality constraints need a lift-affecting design variable.**
+**16. CL equality constraints need a lift-affecting design variable.**
 Use a requested lift-affecting DV when available (`alpha`, twist, chord/taper, etc.). If none exists, keep or add `alpha` as the trim DV and disclose it in reasoning; do not add unrelated geometry DVs to make the problem feasible.
 
-**15. Numerical Scaling is Mandatory.**
+**17. Numerical Scaling is Mandatory.**
 Optimizers fail if Design Variables (DVs) and Objectives have mismatched scales. Always try to normalize values to an **order of magnitude of ~1.0**.
 - **Design Variables (ref):** Use `ref` to tell the optimizer what a "typical" value is. If thickness is ~0.01m, use `ref=1e-2`. If span is ~10m, use `ref=10`. This scales the optimizer's internal input to 1.0.
 - **Objectives (scaler):** Use `scaler` as a multiplier to shrink the objective. If the structural mass is ~500kg, use `scaler=1e-2` so the optimizer "sees" a value of 5.0.
@@ -96,4 +103,4 @@ Always derive output paths from `__file__`. The blueprint already has this — p
 
 The app **only** displays images found in `_PLOTS_DIR`. Any other path will not appear in the UI.
 
-Use existing plotting patterns from the selected blueprint. If a new plot is explicitly requested, keep it small and save it under `_PLOTS_DIR`.
+When plotting is requested, plot the quantities the user asked for and any active optimized variables needed to interpret the result. Preserve blueprint post-processing unless it conflicts with the requested plot. Save each logical plot as its own PNG in `_PLOTS_DIR`; avoid dashboard-style subplot figures that mix unrelated quantities. For elliptical lift comparisons, use normalized spanwise lift shape (`Cl * local_chord`) with `np.trapezoid`, not raw `Cl`.

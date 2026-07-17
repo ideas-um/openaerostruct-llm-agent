@@ -21,6 +21,17 @@ _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
+matplotlib.rcParams.update(
+    {
+        "font.family": "serif",
+        "axes.titlesize": 16,
+        "axes.labelsize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 12,
+    }
+)
+
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
@@ -246,31 +257,68 @@ try:
     CDw_val = prob.get_val(f"{point_name}.wing_perf.CDw")[0]
     Sref_val = prob.get_val(f"{point_name}.wing_perf.S_ref", units="m**2")[0]
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    axes[0].bar(
+    if "twist_cp" in surface:
+        twist_cp_vals = prob.get_val("wing.twist_cp")
+        fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
+        ax_twist.plot(np.arange(len(twist_cp_vals)), twist_cp_vals, "o-", color="black")
+        ax_twist.set_xlabel("Control Point")
+        ax_twist.set_ylabel("Twist [deg]")
+        ax_twist.set_title("Optimized Twist Distribution")
+        ax_twist.grid(True)
+        fig_twist.tight_layout()
+        fig_twist.savefig(
+            os.path.join(_PLOTS_DIR, "aero_opt_twist_distribution.png"),
+            bbox_inches="tight",
+        )
+        plt.close(fig_twist)
+
+    if "chord_cp" in surface:
+        chord_cp_vals = prob.get_val("wing.chord_cp")
+        fig_chord, ax_chord = plt.subplots(figsize=(8, 4))
+        ax_chord.plot(np.arange(len(chord_cp_vals)), chord_cp_vals, "o-", color="black")
+        ax_chord.set_xlabel("Control Point")
+        ax_chord.set_ylabel("Chord Scale")
+        ax_chord.set_title("Optimized Chord Control Points")
+        ax_chord.grid(True)
+        fig_chord.tight_layout()
+        fig_chord.savefig(
+            os.path.join(_PLOTS_DIR, "aero_opt_chord_distribution.png"),
+            bbox_inches="tight",
+        )
+        plt.close(fig_chord)
+
+    fig_drag, ax_drag = plt.subplots(figsize=(8, 4))
+    ax_drag.bar(
         ["CDi", "CDv", "CDw", "CD0"],
         [CDi_val, CDv_val, CDw_val, surface["CD0"]],
         color=["steelblue", "seagreen", "goldenrod", "tomato"],
     )
-    axes[0].set_title(f"Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
-    axes[0].set_ylabel("Drag Coefficient")
-    axes[0].set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surface['S_ref_type']})")
+    ax_drag.set_title(f"Drag Breakdown (CD={CD_val:.5f}, CL={CL_val:.3f})")
+    ax_drag.set_ylabel("Drag Coefficient")
+    ax_drag.set_xlabel(f"S_ref={Sref_val:.3f} m^2 ({surface['S_ref_type']})")
+    fig_drag.tight_layout()
+    fig_drag.savefig(
+        os.path.join(_PLOTS_DIR, "aero_opt_drag_breakdown.png"), bbox_inches="tight"
+    )
+    plt.close(fig_drag)
 
     _mesh_out = prob.get_val(f"{point_name}.wing.def_mesh", units="m")
     mesh_x = _mesh_out[:, :, 0]
     mesh_y = _mesh_out[:, :, 1]
+    fig_wing, ax_wing = plt.subplots(figsize=(8, 4))
     for i in range(mesh_x.shape[0]):
-        axes[1].plot(mesh_y[i, :], mesh_x[i, :], color="C0", lw=1)
+        ax_wing.plot(mesh_y[i, :], mesh_x[i, :], color="C0", lw=1)
     for j in range(mesh_x.shape[1]):
-        axes[1].plot(mesh_y[:, j], mesh_x[:, j], color="C0", lw=1)
-    axes[1].set_aspect("equal")
-    axes[1].set_xlabel("Span (m)")
-    axes[1].set_ylabel("Chord (m)")
-    axes[1].set_title(f"Wing Mesh  (α={alpha_val:.2f}°)")
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(_PLOTS_DIR, "aero_opt_results.png"), bbox_inches="tight")
-    plt.close(fig)
+        ax_wing.plot(mesh_y[:, j], mesh_x[:, j], color="C0", lw=1)
+    ax_wing.set_aspect("equal")
+    ax_wing.set_xlabel("Span (m)")
+    ax_wing.set_ylabel("Chord (m)")
+    ax_wing.set_title(f"Wing Mesh  (alpha={alpha_val:.2f} deg)")
+    fig_wing.tight_layout()
+    fig_wing.savefig(
+        os.path.join(_PLOTS_DIR, "aero_opt_wing_planform.png"), bbox_inches="tight"
+    )
+    plt.close(fig_wing)
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:
     print(f"Plotting warning: {e}")
