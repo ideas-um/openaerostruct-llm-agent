@@ -40,12 +40,28 @@ def _plot_path(name: str) -> str:
     return os.path.join(_PLOTS_DIR, safe + ".png")
 
 
+def _isa_temperature(altitude_m):
+    return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
+
+
+def _isa_speed_of_sound(altitude_m):
+    return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
+
+
+def _sutherland_mu(altitude_m):
+    T = _isa_temperature(altitude_m)
+    return 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)
+
+
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
 # CRM mesh is built-in — span and root_chord are not required for "CRM".
 # num_twist_cp controls how many twist control points are initialized from the CRM geometry.
-# generate_mesh returns TWO values for CRM — always unpack as (mesh, twist_cp).
+# generate_mesh returns (mesh, twist_cp) for CRM, or just mesh for rect.
+# Keep this tuple-handling pattern when switching wing_type.
+# num_y/num_x are mesh resolution assumptions. Preserve them unless the user
+# explicitly asks for mesh resolution, panel count, or discretization changes.
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 5,
@@ -57,7 +73,12 @@ mesh_dict = {
 }
 # === AGENT EDITABLE SECTION END ===
 
-mesh, twist_cp = generate_mesh(mesh_dict)
+_mesh_result = generate_mesh(mesh_dict)
+if isinstance(_mesh_result, tuple):
+    mesh, twist_cp = _mesh_result
+else:
+    mesh = _mesh_result
+    twist_cp = np.zeros(mesh_dict.get("num_twist_cp", 3))
 
 # =============================================================================
 # 2. SURFACE DEFINITION
@@ -123,18 +144,26 @@ n_points = 2
 #   e.g. "wing_geom.twist_cp", "wing_geom.taper", "wing_geom.xshear_cp".
 #   Using "wing.<var>" will fail — that path does not exist in this blueprint.
 #
+# Flight-condition arrays are indexed by point. Keep altitude, Mach, rho, v,
+# Reynolds number, and CL targets aligned by index.
 # alpha is a vector of length n_points — one AoA value per flight condition.
 # === AGENT EDITABLE SECTION START ===
 prob = om.Problem()
 
+_altitudes = np.ones(n_points) * 11000.0  # Altitude per point [m]
+_Mach_numbers = np.ones(n_points) * 0.84  # Mach per point
+_rho_vals = np.ones(n_points) * 0.38  # Air density per point [kg/m^3]
+_a_vals = _isa_speed_of_sound(_altitudes)  # Speed of sound per point [m/s]
+_v_vals = _Mach_numbers * _a_vals  # Velocity per point [m/s]
+_mu_vals = _sutherland_mu(_altitudes)  # Dynamic viscosity per point [kg/(m*s)]
+
 indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("v", val=248.136, units="m/s")
-indep_var_comp.add_output(
-    "alpha", val=np.ones(n_points) * 6.64, units="deg"
-)  # shape=(n_points,)
-indep_var_comp.add_output("Mach_number", val=0.84)
-indep_var_comp.add_output("re", val=1.0e6, units="1/m")
-indep_var_comp.add_output("rho", val=0.38, units="kg/m**3")
+indep_var_comp.add_output("v", val=_v_vals, units="m/s")
+indep_var_comp.add_output("alpha", val=np.ones(n_points) * 6.64, units="deg")  # shape=(n_points,)
+indep_var_comp.add_output("Mach_number", val=_Mach_numbers)
+indep_var_comp.add_output("re", val=_rho_vals * _v_vals / _mu_vals, units="1/m")
+indep_var_comp.add_output("rho", val=_rho_vals, units="kg/m**3")
+indep_var_comp.add_output("speed_of_sound", val=_a_vals, units="m/s")
 indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
 # === AGENT EDITABLE SECTION END ===
 
@@ -150,23 +179,19 @@ for i in range(n_points):
     point_name = "aero_point_{}".format(i)
     prob.model.add_subsystem(point_name, aero_group)
 
-    prob.model.connect("v", point_name + ".v")
+    prob.model.connect("v", point_name + ".v", src_indices=[i])
     prob.model.connect("alpha", point_name + ".alpha", src_indices=[i])
-    prob.model.connect("Mach_number", point_name + ".Mach_number")
-    prob.model.connect("re", point_name + ".re")
-    prob.model.connect("rho", point_name + ".rho")
+    prob.model.connect("Mach_number", point_name + ".Mach_number", src_indices=[i])
+    prob.model.connect("re", point_name + ".re", src_indices=[i])
+    prob.model.connect("rho", point_name + ".rho", src_indices=[i])
     prob.model.connect("cg", point_name + ".cg")
 
     for surface in surfaces:
         name = surface["name"]
         prob.model.connect(point_name + ".CD", "multi_CD." + str(i) + "_CD")
         prob.model.connect(name + "_geom.mesh", point_name + "." + name + ".def_mesh")
-        prob.model.connect(
-            name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh"
-        )
-        prob.model.connect(
-            name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c"
-        )
+        prob.model.connect(name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh")
+        prob.model.connect(name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c")
 
 prob.model.add_subsystem(
     "multi_CD", MultiCD(n_points=n_points), promotes_outputs=["CD"]
@@ -216,15 +241,17 @@ prob.model.add_design_var("wing_geom.twist_cp", lower=-5, upper=8)
 #   "aero_point_1.wing_perf.CL"       — CL at flight condition 1
 #   "aero_point_0.wing_perf.S_ref"    — reference area at point 0 (NOT "wing.S_ref")
 #   "aero_point_0.wing_perf.CD"       — drag at point 0
-#   "CD"                              — total weighted drag (output of MultiCD)
+#   "CD"                              — unweighted sum of drag (output of MultiCD)
 
+# If n_points changes, this CL target list must be changed to the same length.
 for i in range(n_points):
     prob.model.add_constraint(f"aero_point_{i}.wing_perf.CL", equals=[0.45, 0.5][i])
 
 # --- Objective ---
-# "CD" is the sum of drag across all flight points (output of MultiCD component).
+# "CD" is the unweighted sum of drag across all flight points.
+# If the user requests a weighted objective, replace MultiCD with explicit weighted wiring.
 # FULL OBJECTIVE PATH REFERENCE:
-#   "CD"                              — weighted sum of drag (MultiCD output)
+#   "CD"                              — unweighted sum of drag (MultiCD output)
 #   "aero_point_0.wing_perf.CD"       — drag at a single flight point
 prob.model.add_objective("CD", scaler=1e4)
 # === AGENT EDITABLE SECTION END ===

@@ -35,11 +35,27 @@ matplotlib.rcParams.update(
     }
 )
 
+
+def _isa_temperature(altitude_m):
+    return max(288.15 - 0.0065 * altitude_m, 216.65)
+
+
+def _isa_speed_of_sound(altitude_m):
+    return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
+
+
+def _sutherland_mu(altitude_m):
+    T = _isa_temperature(altitude_m)
+    return 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)
+
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
 # CRM mesh is built-in. num_twist_cp sets the number of twist control points.
-# generate_mesh returns TWO values for CRM — always unpack as (mesh, twist_cp).
+# generate_mesh returns (mesh, twist_cp) for CRM, or just mesh for rect.
+# Keep this tuple-handling pattern when switching wing_type.
+# num_y/num_x are mesh resolution assumptions. Preserve them unless the user
+# explicitly asks for mesh resolution, panel count, or discretization changes.
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 5,
@@ -49,7 +65,12 @@ mesh_dict = {
     "num_twist_cp": 5,
 }
 
-mesh, twist_cp = generate_mesh(mesh_dict)
+_mesh_result = generate_mesh(mesh_dict)
+if isinstance(_mesh_result, tuple):
+    mesh, twist_cp = _mesh_result
+else:
+    mesh = _mesh_result
+    twist_cp = np.zeros(mesh_dict.get("num_twist_cp", 3))
 # === AGENT EDITABLE SECTION END ===
 
 
@@ -88,7 +109,7 @@ surface = {
     "fem_model_type": "tube",
     "mesh": mesh,
     # Structural DVs — declared here to enable in add_design_var()
-    "thickness_cp": np.array([0.01, 0.02, 0.03]),  # Tube wall thickness CPs [m]
+    "thickness_cp": np.array([0.1, 0.2, 0.3]),  # Tube wall thickness CPs [m]
     # "radius_cp": np.ones(3) * 0.05,                 # Tube radius CPs [m] — optional DV
     # Geometry DVs — declared here to enable in add_design_var()
     "twist_cp": twist_cp,  # Spanwise twist CPs [deg] — required
@@ -129,7 +150,8 @@ surface = {
 prob = om.Problem()
 
 # === AGENT EDITABLE SECTION START ===
-# Mission and flight condition parameters — modify to match the user's scenario.
+# Mission and flight condition parameters. Derive speed and Reynolds number
+# from Mach, altitude, and rho.
 # CT = thrust-specific fuel consumption [1/s] = grav_constant * TSFC_in_per_hour * (1/3600)
 #
 # CRITICAL WARNING: Never set CT to 0.0. A zero thrust-specific fuel consumption rate
@@ -137,20 +159,23 @@ prob = om.Problem()
 # optimization landscape, removing all gradients and causing Line Search failures.
 # Keep CT set to a realistic non-zero value (e.g. grav_constant * 17.0e-6).
 #
+altitude = 11000.0  # Altitude [m]
+Mach_number = 0.84
+rho = 0.38  # Cruise altitude density [kg/m^3]
+speed_of_sound = _isa_speed_of_sound(altitude)
+v = Mach_number * speed_of_sound
+re = rho * v / _sutherland_mu(altitude)
+
 indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("v", val=248.136, units="m/s")  # Cruise speed [m/s]
-indep_var_comp.add_output("alpha", val=5.0, units="deg")  # Initial AoA [deg]
-indep_var_comp.add_output("Mach_number", val=0.84)
-indep_var_comp.add_output("re", val=1.0e6, units="1/m")
-indep_var_comp.add_output("rho", val=0.38, units="kg/m**3")  # Cruise altitude density
-indep_var_comp.add_output(
-    "CT", val=grav_constant * 17.0e-6, units="1/s"
-)  # Thrust-specific fuel consumption (CRITICAL: NEVER SET TO 0.0!)
+indep_var_comp.add_output("v", val=v, units="m/s")
+indep_var_comp.add_output("alpha", val=5.0, units="deg")  # Initial trim guess; final alpha is optimized.
+indep_var_comp.add_output("Mach_number", val=Mach_number)
+indep_var_comp.add_output("re", val=re, units="1/m")
+indep_var_comp.add_output("rho", val=rho, units="kg/m**3")
+indep_var_comp.add_output("CT", val=grav_constant * 17.0e-6, units="1/s")  # Thrust-specific fuel consumption (CRITICAL: NEVER SET TO 0.0!)
 indep_var_comp.add_output("R", val=11.165e6, units="m")  # Range [m]
-indep_var_comp.add_output(
-    "W0", val=0.4 * 3e5, units="kg"
-)  # Aircraft weight excl. wing+fuel [kg]
-indep_var_comp.add_output("speed_of_sound", val=295.4, units="m/s")
+indep_var_comp.add_output("W0", val=0.4 * 3e5, units="kg")  # Aircraft weight excl. wing+fuel [kg]
+indep_var_comp.add_output("speed_of_sound", val=speed_of_sound, units="m/s")
 indep_var_comp.add_output("load_factor", val=1.0)
 indep_var_comp.add_output("empty_cg", val=np.zeros((3)), units="m")
 # === AGENT EDITABLE SECTION END ===
@@ -182,21 +207,14 @@ prob.model.add_subsystem(
 )
 
 com_name = point_name + "." + name + "_perf"
-prob.model.connect(
-    name + ".local_stiff_transformed",
-    point_name + ".coupled." + name + ".local_stiff_transformed",
-)
+prob.model.connect(name + ".local_stiff_transformed", point_name + ".coupled." + name + ".local_stiff_transformed")
 prob.model.connect(name + ".nodes", point_name + ".coupled." + name + ".nodes")
 prob.model.connect(name + ".mesh", point_name + ".coupled." + name + ".mesh")
 prob.model.connect(name + ".radius", com_name + ".radius")
 prob.model.connect(name + ".thickness", com_name + ".thickness")
 prob.model.connect(name + ".nodes", com_name + ".nodes")
-prob.model.connect(
-    name + ".cg_location", point_name + ".total_perf." + name + "_cg_location"
-)
-prob.model.connect(
-    name + ".structural_mass", point_name + ".total_perf." + name + "_structural_mass"
-)
+prob.model.connect(name + ".cg_location", point_name + ".total_perf." + name + "_cg_location")
+prob.model.connect(name + ".structural_mass", point_name + ".total_perf." + name + "_structural_mass")
 prob.model.connect(name + ".t_over_c", com_name + ".t_over_c")
 
 # =============================================================================
@@ -249,6 +267,7 @@ prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, scaler=1e2
 # FULL CONSTRAINT PATH REFERENCE:
 #   "AS_point_0.wing_perf.failure"  — KS-aggregated structural failure index, upper=0
 #                                     Failure index > 0 means material has yielded.
+#   "AS_point_0.wing_perf.thickness_intersects" — tube wall thickness geometry validity
 #   "AS_point_0.L_equals_W"         — lift-equals-weight trim constraint, equals=0
 #                                     Requires alpha as a design variable.
 #   "AS_point_0.wing_perf.CL"       — lift coefficient
@@ -256,6 +275,7 @@ prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, scaler=1e2
 #   "AS_point_0.wing_perf.CD"       — drag coefficient
 
 prob.model.add_constraint("AS_point_0.wing_perf.failure", upper=0.0)
+prob.model.add_constraint("AS_point_0.wing_perf.thickness_intersects", upper=0.0)  # Required tube geometry validity constraint.
 prob.model.add_constraint("AS_point_0.L_equals_W", equals=0.0)
 
 # --- Objective ---

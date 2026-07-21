@@ -17,7 +17,8 @@ from .config import (
 logger = logging.getLogger("LLM_Backend")
 _LLM_DIR = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR = os.path.dirname(_LLM_DIR)
-_SKILLS_PATH = os.path.join(_SRC_DIR, "llm", "skills.md")
+_ROUTER_PROMPT_PATH = os.path.join(_SRC_DIR, "llm", "router.md")
+_LEGACY_SKILLS_PATH = os.path.join(_SRC_DIR, "llm", "skills.md")
 
 VALID_BLUEPRINTS: frozenset = frozenset(
     {
@@ -43,10 +44,16 @@ def _approx_tokens(text: str) -> int:
 
 
 def _load_system_prompt() -> str:
-    if os.path.exists(_SKILLS_PATH):
-        with open(_SKILLS_PATH, "r") as f:
+    for path in (_ROUTER_PROMPT_PATH, _LEGACY_SKILLS_PATH):
+        if not os.path.exists(path):
+            continue
+        with open(path, "r") as f:
             return f.read()
     return "Select an OpenAeroStruct blueprint."
+
+
+class RouterContractError(ValueError):
+    pass
 
 
 def _parse_routing_response(response: str) -> dict:
@@ -80,13 +87,23 @@ def _parse_routing_response(response: str) -> dict:
         if "blueprint" in data and "blueprints" not in data:
             data["blueprints"] = [data["blueprint"]]
 
-        # 5. Validate blueprint selection
+        # 5. Validate blueprint selection. The router contract is exactly one
+        # blueprint; retry upstream if the model returns a list.
         raw = data.get("blueprints", [])
-        validated = [b for b in raw if b in VALID_BLUEPRINTS][:1]
+        if isinstance(raw, str):
+            raw = [raw]
+        if isinstance(raw, list) and len(raw) > 1:
+            raise RouterContractError(
+                f"Router returned multiple blueprint entries: {raw}"
+            )
+        validated = [b for b in raw if b in VALID_BLUEPRINTS]
+        validated = validated[:1]
         data["blueprints"] = validated if validated else ["aero_opt.py"]
 
         return data
 
+    except RouterContractError:
+        raise
     except Exception as e:
         logger.error(f"Routing parse error: {e}. Raw response: {response}")
         return {
@@ -94,6 +111,16 @@ def _parse_routing_response(response: str) -> dict:
             "is_vague": False,
             "reason": f"Parsing failure: {str(e)}",
         }
+
+
+def _router_repair_prompt(user_prompt: str, previous_response: str) -> str:
+    return (
+        f"{user_prompt}\n\n"
+        "Router contract error: your previous response returned more than one "
+        "blueprint. Return exactly one best blueprint in blueprints. Do not "
+        "combine blueprints. Previous response:\n"
+        f"{previous_response}"
+    )
 
 
 def route_intent(
@@ -111,9 +138,24 @@ def route_intent(
     )
     logger.info(f"--- LLM RESPONSE ---\n{response}")
 
-    data = _parse_routing_response(response)
-    data["input_tokens"] = _approx_tokens(system_prompt + "\n" + user_prompt)
-    data["output_tokens"] = _approx_tokens(response)
+    input_text = system_prompt + "\n" + user_prompt
+    output_text = response
+    try:
+        data = _parse_routing_response(response)
+    except RouterContractError as exc:
+        logger.warning(f"{exc}; retrying router once.")
+        repair_prompt = _router_repair_prompt(user_prompt, response)
+        retry_response = get_llm_response(
+            repair_prompt, model_name, system_prompt, provider=provider
+        )
+        logger.info(f"--- LLM RESPONSE (router retry) ---\n{retry_response}")
+        data = _parse_routing_response(retry_response)
+        input_text += "\n" + repair_prompt
+        output_text += "\n" + retry_response
+        data["router_retry"] = True
+
+    data["input_tokens"] = _approx_tokens(input_text)
+    data["output_tokens"] = _approx_tokens(output_text)
     return data
 
 
@@ -131,9 +173,24 @@ def route_intent_stream(
             user_prompt, model_name, system_prompt, provider=provider
         )
         yield response
-        data = _parse_routing_response(response)
-        data["input_tokens"] = _approx_tokens(system_prompt + "\n" + user_prompt)
-        data["output_tokens"] = _approx_tokens(response)
+        input_text = system_prompt + "\n" + user_prompt
+        output_text = response
+        try:
+            data = _parse_routing_response(response)
+        except RouterContractError as exc:
+            logger.warning(f"{exc}; retrying router once.")
+            yield "\n\nRouter returned multiple blueprints — retrying once...\n"
+            repair_prompt = _router_repair_prompt(user_prompt, response)
+            retry_response = get_llm_response(
+                repair_prompt, model_name, system_prompt, provider=provider
+            )
+            yield retry_response
+            data = _parse_routing_response(retry_response)
+            input_text += "\n" + repair_prompt
+            output_text += "\n" + retry_response
+            data["router_retry"] = True
+        data["input_tokens"] = _approx_tokens(input_text)
+        data["output_tokens"] = _approx_tokens(output_text)
         yield data
         return
 
@@ -196,10 +253,29 @@ def route_intent_stream(
     except Exception:
         pass
 
-    data = _parse_routing_response(full_response)
-    data["input_tokens"] = input_tokens or _approx_tokens(
-        system_prompt + "\n" + user_prompt
-    )
-    data["output_tokens"] = output_tokens or _approx_tokens(full_response)
-    log_token_usage(provider, model_name, input_tokens, output_tokens)
+    input_text = system_prompt + "\n" + user_prompt
+    output_text = full_response
+    try:
+        data = _parse_routing_response(full_response)
+    except RouterContractError as exc:
+        logger.warning(f"{exc}; retrying router once.")
+        yield "\n\nRouter returned multiple blueprints — retrying once...\n"
+        repair_prompt = _router_repair_prompt(user_prompt, full_response)
+        retry_response = get_llm_response(
+            repair_prompt, model_name, system_prompt, provider=provider
+        )
+        logger.info(f"--- LLM RESPONSE (router retry) ---\n{retry_response}")
+        yield retry_response
+        data = _parse_routing_response(retry_response)
+        input_text += "\n" + repair_prompt
+        output_text += "\n" + retry_response
+        data["router_retry"] = True
+
+    if data.get("router_retry"):
+        data["input_tokens"] = _approx_tokens(input_text)
+        data["output_tokens"] = _approx_tokens(output_text)
+    else:
+        data["input_tokens"] = input_tokens or _approx_tokens(input_text)
+        data["output_tokens"] = output_tokens or _approx_tokens(output_text)
+    log_token_usage(provider, model_name, data["input_tokens"], data["output_tokens"])
     yield data

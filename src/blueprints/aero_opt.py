@@ -32,6 +32,19 @@ matplotlib.rcParams.update(
     }
 )
 
+
+def _isa_temperature(altitude_m):
+    return max(288.15 - 0.0065 * altitude_m, 216.65)
+
+
+def _isa_speed_of_sound(altitude_m):
+    return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
+
+
+def _sutherland_mu(altitude_m):
+    T = _isa_temperature(altitude_m)
+    return 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)
+
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
@@ -42,17 +55,15 @@ matplotlib.rcParams.update(
 #
 # num_y must be an odd number.
 # num_twist_cp is used when we want to initialize twist as a design variable
+# num_y/num_x are mesh resolution assumptions. Preserve them unless the user
+# explicitly asks for mesh resolution, panel count, or discretization changes.
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
-    "num_y": 19,  # Number of spanwise panels (must be odd)
-    "num_x": 3,  # Number of chordwise panels
-    "wing_type": "rect",  # "rect" or "CRM"
+    "num_y": 7,  # Number of spanwise panels (must be odd)
+    "num_x": 2,  # Number of chordwise panels
+    "wing_type": "CRM",  # "rect" or "CRM"
     "symmetry": True,
-    # --- rect-only parameters (ignored when wing_type="CRM") ---
-    "span": 10.0,  # Full wingspan [m]
-    "root_chord": 2.0,  # Root chord [m]
-    "span_cos_spacing": 0.0,
-    "chord_cos_spacing": 0.0,
+    "num_twist_cp": 5,
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -100,20 +111,21 @@ surface = {
     "name": "wing",
     "symmetry": True,
     "S_ref_type": "wetted",
+    "fem_model_type": "tube",
     "mesh": mesh,
+    "twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(5),
     # --- Aerodynamic solver parameters — always keep these ---
     "CL0": 0.0,  # Lift coefficient at zero AoA
-    "CD0": 0.0,  # Profile drag (zero-lift drag)
+    "CD0": 0.015,  # Profile drag (zero-lift drag)
     "with_viscous": True,  # Include viscous drag
     "with_wave": False,  # Include wave drag (transonic/supersonic only)
     "k_lam": 0.05,  # Fraction of laminar flow (0.05 = 5%)
     "c_max_t": 0.303,  # Chordwise location of max thickness (NACA 4-digit: 0.303)
-    "t_over_c_cp": np.array([0.12]),  # Thickness-to-chord ratio — affects viscous drag
+    "t_over_c_cp": np.array([0.15]),  # Thickness-to-chord ratio — affects viscous drag
     # --- Geometry DVs — uncomment each key you want to optimize ---
     # For CRM: use _crm_twist_cp for twist_cp initialization.
     # For rect: use np.zeros(N) or np.array([...]) manually.
     # After uncommenting here, also add the matching add_design_var() call in Section 4.
-    # "twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(3),
     # "chord_cp": np.ones(3),          # Chord scaling CPs (1.0 = no scaling)
     # "xshear_cp": np.zeros(3),        # x-shear CPs [m] — generalized sweep
     # "zshear_cp": np.zeros(3),        # z-shear CPs [m] — generalized dihedral
@@ -128,19 +140,21 @@ surface = {
 # =============================================================================
 prob = om.Problem()
 
-# Flight condition — modify Mach and rho to match the desired operating point.
-# Re is computed as rho * v / 1.81e-5 [1/m] — do NOT use surface["root_chord"].
+# Flight condition. Derive speed and Reynolds number from Mach, altitude, and rho.
 # === AGENT EDITABLE SECTION START ===
-Mach_number = 0.5
-rho = 1.225  # Air density [kg/m^3]
-v = Mach_number * 340.0  # Freestream speed [m/s]
-re = rho * v / 1.81e-5  # Reynolds number per unit length [1/m]
+altitude = 11000.0  # Altitude [m]
+Mach_number = 0.84
+rho = 0.38
+speed_of_sound = _isa_speed_of_sound(altitude)
+v = Mach_number * speed_of_sound
+re = rho * v / _sutherland_mu(altitude)
 # === AGENT EDITABLE SECTION END ===
 
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("v", val=v, units="m/s")
-indep_var_comp.add_output("alpha", val=3.0, units="deg")
+indep_var_comp.add_output("alpha", val=5.0, units="deg")
 indep_var_comp.add_output("Mach_number", val=Mach_number)
+indep_var_comp.add_output("speed_of_sound", val=speed_of_sound, units="m/s")
 indep_var_comp.add_output("re", val=re, units="1/m")
 indep_var_comp.add_output("rho", val=rho, units="kg/m**3")
 indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
@@ -154,12 +168,12 @@ name = surface["name"]
 geom_group = Geometry(surface=surface)
 prob.model.add_subsystem(name, geom_group)
 
-aero_group = AeroPoint(surfaces=[surface], rotational=True)
+aero_group = AeroPoint(surfaces=[surface])
 point_name = "flight_condition_0"
 prob.model.add_subsystem(
     point_name,
     aero_group,
-    promotes_inputs=["v", "alpha", "beta", "omega", "Mach_number", "re", "rho", "cg"],
+    promotes_inputs=["v", "alpha", "Mach_number", "re", "rho", "cg"],
 )
 
 prob.model.connect(f"{name}.mesh", f"{point_name}.{name}.def_mesh")
@@ -170,6 +184,7 @@ prob.model.connect(f"{name}.t_over_c", f"{point_name}.{name}_perf.t_over_c")
 # 4. OPTIMIZATION SETTINGS
 # =============================================================================
 prob.driver = om.ScipyOptimizeDriver()
+prob.driver.options["tol"] = 1e-9
 
 recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
@@ -200,8 +215,8 @@ prob.options["work_dir"] = _RUN_OUT_DIR
 #   Span constraint:  "wing.mesh.stretch.span"               (upper/lower bounds)
 #   Area constraint:  "flight_condition_0.wing_perf.S_ref"   (equals/lower)
 
-prob.model.add_design_var("alpha", lower=-10.0, upper=10.0)
-# prob.model.add_design_var("wing.twist_cp", lower=-10.0, upper=10.0)
+# prob.model.add_design_var("alpha", lower=-10.0, upper=10.0)
+prob.model.add_design_var("wing.twist_cp", lower=-10.0, upper=15.0)
 # prob.model.add_design_var("wing.chord_cp", lower=0.5, upper=3.0)
 # prob.model.add_design_var("wing.xshear_cp", lower=-5.0, upper=5.0)
 # prob.model.add_design_var("wing.zshear_cp", lower=-2.0, upper=2.0)
@@ -224,7 +239,7 @@ prob.model.add_constraint(f"{point_name}.wing_perf.CL", equals=0.5)
 # FULL OBJECTIVE PATH REFERENCE:
 #   "flight_condition_0.wing_perf.CD"   — drag coefficient (minimize drag)
 #   "flight_condition_0.wing_perf.CL"   — lift coefficient (maximize → scaler=-1)
-prob.model.add_objective(f"{point_name}.wing_perf.CD", ref=0.01)
+prob.model.add_objective(f"{point_name}.wing_perf.CD", scaler=1e4)
 # === AGENT EDITABLE SECTION END ===
 
 # =============================================================================

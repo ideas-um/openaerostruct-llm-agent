@@ -3,6 +3,7 @@ agent_logic.py — Hardened Memory & Error Feedback
 """
 
 from __future__ import annotations
+import csv
 import os
 import re
 import shutil
@@ -179,6 +180,34 @@ def _find_db_metrics() -> dict:
     return {}
 
 
+def _find_analysis_csv_metrics() -> dict:
+    """Return aero-analysis polar rows when a generated script writes a CSV artifact."""
+    for p in [
+        os.path.join(_OUT_DIR, "OptimizedWing_Polars.csv"),
+        os.path.join(_GEN_RUN_DIR, "OptimizedWing_Polars.csv"),
+    ]:
+        if not os.path.exists(p):
+            continue
+        with open(p, newline="", encoding="utf-8") as fh:
+            rows = []
+            core_columns = ("Mach", "Alpha", "CL", "CD", "L/D")
+            for row in csv.DictReader(fh):
+                rows.append(
+                    {
+                        key: round(float(row[key]), 12)
+                        for key in core_columns
+                        if row.get(key) not in ("", None)
+                    }
+                )
+        if rows:
+            return {
+                "path": os.path.basename(p),
+                "columns": [key for key in core_columns if key in rows[0]],
+                "rows": rows,
+            }
+    return {}
+
+
 def _extract_stdout_metrics(stdout: str) -> dict:
     """Pull compact numeric result lines from generated-script stdout."""
     interesting = (
@@ -198,6 +227,7 @@ def _extract_stdout_metrics(stdout: str) -> dict:
     number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
     metrics = {}
     lines = []
+    analysis_points = []
 
     for raw_line in stdout.splitlines():
         line = raw_line.strip()
@@ -206,20 +236,29 @@ def _extract_stdout_metrics(stdout: str) -> dict:
         lines.append(line)
 
         pairs = re.findall(rf"([A-Za-z][A-Za-z0-9_./]*)\s*=\s*({number})", line)
-        for name, val in pairs:
-            metrics[name] = float(val)
+        is_analysis_point = line.startswith("AnalysisPoint:")
+        if is_analysis_point:
+            point = {name: float(val) for name, val in pairs}
+            if point:
+                analysis_points.append(point)
+        else:
+            for name, val in pairs:
+                metrics[name] = float(val)
 
-        if ":" in line:
+        if ":" in line and not is_analysis_point:
             label, rest = line.split(":", 1)
             vals = [float(v) for v in re.findall(number, rest)]
             if vals:
                 key = re.sub(r"[^A-Za-z0-9_]+", "_", label.strip()).strip("_")
                 metrics[key] = vals[0] if len(vals) == 1 else vals
 
-        if len(lines) >= 30:
+        if len(lines) >= 120:
             break
 
-    return {"values": metrics, "lines": lines}
+    result = {"values": metrics, "lines": lines}
+    if analysis_points:
+        result["analysis_points"] = analysis_points
+    return result
 
 
 def _collect_result_metrics(stdout: str) -> dict:
@@ -227,6 +266,13 @@ def _collect_result_metrics(stdout: str) -> dict:
     db_metrics = _find_db_metrics()
     if db_metrics:
         metrics["db"] = db_metrics
+    csv_metrics = _find_analysis_csv_metrics()
+    if csv_metrics:
+        metrics["analysis_csv"] = csv_metrics
+        stdout_metrics = _extract_stdout_metrics(stdout)
+        if stdout_metrics["values"]:
+            metrics["stdout"] = {"values": stdout_metrics["values"]}
+        return metrics
     stdout_metrics = _extract_stdout_metrics(stdout)
     if stdout_metrics["values"] or stdout_metrics["lines"]:
         metrics["stdout"] = stdout_metrics
@@ -286,6 +332,7 @@ def run_agent(
 ) -> AgentResult:
 
     from llm.coder import generate_code, generate_code_stream
+    from llm.auditor import audit_blueprint_consistency
     from llm.config import LLMBackendTransientError
     from tools.executor import execute_run
 
@@ -350,6 +397,31 @@ def run_agent(
             error_history.append(f"Code:\n{code}\nError:\n{err}")
             result.error_logs.append(err)
             emit("safety_blocked", {"violations": violations})
+            attempt += 1
+            continue
+
+        audit_report, audit_in_tok, audit_out_tok = audit_blueprint_consistency(
+            user_prompt=user_prompt,
+            blueprints=blueprints,
+            generated_code=code,
+            model_name=model_name,
+            provider=provider,
+        )
+        result.input_tokens += audit_in_tok
+        result.output_tokens += audit_out_tok
+        audit_diff = audit_report.pop("diff", "")
+        emit("blueprint_audit", {"report": audit_report, "diff": audit_diff})
+        audit_warning = audit_report.get("warning")
+        if audit_warning:
+            result.error_logs.append(f"[attempt {attempt + 1}] {audit_warning}")
+        if not audit_report.get("passed", True):
+            feedback = audit_report.get("feedback_for_coder") or (
+                "Restore unrequested blueprint assumptions. Violations: "
+                f"{audit_report.get('violations', [])}"
+            )
+            err = "Blueprint consistency error:\n" + sanitize_feedback(feedback, 2000)
+            error_history.append(err)
+            result.error_logs.append(f"[attempt {attempt + 1}] {err}")
             attempt += 1
             continue
 

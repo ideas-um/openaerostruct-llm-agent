@@ -230,6 +230,7 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 "code": "",
                 "status": "running",
                 "logs": "",
+                "audit": {},
                 "db_summary": "",
                 "plots": [],
             }
@@ -318,6 +319,24 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "blocked"
                 st.session_state["active_attempts"][-1]["logs"] = violation_text
+
+        elif event == "blueprint_audit":
+            report = data.get("report", {})
+            if report.get("passed", True):
+                st.success("✅ Blueprint consistency check passed.")
+            else:
+                feedback = report.get("feedback_for_coder", "")
+                st.error("❌ Blueprint consistency check failed.")
+                if feedback:
+                    st.code(feedback, language="text")
+
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["audit"] = report
+                if not report.get("passed", True):
+                    st.session_state["active_attempts"][-1]["status"] = "audit_failed"
+                    st.session_state["active_attempts"][-1]["logs"] = report.get(
+                        "feedback_for_coder", ""
+                    )
 
         elif event == "exec_success":
             st.success("✅ Execution completed successfully.")
@@ -494,6 +513,9 @@ for message in st.session_state.messages:
                         # Database summary and plots for the successful run are shown once at the bottom
                     elif att["status"] == "error":
                         st.error("❌ Python error occurred.")
+                        st.code(att["logs"], language="text")
+                    elif att["status"] == "audit_failed":
+                        st.error("❌ Blueprint consistency check failed.")
                         st.code(att["logs"], language="text")
                     elif att["status"] == "no_converge":
                         st.warning("⚠️ Optimiser did not converge.")

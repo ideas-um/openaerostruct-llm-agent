@@ -61,6 +61,19 @@ def plot_mesh(mesh, filename=None):
     plt.close()
 
 
+def _isa_temperature(altitude_m):
+    return max(288.15 - 0.0065 * altitude_m, 216.65)
+
+
+def _isa_speed_of_sound(altitude_m):
+    return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
+
+
+def _sutherland_mu(altitude_m):
+    T = _isa_temperature(altitude_m)
+    return 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)
+
+
 if __name__ == "__main__":
     # =============================================================================
     # 2. MESH GENERATION
@@ -69,20 +82,24 @@ if __name__ == "__main__":
     # For "rect" wings: span and root_chord are required.
     # For "CRM" wings: span and root_chord are not used — CRM geometry is built-in.
     # num_y must be an odd number.
+    # num_y/num_x are mesh resolution assumptions. Preserve them unless the user
+    # explicitly asks for mesh resolution, panel count, or discretization changes.
     # === AGENT EDITABLE SECTION START ===
     mesh_dict = {
-        "num_y": 19,  # Number of spanwise panels (must be odd)
-        "num_x": 3,  # Number of chordwise panels
-        "wing_type": "rect",  # "rect" or "CRM"
+        "num_y": 7,  # Number of spanwise panels (must be odd)
+        "num_x": 2,  # Number of chordwise panels
+        "wing_type": "CRM",  # "rect" or "CRM"
         "symmetry": True,
-        "span": 25.52,  # Full wingspan [m]
-        "root_chord": 2.83,  # Root chord [m] — only used for "rect" wing_type
-        "span_cos_spacing": 0.0,
-        "chord_cos_spacing": 0.0,
+        "num_twist_cp": 5,
     }
     # === AGENT EDITABLE SECTION END ===
 
-    mesh = generate_mesh(mesh_dict)
+    _mesh_result = generate_mesh(mesh_dict)
+    if isinstance(_mesh_result, tuple):
+        mesh, _crm_twist_cp = _mesh_result
+    else:
+        mesh = _mesh_result
+        _crm_twist_cp = None
 
     # =============================================================================
     # 3. SURFACE DEFINITION
@@ -118,20 +135,21 @@ if __name__ == "__main__":
         "name": "wing",
         "symmetry": True,
         "S_ref_type": "wetted",
+        "fem_model_type": "tube",
         # --- Active geometry (modify values to test different shapes) ---
-        "twist_cp": np.array([0.0, 0.0]),  # Spanwise twist [deg], 2 control points
-        "t_over_c_cp": np.array([0.12]),  # Thickness-to-chord ratio
-        "taper": 1.0,  # Taper ratio (1.0 = rectangular)
-        "sweep": 0.0,  # Sweep angle [deg]
-        "dihedral": 0.0,  # Dihedral angle [deg]
+        "twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(5),
+        "t_over_c_cp": np.array([0.15]),  # Thickness-to-chord ratio
         # --- Optional geometry modifiers — uncomment to activate ---
-        # "chord_cp": np.ones(2),                 # Chord B-spline CPs (1.0 = no scaling)
-        # "xshear_cp": np.zeros(2),               # x-shear CPs [m] — generalized sweep
-        # "zshear_cp": np.zeros(2),               # z-shear CPs [m] — generalized dihedral
+        # "chord_cp": np.ones(5),                 # Chord B-spline CPs (1.0 = no scaling)
+        # "xshear_cp": np.zeros(5),               # x-shear CPs [m] — generalized sweep
+        # "zshear_cp": np.zeros(5),               # z-shear CPs [m] — generalized dihedral
+        # "taper": 1.0,                           # Taper ratio
+        # "sweep": 0.0,                           # Sweep angle [deg]
+        # "dihedral": 0.0,                        # Dihedral angle [deg]
         "mesh": mesh,  # Mesh generated above — do not remove
         # --- Aerodynamic solver parameters — do not remove ---
         "CL0": 0.0,  # Lift coefficient at zero AoA
-        "CD0": 0.005,  # Profile drag coefficient (zero-lift drag)
+        "CD0": 0.015,  # Profile drag coefficient (zero-lift drag)
         "k_lam": 0.05,  # Fraction of laminar flow (0.05 = 5%)
         "c_max_t": 0.303,  # Chordwise location of max thickness (NACA 4-digit: 0.303)
         "with_viscous": True,  # Include viscous drag in the analysis
@@ -145,17 +163,15 @@ if __name__ == "__main__":
     prob = om.Problem()
 
     indep_var_comp = om.IndepVarComp()
-    # These are initial/placeholder values — they are overridden in the sweep loop below.
-    # DO NOT compute re using surface["root_chord"] — that key does not exist in surface.
-    # Compute re as: rho * v / 1.81e-5  (units: 1/m, i.e. per unit length)
+    # These placeholder values are overwritten in the sweep loop below.
     # === AGENT EDITABLE SECTION START ===
+    placeholder_altitude = 11000.0  # Altitude [m], overwritten by sweep setup
     indep_var_comp.add_output("v", val=100.0, units="m/s")  # Overridden in sweep
     indep_var_comp.add_output("alpha", val=0.0, units="deg")  # Overridden in sweep
     indep_var_comp.add_output("Mach_number", val=0.3)  # Overridden in sweep
+    indep_var_comp.add_output("speed_of_sound", val=_isa_speed_of_sound(placeholder_altitude), units="m/s")
     indep_var_comp.add_output("re", val=1e6, units="1/m")  # Overridden in sweep
-    indep_var_comp.add_output(
-        "rho", val=1.225, units="kg/m**3"
-    )  # Set to match flight condition
+    indep_var_comp.add_output("rho", val=1.225, units="kg/m**3")  # Set to match flight condition
     indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
     # === AGENT EDITABLE SECTION END ===
 
@@ -165,7 +181,7 @@ if __name__ == "__main__":
     geom_group = Geometry(surface=surface)
     prob.model.add_subsystem(name, geom_group)
 
-    aero_group = AeroPoint(surfaces=[surface], rotational=True)
+    aero_group = AeroPoint(surfaces=[surface])
     point_name = "flight_condition_0"
     prob.model.add_subsystem(
         point_name,
@@ -173,8 +189,6 @@ if __name__ == "__main__":
         promotes_inputs=[
             "v",
             "alpha",
-            "beta",
-            "omega",
             "Mach_number",
             "re",
             "rho",
@@ -183,12 +197,8 @@ if __name__ == "__main__":
     )
 
     prob.model.connect(name + ".mesh", point_name + "." + name + ".def_mesh")
-    prob.model.connect(
-        name + ".mesh", point_name + ".aero_states." + name + "_def_mesh"
-    )
-    prob.model.connect(
-        name + ".t_over_c", point_name + "." + name + "_perf." + "t_over_c"
-    )
+    prob.model.connect(name + ".mesh", point_name + ".aero_states." + name + "_def_mesh")
+    prob.model.connect(name + ".t_over_c", point_name + "." + name + "_perf." + "t_over_c")
 
     prob.setup()
 
@@ -196,10 +206,12 @@ if __name__ == "__main__":
     # 5. ANALYSIS SWEEP
     # =============================================================================
     # Set the Mach numbers and alpha range to sweep over.
-    # Re is computed from rho and v — do NOT use surface["root_chord"], it doesn't exist.
-    # Formula: re_val = rho * v_val / 1.81e-5  [units: 1/m]
+    # Derive speed and Reynolds number from Mach, altitude, and rho.
     # === AGENT EDITABLE SECTION START ===
-    rho_val = 1.225  # Air density [kg/m^3] — change for cruise altitude
+    altitude_val = 11000.0  # Altitude [m]
+    rho_val = 0.38  # Air density [kg/m^3]
+    speed_of_sound = _isa_speed_of_sound(altitude_val)
+    mu_val = _sutherland_mu(altitude_val)
     mach_range = np.arange(0.1, 0.8, 0.1)  # Mach numbers to sweep
     alpha_range = np.arange(-10, 16, 1)  # Angle of attack range [deg]
     # === AGENT EDITABLE SECTION END ===
@@ -208,9 +220,10 @@ if __name__ == "__main__":
     print("Running Aerodynamic Analysis Sweep...")
     for M in mach_range:
         for a in alpha_range:
-            v_val = M * 340.0
-            re_val = rho_val * v_val / 1.81e-5  # Re per unit length [1/m]
+            v_val = M * speed_of_sound
+            re_val = rho_val * v_val / mu_val  # Re per unit length [1/m]
             prob.set_val("Mach_number", M)
+            prob.set_val("speed_of_sound", speed_of_sound, units="m/s")
             prob.set_val("v", v_val, units="m/s")
             prob.set_val("re", re_val, units="1/m")
             prob.set_val("rho", rho_val, units="kg/m**3")
@@ -245,6 +258,16 @@ if __name__ == "__main__":
     csv_path = os.path.join(_OUT_DIR, "OptimizedWing_Polars.csv")
     df.to_csv(csv_path, index=False)
     print(f"Analysis complete. Saved data to {csv_path}")
+    print("\n--- Analysis Sweep Metrics ---")
+    for row in results:
+        print(
+            "AnalysisPoint: "
+            f"Mach={row['Mach']:.3f} "
+            f"Alpha={row['Alpha']:.3f} "
+            f"CL={row['CL']:.8f} "
+            f"CD={row['CD']:.8f} "
+            f"LD={row['L/D']:.8f}"
+        )
     print("\n--- Aerodynamic Bookkeeping ---")
     print("OAS reports CL = CL1 + CL0 and CD = CDi + CDv + CDw + CD0.")
     print(f"CL0={surface['CL0']:.6f}, CD0={surface['CD0']:.6f}")
@@ -320,10 +343,11 @@ if __name__ == "__main__":
     trim_rho = 1.225
     # === AGENT EDITABLE SECTION END ===
 
-    v_trim = trim_mach * 340.0
+    v_trim = trim_mach * speed_of_sound
     prob.set_val("Mach_number", trim_mach)
+    prob.set_val("speed_of_sound", speed_of_sound, units="m/s")
     prob.set_val("v", v_trim, units="m/s")
-    prob.set_val("re", trim_rho * v_trim / 1.81e-5, units="1/m")
+    prob.set_val("re", trim_rho * v_trim / mu_val, units="1/m")
     prob.set_val("rho", trim_rho, units="kg/m**3")
     prob.set_val("alpha", trim_alpha, units="deg")
     prob.run_model()

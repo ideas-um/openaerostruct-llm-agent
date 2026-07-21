@@ -28,7 +28,7 @@ _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 _BLUEPRINTS_DIR = os.path.join(_SRC_DIR, "blueprints")
 
 DEFAULT_MAX_RETRIES = 5
-NUM_REPS = 10
+NUM_REPS = 1
 MAX_BACKEND_RETRIES_PER_REP = int(os.getenv("MAX_BACKEND_RETRIES_PER_REP", "3"))
 
 # ---------------------------------------------------------------------------
@@ -129,6 +129,33 @@ def _safe_name(name: str) -> str:
 def _write_json(path: str, data: dict):
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
+
+
+def _compact_metrics_for_csv(metrics: dict) -> dict:
+    """Keep rep_results.csv readable; full metrics still go to final_result_metrics.json."""
+    if not metrics:
+        return {}
+
+    compact = dict(metrics)
+    analysis_csv = compact.get("analysis_csv")
+    if isinstance(analysis_csv, dict) and isinstance(analysis_csv.get("rows"), list):
+        rows = analysis_csv["rows"]
+        compact["analysis_csv"] = {
+            "path": analysis_csv.get("path"),
+            "columns": analysis_csv.get("columns"),
+            "row_count": len(rows),
+            "first": rows[0] if rows else None,
+            "last": rows[-1] if rows else None,
+        }
+
+    stdout = compact.get("stdout")
+    if isinstance(stdout, dict):
+        compact_stdout = dict(stdout)
+        compact_stdout.pop("analysis_points", None)
+        compact_stdout.pop("lines", None)
+        compact["stdout"] = compact_stdout
+
+    return compact
 
 
 def _write_code_diffs(
@@ -249,6 +276,17 @@ def _run_single_rep(
             code_path = os.path.join(attempt_dir, "code.py")
             with open(code_path, "w", encoding="utf-8") as fh:
                 fh.write(code)
+        elif event == "blueprint_audit":
+            attempt_dir = attempt_dirs.get(attempt, rep_dir)
+            report = data.get("report", {})
+            diff_text = data.get("diff", "") or report.get("diff", "")
+            report = {k: v for k, v in report.items() if k != "diff"}
+            report_path = os.path.join(attempt_dir, "blueprint_audit.json")
+            diff_path = os.path.join(attempt_dir, "blueprint_audit.diff")
+            _write_json(report_path, report)
+            if diff_text:
+                with open(diff_path, "w", encoding="utf-8") as fh:
+                    fh.write(diff_text)
         elif event in ("exec_success", "exec_error", "no_converge"):
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             _copy_artifacts(attempt_dir)
@@ -315,7 +353,7 @@ def run_benchmark(
     os.makedirs(_BENCH_OUT_DIR, exist_ok=True)
 
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(_BENCH_OUT_DIR, f"run_{run_ts}")
+    run_dir = os.path.join(_BENCH_OUT_DIR, f"run_{run_ts}_{_safe_name(model)}")
     os.makedirs(run_dir, exist_ok=True)
 
     rep_results_file = os.path.join(run_dir, "rep_results.csv")
@@ -398,12 +436,17 @@ def run_benchmark(
             selected_last = res["selected_blueprints"]
             total_runs += 1
             all_errors.extend(res["error_logs"])
-            metrics_json = json.dumps(
+            full_metrics_json = json.dumps(
                 res["result_metrics"], sort_keys=True, separators=(",", ":")
             )
+            csv_metrics_json = json.dumps(
+                _compact_metrics_for_csv(res["result_metrics"]),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
             metrics_hash = (
-                hashlib.sha1(metrics_json.encode("utf-8")).hexdigest()[:12]
-                if metrics_json != "{}"
+                hashlib.sha1(full_metrics_json.encode("utf-8")).hexdigest()[:12]
+                if full_metrics_json != "{}"
                 else ""
             )
             rep_metric_hashes.append(metrics_hash)
@@ -423,7 +466,7 @@ def run_benchmark(
                 "input_tokens": res["input_tokens"],
                 "output_tokens": res["output_tokens"],
                 "success": res["success"],
-                "result_metrics": metrics_json,
+                "result_metrics": csv_metrics_json,
                 "result_metrics_hash": metrics_hash,
                 "error_log": " ||| ".join(res["error_logs"]).replace("\n", " "),
             }

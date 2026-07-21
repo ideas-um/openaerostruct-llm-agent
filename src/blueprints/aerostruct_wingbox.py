@@ -35,6 +35,19 @@ matplotlib.rcParams.update(
     }
 )
 
+
+def _isa_temperature(altitude_m):
+    return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
+
+
+def _isa_speed_of_sound(altitude_m):
+    return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
+
+
+def _sutherland_mu(altitude_m):
+    T = _isa_temperature(altitude_m)
+    return 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)
+
 # =============================================================================
 # AIRFOIL COORDINATES (fixed — defines the wingbox cross-section shape)
 # =============================================================================
@@ -283,9 +296,7 @@ mesh_dict = {
 }
 # === AGENT EDITABLE SECTION END ===
 
-mesh, twist_cp = generate_mesh(
-    mesh_dict
-)  # MUST unpack both — mesh is ndarray, twist_cp is ndarray
+mesh, twist_cp = generate_mesh(mesh_dict)  # MUST unpack both — mesh is ndarray, twist_cp is ndarray
 
 # =============================================================================
 # 2. SURFACE DEFINITION
@@ -294,7 +305,7 @@ mesh, twist_cp = generate_mesh(
 # change: structural DVs (twist_cp, spar/skin thickness, t_over_c), material
 # properties, and Wf_reserve.
 #
-# Everything else (airfoil coords, n_point_masses, distributed_fuel_weight, etc.)
+# Everything else (airfoil coords, distributed_fuel_weight, etc.)
 # is set in the fixed block immediately after and must not be touched.
 #
 # FULL DV CATALOG for aerostructural wingbox FEM:
@@ -322,16 +333,14 @@ mesh, twist_cp = generate_mesh(
 surf_dict = {
     "name": "wing",
     "symmetry": True,
-    "S_ref_type": "projected",
+    "S_ref_type": "wetted",
     "mesh": mesh,
     "fem_model_type": "wingbox",
     # Structural DVs — number of CPs must match add_design_var() usage
-    "twist_cp": np.array([4.0, 5.0, 8.0, 9.0]),  # Spanwise twist [deg]
-    "spar_thickness_cp": np.array(
-        [0.004, 0.005, 0.008, 0.01]
-    ),  # Spar wall thickness [m]
-    "skin_thickness_cp": np.array([0.005, 0.01, 0.015, 0.025]),  # Skin thickness [m]
-    "t_over_c_cp": np.array([0.08, 0.08, 0.10, 0.08]),  # Thickness-to-chord ratio
+    "twist_cp": np.array([6.0, 7.0, 7.0, 7.0]),  # Spanwise twist [deg]
+    "spar_thickness_cp": np.array([0.004, 0.004, 0.004, 0.004]),  # Spar wall thickness [m]
+    "skin_thickness_cp": np.array([0.003, 0.006, 0.010, 0.012]),  # Skin thickness [m]
+    "t_over_c_cp": np.array([0.1, 0.1, 0.15, 0.15]),  # Thickness-to-chord ratio
     # Optional geometry DVs — uncomment to activate
     # After uncommenting here, also add the matching add_design_var() call in Section 4.
     # "chord_cp": np.ones(4),                                         # Chord scaling CPs
@@ -343,7 +352,7 @@ surf_dict = {
     "yield": 420.0e6,
     "safety_factor": 1.5,
     "mrho": 2.78e3,
-    "Wf_reserve": 15000.0,  # Reserve fuel [kg]
+    "Wf_reserve": 500.0,  # Reserve fuel [kg]
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -360,7 +369,7 @@ surf_dict.update(
         "original_wingbox_airfoil_t_over_c": 0.12,
         # Aerodynamic solver parameters — do not remove
         "CL0": 0.0,
-        "CD0": 0.0078,
+        "CD0": 0.0142,
         "with_viscous": True,
         "with_wave": True,
         "k_lam": 0.05,
@@ -373,12 +382,6 @@ surf_dict.update(
         # distributed_fuel_weight MUST stay True — the fuel loop connections below depend on it.
         # Setting False silently drops fuel weight relief and breaks the fuel_diff constraint.
         "distributed_fuel_weight": True,
-        # n_point_masses MUST stay 1. OAS always instantiates ComputePointMassLoads and
-        # n_point_masses=0 creates a size-0 nodal_weightings array that crashes prob.setup()
-        # with: ValueError: 'nodal_weightings' is an array of size 0.
-        # The dummy point mass below (10 kg, far from wing) satisfies the requirement with
-        # negligible effect on results.
-        "n_point_masses": 1,
         "fuel_density": 803.0,
     }
 )
@@ -388,63 +391,38 @@ surfaces = [surf_dict]
 # =============================================================================
 # 3. PROBLEM SETUP (AEROSTRUCTURAL WINGBOX — TWO POINT)
 # =============================================================================
-# Point 0 = cruise (Mach 0.85, rho 0.348), connected to "alpha"
+# Point 0 = cruise, connected to "alpha"
 # Point 1 = maneuver (load_factor 2.5), connected to "alpha_maneuver"
+# If the user requests a different maneuver g value, change ONLY index 1 of
+# load_factor; index 0 remains the cruise load factor.
 prob = om.Problem()
 
 # === AGENT EDITABLE SECTION START ===
-# Mission and flight condition parameters.
-# Point 0 = cruise, Point 1 = maneuver (sea level by convention).
-# Set altitudes and Mach numbers — v and speed_of_sound are derived from ISA.
-_altitudes = np.array([11000.0, 0.0])  # Altitude per point [m]
-_Mach_numbers = np.array([0.85, 0.64])  # Mach per point
-_rho_vals = np.array([0.348, 1.225])  # Air density per point [kg/m^3]
-
-
-def _isa_a(h):
-    T = max(288.15 - 0.0065 * h, 216.65)  # ISA temperature [K], clamped at tropopause
-    return np.sqrt(1.4 * 287.058 * T)  # Speed of sound [m/s]
-
-
-_a_vals = np.array([_isa_a(h) for h in _altitudes])  # Speed of sound per point [m/s]
+# Mission and flight condition parameters. Arrays are [cruise, maneuver].
+_altitudes = np.array([7300.0, 0.0])  # Altitude per point [m]
+_Mach_numbers = np.array([0.5, 0.3])  # Mach per point
+_rho_vals = np.array([0.569, 1.225])  # Air density per point [kg/m^3]
+_a_vals = _isa_speed_of_sound(_altitudes)  # Speed of sound per point [m/s]
 _v_vals = _Mach_numbers * _a_vals  # Velocity per point [m/s]
+_mu_vals = _sutherland_mu(_altitudes)  # Dynamic viscosity per point
 
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("Mach_number", val=_Mach_numbers)
-indep_var_comp.add_output("v", val=_v_vals, units="m/s")  # Derived from ISA
-indep_var_comp.add_output(
-    "re", val=_rho_vals * _v_vals / 1.81e-5, units="1/m"
-)  # Derived from ISA
+indep_var_comp.add_output("v", val=_v_vals, units="m/s")
+indep_var_comp.add_output("re", val=_rho_vals * _v_vals / _mu_vals, units="1/m")
 indep_var_comp.add_output("rho", val=_rho_vals, units="kg/m**3")
-indep_var_comp.add_output(
-    "speed_of_sound", val=_a_vals, units="m/s"
-)  # Derived from ISA
-indep_var_comp.add_output(
-    "CT", val=0.53 / 3600, units="1/s"
-)  # Thrust-specific fuel consumption
-indep_var_comp.add_output("R", val=14.307e6, units="m")  # Range [m]
-indep_var_comp.add_output(
-    "W0_without_point_masses", val=128000 + surf_dict["Wf_reserve"], units="kg"
-)
+indep_var_comp.add_output("speed_of_sound", val=_a_vals, units="m/s")
+indep_var_comp.add_output("CT", val=0.43 / 3600, units="1/s")
+indep_var_comp.add_output("R", val=2e6, units="m")  # Range [m]
+indep_var_comp.add_output("W0", val=25400 + surf_dict["Wf_reserve"], units="kg")
 indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.5]))  # [cruise, maneuver]
 indep_var_comp.add_output("alpha", val=0.0, units="deg")  # Cruise AoA
 indep_var_comp.add_output("alpha_maneuver", val=0.0, units="deg")  # Maneuver AoA
 indep_var_comp.add_output("empty_cg", val=np.zeros((3)), units="m")
-indep_var_comp.add_output("fuel_mass", val=10000.0, units="kg")
+indep_var_comp.add_output("fuel_mass", val=3000.0, units="kg")
 # === AGENT EDITABLE SECTION END ===
 
 prob.model.add_subsystem("prob_vars", indep_var_comp, promotes=["*"])
-
-# KEEP these point-mass outputs and connections unchanged — required by n_point_masses=1
-point_masses = np.array([[10.0e3]])
-point_mass_locations = np.array([[25, -10.0, 0.0]])
-indep_var_comp.add_output("point_masses", val=point_masses, units="kg")
-indep_var_comp.add_output("point_mass_locations", val=point_mass_locations, units="m")
-prob.model.add_subsystem(
-    "W0_comp",
-    om.ExecComp("W0 = W0_without_point_masses + 2 * sum(point_masses)", units="kg"),
-    promotes=["*"],
-)
 
 for surface in surfaces:
     name = surface["name"]
@@ -463,9 +441,7 @@ for i in range(2):
     prob.model.connect("CT", point_name + ".CT")
     prob.model.connect("R", point_name + ".R")
     prob.model.connect("W0", point_name + ".W0")
-    prob.model.connect(
-        "speed_of_sound", point_name + ".speed_of_sound", src_indices=[i]
-    )
+    prob.model.connect("speed_of_sound", point_name + ".speed_of_sound", src_indices=[i])
     prob.model.connect("empty_cg", point_name + ".empty_cg")
     prob.model.connect("load_factor", point_name + ".load_factor", src_indices=[i])
     prob.model.connect("fuel_mass", point_name + ".total_perf.L_equals_W.fuelburn")
@@ -474,31 +450,18 @@ for i in range(2):
     for surface in surfaces:
         name = surface["name"]
         if surf_dict["distributed_fuel_weight"]:
-            prob.model.connect(
-                "load_factor", point_name + ".coupled.load_factor", src_indices=[i]
-            )
+            prob.model.connect("load_factor", point_name + ".coupled.load_factor", src_indices=[i])
 
         com_name = point_name + "." + name + "_perf."
-        prob.model.connect(
-            name + ".local_stiff_transformed",
-            point_name + ".coupled." + name + ".local_stiff_transformed",
-        )
+        prob.model.connect(name + ".local_stiff_transformed", point_name + ".coupled." + name + ".local_stiff_transformed")
         prob.model.connect(name + ".nodes", point_name + ".coupled." + name + ".nodes")
         prob.model.connect(name + ".mesh", point_name + ".coupled." + name + ".mesh")
         if surf_dict["struct_weight_relief"]:
-            prob.model.connect(
-                name + ".element_mass",
-                point_name + ".coupled." + name + ".element_mass",
-            )
+            prob.model.connect(name + ".element_mass", point_name + ".coupled." + name + ".element_mass")
 
         prob.model.connect(name + ".nodes", com_name + "nodes")
-        prob.model.connect(
-            name + ".cg_location", point_name + ".total_perf." + name + "_cg_location"
-        )
-        prob.model.connect(
-            name + ".structural_mass",
-            point_name + ".total_perf." + name + "_structural_mass",
-        )
+        prob.model.connect(name + ".cg_location", point_name + ".total_perf." + name + "_cg_location")
+        prob.model.connect(name + ".structural_mass", point_name + ".total_perf." + name + "_structural_mass")
         prob.model.connect(name + ".Qz", com_name + "Qz")
         prob.model.connect(name + ".J", com_name + "J")
         prob.model.connect(name + ".A_enc", com_name + "A_enc")
@@ -509,12 +472,6 @@ for i in range(2):
         prob.model.connect(name + ".spar_thickness", com_name + "spar_thickness")
         prob.model.connect(name + ".t_over_c", com_name + "t_over_c")
 
-        coupled_name = point_name + ".coupled." + name
-        prob.model.connect("point_masses", coupled_name + ".point_masses")
-        prob.model.connect(
-            "point_mass_locations", coupled_name + ".point_mass_locations"
-        )
-
 prob.model.connect("alpha", "AS_point_0.alpha")
 prob.model.connect("alpha_maneuver", "AS_point_1.alpha")
 
@@ -523,19 +480,13 @@ prob.model.connect("wing.struct_setup.fuel_vols", "fuel_vol_delta.fuel_vols")
 prob.model.connect("AS_point_0.fuelburn", "fuel_vol_delta.fuelburn")
 
 if surf_dict["distributed_fuel_weight"]:
-    prob.model.connect(
-        "wing.struct_setup.fuel_vols", "AS_point_0.coupled.wing.struct_states.fuel_vols"
-    )
+    prob.model.connect("wing.struct_setup.fuel_vols", "AS_point_0.coupled.wing.struct_states.fuel_vols")
     prob.model.connect("fuel_mass", "AS_point_0.coupled.wing.struct_states.fuel_mass")
-    prob.model.connect(
-        "wing.struct_setup.fuel_vols", "AS_point_1.coupled.wing.struct_states.fuel_vols"
-    )
+    prob.model.connect("wing.struct_setup.fuel_vols", "AS_point_1.coupled.wing.struct_states.fuel_vols")
     prob.model.connect("fuel_mass", "AS_point_1.coupled.wing.struct_states.fuel_mass")
 
 comp = om.ExecComp("fuel_diff = (fuel_mass - fuelburn) / fuelburn", units="kg")
-prob.model.add_subsystem(
-    "fuel_diff", comp, promotes_inputs=["fuel_mass"], promotes_outputs=["fuel_diff"]
-)
+prob.model.add_subsystem("fuel_diff", comp, promotes_inputs=["fuel_mass"], promotes_outputs=["fuel_diff"])
 prob.model.connect("AS_point_0.fuelburn", "fuel_diff.fuelburn")
 
 # =============================================================================
@@ -543,7 +494,7 @@ prob.model.connect("AS_point_0.fuelburn", "fuel_diff.fuelburn")
 # =============================================================================
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["optimizer"] = "SLSQP"
-prob.driver.options["tol"] = 1e-2
+prob.driver.options["tol"] = 1e-4
 
 recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
@@ -576,9 +527,7 @@ prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 prob.model.add_design_var("wing.twist_cp", lower=-15.0, upper=15.0, scaler=0.1)
 prob.model.add_design_var("wing.spar_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
 prob.model.add_design_var("wing.skin_thickness_cp", lower=0.003, upper=0.1, scaler=1e2)
-prob.model.add_design_var(
-    "wing.geometry.t_over_c_cp", lower=0.07, upper=0.2, scaler=10.0
-)  # .geometry. required
+prob.model.add_design_var("wing.geometry.t_over_c_cp", lower=0.07, upper=0.2, scaler=10.0)  # .geometry. required
 prob.model.add_design_var("alpha_maneuver", lower=-15.0, upper=15.0)
 prob.model.add_design_var("fuel_mass", lower=0.0, upper=2e5, scaler=1e-5)
 # prob.model.add_design_var("alpha", lower=-15.0, upper=15.0)          # Cruise AoA — add if needed
@@ -595,11 +544,11 @@ prob.model.add_design_var("fuel_mass", lower=0.0, upper=2e5, scaler=1e-5)
 #   "fuel_vol_delta.fuel_vol_delta"     — fuel volume constraint: box must hold fuel, lower=0
 #   "fuel_diff"                         — fuel mass consistency: fuel_mass == fuelburn, equals=0
 
-prob.model.add_constraint("AS_point_0.CL", equals=0.5)
-prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)
+prob.model.add_constraint("AS_point_0.CL", equals=0.6)
+prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)  # Required maneuver trim constraint.
 prob.model.add_constraint("AS_point_1.wing_perf.failure", upper=0.0)
-prob.model.add_constraint("fuel_vol_delta.fuel_vol_delta", lower=0.0)
-prob.model.add_constraint("fuel_diff", equals=0.0)
+prob.model.add_constraint("fuel_vol_delta.fuel_vol_delta", lower=0.0)  # Required fuel-volume feasibility constraint.
+prob.model.add_constraint("fuel_diff", equals=0.0)  # Required fuel-mass consistency constraint.
 # === AGENT EDITABLE SECTION END ===
 
 # =============================================================================
