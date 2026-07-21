@@ -5,7 +5,7 @@ import logging
 import os
 import re
 
-from .config import get_llm_response, LLMBackendTransientError
+from .config import get_llm_response, LLMBackendTransientError, estimate_tokens
 
 logger = logging.getLogger("LLM_Backend")
 _LLM_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -196,6 +196,45 @@ _POINTWISE_REVIEW_ITEMS = {
     "call:add_output:load_factor",
 }
 
+_PRESERVE_WORD_RE = re.compile(
+    r"\b(preserve|preserved|keep|kept|unchanged|leave\s+unchanged|blueprint\s+value)\b",
+    re.IGNORECASE,
+)
+_REMOVAL_WORD_RE = re.compile(r"\b(remove|delete|drop|omit|disable)\b", re.IGNORECASE)
+_INITIAL_WORD_RE = re.compile(r"\b(initial|init|initially|guess)\b", re.IGNORECASE)
+_SCALING_WORD_RE = re.compile(r"\b(ref|scaler|scaling|scale|conditioning)\b", re.IGNORECASE)
+_MESH_RESOLUTION_RE = re.compile(
+    r"\b(num_y|num_x|mesh\s+resolution|panel\s+count|panels?|discretization|discretisation)\b",
+    re.IGNORECASE,
+)
+_T_OVER_C_ALIAS_RE = re.compile(
+    r"\b(t/c|t\s*over\s*c|thickness[-\s]*to[-\s]*chord|thickness\s+ratio)\b",
+    re.IGNORECASE,
+)
+_TWIST_REQUEST_RE = re.compile(r"\b(twist|twist_cp|washout|washin)\b", re.IGNORECASE)
+_POINT1_WORD_RE = re.compile(
+    r"\b(maneuver|manoeuvre|secondary|second\s+point|point\s*1|index\s*1)\b",
+    re.IGNORECASE,
+)
+_POINT1_FLIGHT_ITEMS = {
+    "assign:_Mach_numbers",
+    "assign:_rho_vals",
+    "assign:_altitudes",
+    "assign:_v_vals",
+    "assign:_a_vals",
+    "assign:_mu_vals",
+    "call:add_output:Mach_number",
+    "call:add_output:rho",
+}
+_INITIAL_DICT_KEYS = {
+    "twist_cp",
+    "thickness_cp",
+    "t_over_c_cp",
+    "spar_thickness_cp",
+    "skin_thickness_cp",
+    "radius_cp",
+}
+
 
 def _ast_code(node: ast.AST) -> str:
     try:
@@ -325,6 +364,18 @@ def _dict_key_name(node: ast.AST) -> str:
     return _ast_code(node)
 
 
+def _subscript_dict_item(node: ast.AST) -> tuple[str, str] | None:
+    if not isinstance(node, ast.Subscript):
+        return None
+    target = _target_name(node.value)
+    if target not in {"mesh_dict", "surf_dict", "surface"}:
+        return None
+    key = _dict_key_name(node.slice)
+    if key not in _WATCHED_DICT_KEYS:
+        return None
+    return target, key
+
+
 def _call_signature(call: ast.Call) -> tuple[str, str] | None:
     func_name = _call_attr_name(call.func)
     short_name = func_name.split(".")[-1]
@@ -346,10 +397,21 @@ def _collect_semantic_units(code: str) -> dict[str, str]:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            target_names = [_target_name(target) for target in node.targets]
+            target_names = [
+                _target_name(target)
+                for target in node.targets
+                if not isinstance(target, ast.Subscript)
+            ]
             for target in target_names:
                 if target in _WATCHED_ASSIGNMENTS:
                     units[f"assign:{target}"] = _ast_code(node)
+            for target_node in node.targets:
+                item = _subscript_dict_item(target_node)
+                if item:
+                    target, key = item
+                    units[f"dict:{target}.{key}"] = (
+                        f"{target}[{key!r}] = {_ast_code(node.value)}"
+                    )
             if isinstance(node.value, ast.Dict):
                 for target in target_names:
                     if target not in {"mesh_dict", "surf_dict", "surface"}:
@@ -584,10 +646,329 @@ def _unreviewed_semantic_changes(report: dict, changes: list[dict[str, str]]) ->
     return missing
 
 
-def _validate_audit_report(report: dict, diff_text: str, semantic_changes: list[dict[str, str]] | None = None) -> dict:
+def _prompt_preserves_point1(user_prompt: str) -> bool:
+    return bool(
+        _PRESERVE_WORD_RE.search(user_prompt)
+        and _POINT1_WORD_RE.search(user_prompt)
+    )
+
+
+def _prompt_requests_removal(user_prompt: str) -> bool:
+    return bool(_REMOVAL_WORD_RE.search(user_prompt))
+
+
+def _var_initial_requested(user_prompt: str, var_name: str) -> bool:
+    if var_name == "t_over_c_cp" and _T_OVER_C_ALIAS_RE.search(user_prompt):
+        return True
+    var = re.escape(var_name)
+    for match in re.finditer(rf"\b{var}\b", user_prompt, re.IGNORECASE):
+        before = user_prompt[max(0, match.start() - 60) : match.start()]
+        after = user_prompt[match.end() : match.end() + 140]
+        after = re.split(
+            r"(?=,\s*[A-Za-z_][A-Za-z0-9_]*\s*\()|[.;\n]",
+            after,
+            maxsplit=1,
+        )[0]
+        before = re.split(r"[,.;\n]", before)[-1]
+        chunk = f"{before}{var_name}{after}"
+        if _INITIAL_WORD_RE.search(chunk):
+            return True
+    return False
+
+
+def _changed_index(change: dict[str, str], index: int) -> dict[str, str] | None:
+    for element in change.get("element_changes", []) or []:
+        if int(element.get("index", -1)) == index and element.get("status") == "changed":
+            return element
+    return None
+
+
+def _dict_key_from_item(item: str) -> str:
+    return item.rsplit(".", 1)[-1] if "." in item else ""
+
+
+def _call_keyword_value(statement: str, keyword_name: str) -> str | None:
+    try:
+        tree = ast.parse(statement)
+    except SyntaxError:
+        return None
+    if not tree.body:
+        return None
+    node = tree.body[0]
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return None
+    for keyword in node.value.keywords:
+        if keyword.arg == keyword_name:
+            return _normalized_statement(keyword.value)
+    return None
+
+
+def _call_scaling_changed(change: dict[str, str]) -> bool:
+    old = change.get("blueprint", "")
+    new = change.get("generated", "")
+    for keyword in ("ref", "scaler"):
+        if _call_keyword_value(old, keyword) != _call_keyword_value(new, keyword):
+            return True
+    return False
+
+
+def _call_val_changed(change: dict[str, str]) -> bool:
+    return _call_keyword_value(change.get("blueprint", ""), "val") != _call_keyword_value(
+        change.get("generated", ""), "val"
+    )
+
+
+def _prompt_requests_scaling(user_prompt: str) -> bool:
+    return bool(_SCALING_WORD_RE.search(user_prompt))
+
+
+def _prompt_requests_mesh_resolution(user_prompt: str) -> bool:
+    return bool(_MESH_RESOLUTION_RE.search(user_prompt))
+
+
+def _prompt_requests_twist(user_prompt: str) -> bool:
+    return bool(_TWIST_REQUEST_RE.search(user_prompt))
+
+
+def _contract_violations(
+    user_prompt: str, semantic_changes: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    violations = []
+    preserve_point1 = _prompt_preserves_point1(user_prompt)
+    removal_requested = _prompt_requests_removal(user_prompt)
+    scaling_requested = _prompt_requests_scaling(user_prompt)
+    mesh_resolution_requested = _prompt_requests_mesh_resolution(user_prompt)
+    twist_requested = _prompt_requests_twist(user_prompt)
+
+    for change in semantic_changes:
+        item = change.get("item", "")
+
+        if preserve_point1 and item in _POINT1_FLIGHT_ITEMS:
+            element = _changed_index(change, 1)
+            if element:
+                violations.append(
+                    {
+                        "severity": "blocking",
+                        "changed_item": f"{item} index 1",
+                        "blueprint_value": element.get("blueprint", ""),
+                        "generated_value": element.get("generated", ""),
+                        "reason": (
+                            "The user explicitly asked to preserve the maneuver/secondary "
+                            "point, but index 1 changed."
+                        ),
+                        "repair_instruction": (
+                            "Restore index 1 to the blueprint value. Only update the "
+                            "explicitly requested point/index."
+                        ),
+                    }
+                )
+
+        if (
+            change.get("status") == "changed"
+            and item.startswith(
+                (
+                    "call:add_design_var:",
+                    "call:add_objective:",
+                    "call:add_constraint:",
+                )
+            )
+            and _call_scaling_changed(change)
+            and not scaling_requested
+        ):
+            violations.append(
+                {
+                    "severity": "blocking",
+                    "changed_item": item,
+                    "blueprint_value": change.get("blueprint", ""),
+                    "generated_value": change.get("generated", ""),
+                    "reason": "Existing optimizer scaling changed without an explicit scaling request.",
+                    "repair_instruction": (
+                        "Restore the blueprint ref/scaler value. Only change existing "
+                        "scaling for an explicit scaling request or a scaling-specific runtime repair."
+                    ),
+                }
+            )
+
+        if (
+            change.get("status") == "removed"
+            and item.startswith(("call:add_constraint:", "call:add_objective:"))
+            and not removal_requested
+        ):
+            violations.append(
+                {
+                    "severity": "blocking",
+                    "changed_item": item,
+                    "blueprint_value": change.get("blueprint", ""),
+                    "generated_value": "removed",
+                    "reason": "The blueprint setup was removed without an explicit user removal request.",
+                    "repair_instruction": "Restore the blueprint line unless the user explicitly asked to remove it.",
+                }
+            )
+
+        if item.startswith(("dict:surf_dict.", "dict:surface.")):
+            key = _dict_key_from_item(item)
+            if (
+                key == "twist_cp"
+                and change.get("status") in {"added", "changed"}
+                and not twist_requested
+            ):
+                violations.append(
+                    {
+                        "severity": "blocking",
+                        "changed_item": item,
+                        "blueprint_value": change.get("blueprint", ""),
+                        "generated_value": change.get("generated", ""),
+                        "reason": "The user did not request twist, so twist_cp should not be introduced or changed.",
+                        "repair_instruction": (
+                            "Remove twist_cp for rectangular analysis wings unless the "
+                            "user explicitly requests twist. Preserve CRM/uCRM twist only "
+                            "when it comes from the blueprint mesh generator."
+                        ),
+                    }
+                )
+            elif (
+                key in _INITIAL_DICT_KEYS
+                and change.get("status") != "removed"
+                and not _var_initial_requested(user_prompt, key)
+            ):
+                violations.append(
+                    {
+                        "severity": "blocking",
+                        "changed_item": item,
+                        "blueprint_value": change.get("blueprint", ""),
+                        "generated_value": change.get("generated", ""),
+                        "reason": (
+                            "Changing DV bounds/control-point count does not request "
+                            f"changing the initial {key} values."
+                        ),
+                        "repair_instruction": (
+                            f"Restore the blueprint {key} initial values unless the user "
+                            "explicitly gives new initial values or runtime repair requires it."
+                        ),
+                    }
+                )
+
+        if item.startswith("dict:mesh_dict."):
+            key = _dict_key_from_item(item)
+            if (
+                key in {"num_y", "num_x"}
+                and change.get("status") == "changed"
+                and not mesh_resolution_requested
+            ):
+                violations.append(
+                    {
+                        "severity": "blocking",
+                        "changed_item": item,
+                        "blueprint_value": change.get("blueprint", ""),
+                        "generated_value": change.get("generated", ""),
+                        "reason": (
+                            f"The user did not request changing mesh resolution key {key}."
+                        ),
+                        "repair_instruction": (
+                            f"Restore the blueprint {key} value unless the user explicitly "
+                            "asks for mesh resolution, panel count, or discretization changes."
+                        ),
+                    }
+                )
+
+    return violations
+
+
+def _invalid_contract_report(
+    report: dict, violations: list[dict[str, str]], reason: str
+) -> dict:
+    fixed = dict(report)
+    fixed["passed"] = False
+    fixed["violations"] = violations
+    fixed["wrapper_contract_violation"] = True
+    fixed["invalid_audit_reasons"] = [reason]
+    return fixed
+
+
+def _per_change_pass_violations(report: dict) -> list[dict[str, str]]:
+    violations = []
+    for idx, reviewed in enumerate(report.get("reviewed_changes") or [], start=1):
+        if "passed" not in reviewed:
+            reviewed["passed"] = True
+            report.setdefault("warnings", []).append(
+                "Auditor omitted per-change passed on reviewed_changes; "
+                f"wrapper inferred passed=true for reviewed_change {idx}."
+            )
+        if reviewed.get("passed") is False:
+            violations.append(
+                {
+                    "severity": "blocking",
+                    "changed_item": reviewed.get("changed_item", f"reviewed_change {idx}"),
+                    "blueprint_value": reviewed.get("blueprint_value", ""),
+                    "generated_value": reviewed.get("generated_value", ""),
+                    "reason": reviewed.get("reason", "This per-change audit check failed."),
+                    "repair_instruction": reviewed.get(
+                        "repair_instruction",
+                        "Repair this changed item or restore the blueprint value.",
+                    ),
+                }
+            )
+
+    for idx, violation in enumerate(report.get("violations") or [], start=1):
+        if "passed" not in violation:
+            violation["passed"] = False
+        elif violation.get("passed") is not False:
+            violations.append(
+                {
+                    "severity": "blocking",
+                    "changed_item": violation.get("changed_item", f"violation {idx}"),
+                    "blueprint_value": violation.get("blueprint_value", ""),
+                    "generated_value": violation.get("generated_value", ""),
+                    "reason": "A blocking violation cannot have passed=true.",
+                    "repair_instruction": "Return passed=false for blocking violations.",
+                }
+            )
+    return violations
+
+
+def _invalid_audit_failed_report(report: dict) -> dict:
+    fixed = dict(report)
+    fixed["passed"] = False
+    fixed["audit_infrastructure_error"] = True
+    fixed["violations"] = [
+        {
+            "passed": False,
+            "severity": "blocking",
+            "changed_item": "blueprint auditor",
+            "blueprint_value": "valid blueprint consistency audit",
+            "generated_value": "invalid or contradictory audit response",
+            "reason": "The auditor returned an invalid audit after retry, so the code was not safely reviewed.",
+            "repair_instruction": "Do not ask the coder to repair this. Retry or inspect the auditor prompt/schema.",
+        }
+    ]
+    fixed["feedback_for_coder"] = ""
+    return fixed
+
+
+def _validate_audit_report(
+    report: dict,
+    diff_text: str,
+    semantic_changes: list[dict[str, str]] | None = None,
+    user_prompt: str = "",
+) -> dict:
     """Reject impossible auditor failures without judging engineering intent."""
     semantic_changes = semantic_changes or []
+    per_change_violations = _per_change_pass_violations(report)
+    if per_change_violations:
+        return _invalid_contract_report(
+            report,
+            per_change_violations,
+            "audit omitted or contradicted required per-change passed=true/false decisions",
+        )
+
     if report.get("passed", True):
+        contract_violations = _contract_violations(user_prompt, semantic_changes)
+        if contract_violations:
+            return _invalid_contract_report(
+                report,
+                contract_violations,
+                "passed=true contradicted explicit preserve/removal/initial-value/scaling contract",
+            )
         missing = _unreviewed_semantic_changes(report, semantic_changes)
         if not missing:
             return report
@@ -614,6 +995,7 @@ def _validate_audit_report(report: dict, diff_text: str, semantic_changes: list[
         fixed["invalid_audit_reasons"] = [
             "passed=true without reviewing every high-risk semantic statement change"
         ]
+        fixed["unreviewed_semantic_changes"] = missing[:20]
         return fixed
 
     missing = _unreviewed_semantic_changes(report, semantic_changes)
@@ -692,17 +1074,6 @@ def _format_repair_feedback(report: dict) -> str:
     return "\n".join(lines)
 
 
-def _approx_tokens(text: str) -> int:
-    if not text:
-        return 0
-    try:
-        import tiktoken
-
-        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
-    except ImportError:
-        return len(str(text)) // 4
-
-
 def _parse_audit_response(response: str) -> dict:
     match = re.search(r"<audit>(.*?)</audit>", response, re.DOTALL | re.IGNORECASE)
     if match:
@@ -723,9 +1094,49 @@ def _parse_audit_response(response: str) -> dict:
     data["passed"] = bool(passed)
     data["violations"] = data.get("violations") or []
     data["reviewed_changes"] = data.get("reviewed_changes") or []
+    for section in ("violations", "reviewed_changes"):
+        for item in data[section]:
+            if isinstance(item.get("passed"), str):
+                item["passed"] = item["passed"].strip().lower() == "true"
     data["warnings"] = data.get("warnings") or []
     data["feedback_for_coder"] = data.get("feedback_for_coder", "")
     return data
+
+
+def _audit_retry_message(user_message: str, report: dict) -> str:
+    return (
+        f"{user_message}\n\n"
+        "### PREVIOUS AUDIT WAS INVALID ###\n"
+        "Re-audit the same generated code. Do not request code changes just because "
+        "your previous audit omitted review details. Return a per-change "
+        "passed=true/false decision for every reviewed change. The top-level "
+        "passed value must be true only if every per-change decision passed. "
+        "For pointwise arrays, name each changed index/point. For protected "
+        "dict keys, name each exact dict item.\n\n"
+        f"Invalid audit reasons:\n{json.dumps(report.get('invalid_audit_reasons', []), indent=2)}\n\n"
+        f"Unreviewed semantic changes, if any:\n"
+        f"{json.dumps(report.get('unreviewed_semantic_changes', []), indent=2)}\n\n"
+        "Return the corrected audit object."
+    )
+
+
+def _malformed_audit_retry_message(user_message: str, error: Exception) -> str:
+    return (
+        f"{user_message}\n\n"
+        "### PREVIOUS AUDIT RESPONSE WAS MALFORMED ###\n"
+        f"The previous auditor response could not be parsed as the required JSON object: {error}\n\n"
+        "Return exactly one <audit> XML section containing valid JSON. Do not include "
+        "Markdown fences, comments, trailing commas, or prose outside the XML tags."
+    )
+
+
+def _attach_audit_artifacts(
+    report: dict, full_diff: str, semantic_changes: list[dict[str, str]]
+) -> dict:
+    report["diff"] = full_diff
+    report["semantic_changes"] = semantic_changes
+    report["high_risk_diff_lines"] = _high_risk_diff_lines(full_diff)
+    return report
 
 
 def _load_blueprint(blueprint: str) -> tuple[str, str]:
@@ -736,11 +1147,19 @@ def _load_blueprint(blueprint: str) -> tuple[str, str]:
         return path, fh.read()
 
 
+def _without_comment_only_lines(code: str) -> str:
+    return "\n".join(
+        line.rstrip()
+        for line in code.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
+
+
 def _make_diff(blueprint: str, blueprint_code: str, generated_code: str) -> str:
     return "\n".join(
         difflib.unified_diff(
-            blueprint_code.splitlines(),
-            generated_code.splitlines(),
+            _without_comment_only_lines(blueprint_code).splitlines(),
+            _without_comment_only_lines(generated_code).splitlines(),
             fromfile=f"blueprints/{blueprint}",
             tofile="generated/code.py",
             lineterm="",
@@ -785,28 +1204,101 @@ def audit_blueprint_consistency(
         f"### UNIFIED DIFF ###\n```diff\n{full_diff}\n```\n\n"
         "Return the audit object."
     )
-    in_t = _approx_tokens(system_prompt + "\n" + user_message)
+    in_t = estimate_tokens(system_prompt + "\n" + user_message)
 
     try:
         response = get_llm_response(
             user_message, model_name, system_prompt, provider=provider
         )
-        report = _parse_audit_response(response)
-        report = _validate_audit_report(report, full_diff, semantic_changes)
+        out_t = estimate_tokens(response)
+        retry_used = False
+
+        try:
+            report = _parse_audit_response(response)
+        except Exception as parse_exc:
+            logger.warning("Blueprint auditor returned malformed output; retrying auditor once.")
+            retry_used = True
+            retry_message = _malformed_audit_retry_message(user_message, parse_exc)
+            retry_response = get_llm_response(
+                retry_message, model_name, system_prompt, provider=provider
+            )
+            in_t += estimate_tokens(system_prompt + "\n" + retry_message)
+            out_t += estimate_tokens(retry_response)
+            try:
+                report = _parse_audit_response(retry_response)
+                report["auditor_retry"] = True
+            except Exception as retry_parse_exc:
+                report = _invalid_audit_failed_report(
+                    {
+                        "invalid_audit_reasons": [
+                            f"auditor response malformed after retry: {retry_parse_exc}"
+                        ],
+                        "auditor_retry": True,
+                    }
+                )
+
+        report = _validate_audit_report(
+            report, full_diff, semantic_changes, user_prompt=user_prompt
+        )
+        if report.get("invalid_audit"):
+            if retry_used:
+                report = _invalid_audit_failed_report(report)
+                report["auditor_retry"] = True
+            else:
+                retry_used = True
+                logger.warning("Blueprint auditor returned invalid audit; retrying auditor once.")
+                retry_message = _audit_retry_message(user_message, report)
+                retry_response = get_llm_response(
+                    retry_message, model_name, system_prompt, provider=provider
+                )
+                in_t += estimate_tokens(system_prompt + "\n" + retry_message)
+                out_t += estimate_tokens(retry_response)
+                try:
+                    retry_report = _parse_audit_response(retry_response)
+                    report = _validate_audit_report(
+                        retry_report, full_diff, semantic_changes, user_prompt=user_prompt
+                    )
+                    report["auditor_retry"] = True
+                except Exception as retry_exc:
+                    report = _invalid_audit_failed_report(
+                        {
+                            "invalid_audit_reasons": [
+                                f"auditor retry could not be parsed: {retry_exc}"
+                            ],
+                            "auditor_retry": True,
+                        }
+                    )
+                if report.get("invalid_audit"):
+                    report = _invalid_audit_failed_report(report)
+                    report["auditor_retry"] = True
         if not report.get("passed", True):
             report["feedback_for_coder"] = _format_repair_feedback(report)
-        report["diff"] = full_diff
-        report["semantic_changes"] = semantic_changes
-        report["high_risk_diff_lines"] = _high_risk_diff_lines(full_diff)
-        return report, in_t, _approx_tokens(response)
+        report = _attach_audit_artifacts(report, full_diff, semantic_changes)
+        return report, in_t, out_t
     except LLMBackendTransientError:
         raise
     except Exception as exc:
-        logger.error(f"Blueprint auditor failed open: {exc}")
-        return {
-            "passed": True,
-            "violations": [],
+        logger.error(f"Blueprint auditor failed closed: {exc}")
+        report = {
+            "passed": False,
+            "audit_infrastructure_error": True,
+            "invalid_audit_reasons": [str(exc)],
+            "violations": [
+                {
+                    "passed": False,
+                    "severity": "blocking",
+                    "changed_item": "blueprint audit",
+                    "blueprint_value": "valid blueprint consistency audit",
+                    "generated_value": f"audit failure: {exc}",
+                    "reason": "The generated code could not be safely audited.",
+                    "repair_instruction": "Retry generation and audit before execution.",
+                }
+            ],
             "feedback_for_coder": "",
-            "warning": f"Blueprint auditor failed open: {exc}",
+            "warning": f"Blueprint auditor failed closed: {exc}",
+            "diff": full_diff,
+        }
+        return {
+            **report,
             "diff": full_diff,
         }, in_t, 0

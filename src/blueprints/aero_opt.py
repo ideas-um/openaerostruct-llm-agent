@@ -34,7 +34,20 @@ matplotlib.rcParams.update(
 
 
 def _isa_temperature(altitude_m):
-    return max(288.15 - 0.0065 * altitude_m, 216.65)
+    return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
+
+
+def _isa_pressure(altitude_m):
+    altitude_m = np.asarray(altitude_m)
+    T = _isa_temperature(altitude_m)
+    p_trop = 101325.0 * (T / 288.15) ** 5.255877
+    p_11 = 101325.0 * (216.65 / 288.15) ** 5.255877
+    p_strat = p_11 * np.exp(-9.80665 * (altitude_m - 11000.0) / (287.058 * 216.65))
+    return np.where(altitude_m <= 11000.0, p_trop, p_strat)
+
+
+def _isa_density(altitude_m):
+    return _isa_pressure(altitude_m) / (287.058 * _isa_temperature(altitude_m))
 
 
 def _isa_speed_of_sound(altitude_m):
@@ -140,11 +153,13 @@ surface = {
 # =============================================================================
 prob = om.Problem()
 
-# Flight condition. Derive speed and Reynolds number from Mach, altitude, and rho.
+# Flight condition. If the user gives rho, use it directly. If altitude is
+# given and rho is omitted, set rho = _isa_density(altitude).
+# Derive speed and Reynolds number from Mach, altitude, and rho.
 # === AGENT EDITABLE SECTION START ===
 altitude = 11000.0  # Altitude [m]
 Mach_number = 0.84
-rho = 0.38
+rho = 0.38  # Explicit density [kg/m^3]; use _isa_density(altitude) only if rho is omitted.
 speed_of_sound = _isa_speed_of_sound(altitude)
 v = Mach_number * speed_of_sound
 re = rho * v / _sutherland_mu(altitude)

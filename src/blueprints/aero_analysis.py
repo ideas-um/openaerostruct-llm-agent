@@ -62,7 +62,20 @@ def plot_mesh(mesh, filename=None):
 
 
 def _isa_temperature(altitude_m):
-    return max(288.15 - 0.0065 * altitude_m, 216.65)
+    return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
+
+
+def _isa_pressure(altitude_m):
+    altitude_m = np.asarray(altitude_m)
+    T = _isa_temperature(altitude_m)
+    p_trop = 101325.0 * (T / 288.15) ** 5.255877
+    p_11 = 101325.0 * (216.65 / 288.15) ** 5.255877
+    p_strat = p_11 * np.exp(-9.80665 * (altitude_m - 11000.0) / (287.058 * 216.65))
+    return np.where(altitude_m <= 11000.0, p_trop, p_strat)
+
+
+def _isa_density(altitude_m):
+    return _isa_pressure(altitude_m) / (287.058 * _isa_temperature(altitude_m))
 
 
 def _isa_speed_of_sound(altitude_m):
@@ -136,8 +149,6 @@ if __name__ == "__main__":
         "symmetry": True,
         "S_ref_type": "wetted",
         "fem_model_type": "tube",
-        # --- Active geometry (modify values to test different shapes) ---
-        "twist_cp": _crm_twist_cp if _crm_twist_cp is not None else np.zeros(5),
         "t_over_c_cp": np.array([0.15]),  # Thickness-to-chord ratio
         # --- Optional geometry modifiers — uncomment to activate ---
         # "chord_cp": np.ones(5),                 # Chord B-spline CPs (1.0 = no scaling)
@@ -155,6 +166,8 @@ if __name__ == "__main__":
         "with_viscous": True,  # Include viscous drag in the analysis
         "with_wave": False,  # Include wave drag (transonic/supersonic only)
     }
+    if _crm_twist_cp is not None:
+        surface["twist_cp"] = _crm_twist_cp
     # === AGENT EDITABLE SECTION END ===
 
     # =============================================================================
@@ -171,7 +184,7 @@ if __name__ == "__main__":
     indep_var_comp.add_output("Mach_number", val=0.3)  # Overridden in sweep
     indep_var_comp.add_output("speed_of_sound", val=_isa_speed_of_sound(placeholder_altitude), units="m/s")
     indep_var_comp.add_output("re", val=1e6, units="1/m")  # Overridden in sweep
-    indep_var_comp.add_output("rho", val=1.225, units="kg/m**3")  # Set to match flight condition
+    indep_var_comp.add_output("rho", val=1.225, units="kg/m**3")  # Explicit density; use _isa_density(altitude) only if rho is omitted.
     indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
     # === AGENT EDITABLE SECTION END ===
 
@@ -206,10 +219,12 @@ if __name__ == "__main__":
     # 5. ANALYSIS SWEEP
     # =============================================================================
     # Set the Mach numbers and alpha range to sweep over.
+    # If the user gives rho, use it directly. If altitude is given and rho is
+    # omitted, set rho_val = _isa_density(altitude_val).
     # Derive speed and Reynolds number from Mach, altitude, and rho.
     # === AGENT EDITABLE SECTION START ===
     altitude_val = 11000.0  # Altitude [m]
-    rho_val = 0.38  # Air density [kg/m^3]
+    rho_val = 0.38  # Explicit density [kg/m^3]; use _isa_density(altitude_val) only if rho is omitted.
     speed_of_sound = _isa_speed_of_sound(altitude_val)
     mu_val = _sutherland_mu(altitude_val)
     mach_range = np.arange(0.1, 0.8, 0.1)  # Mach numbers to sweep

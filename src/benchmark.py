@@ -28,7 +28,7 @@ _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 _BLUEPRINTS_DIR = os.path.join(_SRC_DIR, "blueprints")
 
 DEFAULT_MAX_RETRIES = 5
-NUM_REPS = 1
+NUM_REPS = 10
 MAX_BACKEND_RETRIES_PER_REP = int(os.getenv("MAX_BACKEND_RETRIES_PER_REP", "3"))
 
 # ---------------------------------------------------------------------------
@@ -110,16 +110,24 @@ def _copy_artifacts(attempt_dir: str):
     artifacts_dst = os.path.join(attempt_dir, "artifacts")
     os.makedirs(artifacts_dst, exist_ok=True)
     if os.path.exists(_OAS_OUT_DIR):
-        for fname in os.listdir(_OAS_OUT_DIR):
-            src = os.path.join(_OAS_OUT_DIR, fname)
-            dst = os.path.join(artifacts_dst, fname)
-            try:
-                if os.path.isfile(src):
+        keep_ext = {".db", ".csv", ".png", ".jpg", ".jpeg", ".pdf"}
+        for root, _, files in os.walk(_OAS_OUT_DIR):
+            rel_root = os.path.relpath(root, _OAS_OUT_DIR)
+            for fname in files:
+                if os.path.splitext(fname)[1].lower() not in keep_ext:
+                    continue
+                src = os.path.join(root, fname)
+                dst_dir = (
+                    artifacts_dst
+                    if rel_root == "."
+                    else os.path.join(artifacts_dst, rel_root)
+                )
+                dst = os.path.join(dst_dir, fname)
+                try:
+                    os.makedirs(dst_dir, exist_ok=True)
                     shutil.copy2(src, dst)
-                elif os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
 
 def _safe_name(name: str) -> str:
@@ -156,6 +164,40 @@ def _compact_metrics_for_csv(metrics: dict) -> dict:
         compact["stdout"] = compact_stdout
 
     return compact
+
+
+def _round_metric_number(value: float):
+    value = float(value)
+    if abs(value) < 1e-4:
+        return 0.0
+    return round(value, 6)
+
+
+def _normalize_metric_value(value):
+    if isinstance(value, dict):
+        return {str(k): _normalize_metric_value(v) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [_normalize_metric_value(v) for v in value]
+    if isinstance(value, tuple):
+        return [_normalize_metric_value(v) for v in value]
+    if isinstance(value, float):
+        return _round_metric_number(value)
+    if isinstance(value, int):
+        return value
+    return value
+
+
+def _metrics_for_hash(metrics: dict) -> dict:
+    """Hash stable numeric results only; stdout/reporting differences are logged separately."""
+    if not metrics:
+        return {}
+    selected = {}
+    if "db" in metrics:
+        selected["db"] = _normalize_metric_value(metrics["db"])
+    if "analysis_csv" in metrics:
+        rows = metrics.get("analysis_csv", {}).get("rows", [])
+        selected["analysis_csv"] = _normalize_metric_value({"rows": rows})
+    return selected
 
 
 def _write_code_diffs(
@@ -348,6 +390,8 @@ def run_benchmark(
     model="gemini-flash-lite-latest",
     provider="Gemini API",
     max_retries=DEFAULT_MAX_RETRIES,
+    num_reps=NUM_REPS,
+    case_ids=None,
 ):
     os.makedirs(_OAS_OUT_DIR, exist_ok=True)
     os.makedirs(_BENCH_OUT_DIR, exist_ok=True)
@@ -366,7 +410,8 @@ def run_benchmark(
                 "model": model,
                 "provider": provider,
                 "max_retry_count": max_retries,
-                "num_reps": NUM_REPS,
+                "num_reps": num_reps,
+                "case_ids": sorted(case_ids) if case_ids else None,
                 "timestamp": run_ts,
             },
             fh,
@@ -380,8 +425,10 @@ def run_benchmark(
             queries.append(row)
     if limit:
         queries = queries[:limit]
+    if case_ids:
+        queries = [q for q in queries if q["id"] in case_ids]
 
-    print(f"--- Starting Benchmark ({len(queries)} cases × {NUM_REPS} reps) ---")
+    print(f"--- Starting Benchmark ({len(queries)} cases × {num_reps} reps) ---")
 
     total_success, total_runs, rep_row_idx, sum_row_idx = 0, 0, 0, 0
 
@@ -400,8 +447,8 @@ def run_benchmark(
 
         rep = 1
         backend_retries = 0
-        while rep <= NUM_REPS:
-            print(f"  [Rep {rep}/{NUM_REPS}]", end=" ", flush=True)
+        while rep <= num_reps:
+            print(f"  [Rep {rep}/{num_reps}]", end=" ", flush=True)
             rep_dir = os.path.join(case_dir, f"rep_{rep}")
             start_time = time.time()
             try:
@@ -436,8 +483,10 @@ def run_benchmark(
             selected_last = res["selected_blueprints"]
             total_runs += 1
             all_errors.extend(res["error_logs"])
-            full_metrics_json = json.dumps(
-                res["result_metrics"], sort_keys=True, separators=(",", ":")
+            hash_metrics_json = json.dumps(
+                _metrics_for_hash(res["result_metrics"]),
+                sort_keys=True,
+                separators=(",", ":"),
             )
             csv_metrics_json = json.dumps(
                 _compact_metrics_for_csv(res["result_metrics"]),
@@ -445,8 +494,8 @@ def run_benchmark(
                 separators=(",", ":"),
             )
             metrics_hash = (
-                hashlib.sha1(full_metrics_json.encode("utf-8")).hexdigest()[:12]
-                if full_metrics_json != "{}"
+                hashlib.sha1(hash_metrics_json.encode("utf-8")).hexdigest()[:12]
+                if hash_metrics_json != "{}"
                 else ""
             )
             rep_metric_hashes.append(metrics_hash)
@@ -532,6 +581,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, help="Limit test cases")
+    parser.add_argument("--num-reps", type=int, default=NUM_REPS, help="Number of reps per selected case")
+    parser.add_argument("--case-ids", type=str, help="Comma-separated benchmark case ids to run, e.g. 4,5")
     parser.add_argument("--model", type=str, default="gemini-flash-lite-latest")
     parser.add_argument("--provider", type=str, default="Gemini API")
     parser.add_argument(
@@ -541,9 +592,14 @@ if __name__ == "__main__":
         help="Maximum number of coder retry attempts per benchmark case",
     )
     args = parser.parse_args()
+    case_ids = None
+    if args.case_ids:
+        case_ids = {item.strip() for item in args.case_ids.split(",") if item.strip()}
     run_benchmark(
         limit=args.limit,
         model=args.model,
         provider=args.provider,
         max_retries=args.max_retries,
+        num_reps=args.num_reps,
+        case_ids=case_ids,
     )

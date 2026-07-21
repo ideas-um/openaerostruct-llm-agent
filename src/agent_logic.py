@@ -19,17 +19,6 @@ _GEN_RUN_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 _GEN_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
 
 
-def _approx_tokens(text: str) -> int:
-    if not text:
-        return 0
-    try:
-        import tiktoken
-
-        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
-    except ImportError:
-        return len(str(text)) // 4
-
-
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
 _INJECTION_PATTERN = re.compile(
     r"(?i)(ignore\s+(previous|all|prior)\s+(instructions?|prompts?|context)|act\s+as\s+(a|an)\s+|forget\s+(everything|all)|you\s+are\s+now\s|disregard\s+(all|previous|prior)|new\s+instruction|\bsystem\s*:)"
@@ -285,7 +274,7 @@ def _get_relaxation_suggestion(
     return suggest_relaxation(user_prompt, error_logs, model_name, provider)
 
 
-def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
+def _build_feedback(error_history: list[str]) -> str:
     parts = []
 
     if error_history:
@@ -348,7 +337,7 @@ def run_agent(
 
     while attempt < max_retries:
         emit("attempt_start", {"max_retries": max_retries})
-        feedback = _build_feedback(error_history, prior_code)
+        feedback = _build_feedback(error_history)
 
         try:
             if stream and callback:
@@ -414,6 +403,23 @@ def run_agent(
         audit_warning = audit_report.get("warning")
         if audit_warning:
             result.error_logs.append(f"[attempt {attempt + 1}] {audit_warning}")
+        if (
+            not audit_report.get("passed", True)
+            and audit_report.get("audit_infrastructure_error")
+        ):
+            reasons = audit_report.get("invalid_audit_reasons") or [
+                "auditor returned an invalid or contradictory response"
+            ]
+            err = (
+                "Blueprint auditor error:\n"
+                "The generated code was not executed because the auditor could not "
+                "produce a valid review. This is an audit/schema failure, not coder "
+                f"repair feedback.\nReasons: {sanitize_feedback(str(reasons), 1000)}"
+            )
+            result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+            result.attempts = attempt + 1
+            emit("done", {"success": False, "attempts": result.attempts})
+            return result
         if not audit_report.get("passed", True):
             feedback = audit_report.get("feedback_for_coder") or (
                 "Restore unrequested blueprint assumptions. Violations: "

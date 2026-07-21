@@ -66,6 +66,17 @@ class LLMBackendTransientError(RuntimeError):
     """Backend transport/rate-limit failure that should not count as model quality."""
 
 
+def estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    try:
+        import tiktoken
+
+        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
+    except ImportError:
+        return len(str(text)) // 4
+
+
 def is_gemini_transient_error(exc: Exception) -> bool:
     """Return True if the exception looks like a Gemini rate-limit / overload error."""
     msg = f"{type(exc).__name__} {exc}".lower()

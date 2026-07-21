@@ -44,6 +44,19 @@ def _isa_temperature(altitude_m):
     return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
 
 
+def _isa_pressure(altitude_m):
+    altitude_m = np.asarray(altitude_m)
+    T = _isa_temperature(altitude_m)
+    p_trop = 101325.0 * (T / 288.15) ** 5.255877
+    p_11 = 101325.0 * (216.65 / 288.15) ** 5.255877
+    p_strat = p_11 * np.exp(-9.80665 * (altitude_m - 11000.0) / (287.058 * 216.65))
+    return np.where(altitude_m <= 11000.0, p_trop, p_strat)
+
+
+def _isa_density(altitude_m):
+    return _isa_pressure(altitude_m) / (287.058 * _isa_temperature(altitude_m))
+
+
 def _isa_speed_of_sound(altitude_m):
     return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
 
@@ -144,7 +157,10 @@ n_points = 2
 #   e.g. "wing_geom.twist_cp", "wing_geom.taper", "wing_geom.xshear_cp".
 #   Using "wing.<var>" will fail — that path does not exist in this blueprint.
 #
-# Flight-condition arrays are indexed by point. Keep altitude, Mach, rho, v,
+# Flight-condition arrays are indexed by point. If the user gives rho, use it
+# directly. If altitude is given and rho is omitted, set _rho_vals =
+# _isa_density(_altitudes).
+# Keep altitude, Mach, rho, v,
 # Reynolds number, and CL targets aligned by index.
 # alpha is a vector of length n_points — one AoA value per flight condition.
 # === AGENT EDITABLE SECTION START ===
@@ -152,7 +168,7 @@ prob = om.Problem()
 
 _altitudes = np.ones(n_points) * 11000.0  # Altitude per point [m]
 _Mach_numbers = np.ones(n_points) * 0.84  # Mach per point
-_rho_vals = np.ones(n_points) * 0.38  # Air density per point [kg/m^3]
+_rho_vals = np.ones(n_points) * 0.38  # Explicit density per point [kg/m^3]; use _isa_density(_altitudes) only if rho is omitted.
 _a_vals = _isa_speed_of_sound(_altitudes)  # Speed of sound per point [m/s]
 _v_vals = _Mach_numbers * _a_vals  # Velocity per point [m/s]
 _mu_vals = _sutherland_mu(_altitudes)  # Dynamic viscosity per point [kg/(m*s)]

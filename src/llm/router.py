@@ -6,6 +6,7 @@ import re
 from .config import (
     get_llm_response,
     get_llm_client,
+    estimate_tokens,
     log_token_usage,
     LLMBackendTransientError,
     is_gemini_transient_error,
@@ -32,17 +33,6 @@ VALID_BLUEPRINTS: frozenset = frozenset(
 )
 
 
-def _approx_tokens(text: str) -> int:
-    if not text:
-        return 0
-    try:
-        import tiktoken
-
-        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
-    except ImportError:
-        return len(str(text)) // 4
-
-
 def _load_system_prompt() -> str:
     for path in (_ROUTER_PROMPT_PATH, _LEGACY_SKILLS_PATH):
         if not os.path.exists(path):
@@ -54,6 +44,23 @@ def _load_system_prompt() -> str:
 
 class RouterContractError(ValueError):
     pass
+
+
+_ANALYSIS_INTENT_RE = re.compile(
+    r"\b(analy[sz]e|analysis|evaluate|run_model|sweep|polar|plot|cl\s+vs|cd\s+vs|l/d\s+vs|drag\s+polar)\b",
+    re.IGNORECASE,
+)
+_OPTIMIZATION_INTENT_RE = re.compile(
+    r"\b(optimi[sz]e|minimi[sz]e|maximi[sz]e|objective|design\s+variable|"
+    r"\bDV\b|constraint|run_driver|target\s+CL|weighted\s+objective)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_analysis_without_optimization(user_prompt: str) -> bool:
+    return bool(_ANALYSIS_INTENT_RE.search(user_prompt)) and not bool(
+        _OPTIMIZATION_INTENT_RE.search(user_prompt)
+    )
 
 
 def _parse_routing_response(response: str) -> dict:
@@ -113,12 +120,26 @@ def _parse_routing_response(response: str) -> dict:
         }
 
 
-def _router_repair_prompt(user_prompt: str, previous_response: str) -> str:
+def _validate_routing_contract(data: dict, user_prompt: str) -> dict:
+    blueprints = data.get("blueprints") or []
+    selected = blueprints[0] if blueprints else ""
+    if selected == "aero_multipoint.py" and _is_analysis_without_optimization(user_prompt):
+        raise RouterContractError(
+            "Router selected aero_multipoint.py for an analysis/polar sweep request "
+            "with no optimization objective, design variable, or constraint. Multiple "
+            "Mach numbers alone still route to aero_analysis.py."
+        )
+    return data
+
+
+def _router_repair_prompt(user_prompt: str, previous_response: str, error: str) -> str:
     return (
         f"{user_prompt}\n\n"
-        "Router contract error: your previous response returned more than one "
-        "blueprint. Return exactly one best blueprint in blueprints. Do not "
-        "combine blueprints. Previous response:\n"
+        "Router contract error: "
+        f"{error}\n"
+        "Return exactly one best blueprint in blueprints. Do not combine "
+        "blueprints. Analysis/polar/plot/sweep requests without optimization "
+        "must use aero_analysis.py, even with multiple Mach numbers. Previous response:\n"
         f"{previous_response}"
     )
 
@@ -142,20 +163,22 @@ def route_intent(
     output_text = response
     try:
         data = _parse_routing_response(response)
+        data = _validate_routing_contract(data, user_prompt)
     except RouterContractError as exc:
         logger.warning(f"{exc}; retrying router once.")
-        repair_prompt = _router_repair_prompt(user_prompt, response)
+        repair_prompt = _router_repair_prompt(user_prompt, response, str(exc))
         retry_response = get_llm_response(
             repair_prompt, model_name, system_prompt, provider=provider
         )
         logger.info(f"--- LLM RESPONSE (router retry) ---\n{retry_response}")
         data = _parse_routing_response(retry_response)
+        data = _validate_routing_contract(data, user_prompt)
         input_text += "\n" + repair_prompt
         output_text += "\n" + retry_response
         data["router_retry"] = True
 
-    data["input_tokens"] = _approx_tokens(input_text)
-    data["output_tokens"] = _approx_tokens(output_text)
+    data["input_tokens"] = estimate_tokens(input_text)
+    data["output_tokens"] = estimate_tokens(output_text)
     return data
 
 
@@ -177,20 +200,22 @@ def route_intent_stream(
         output_text = response
         try:
             data = _parse_routing_response(response)
+            data = _validate_routing_contract(data, user_prompt)
         except RouterContractError as exc:
             logger.warning(f"{exc}; retrying router once.")
-            yield "\n\nRouter returned multiple blueprints — retrying once...\n"
-            repair_prompt = _router_repair_prompt(user_prompt, response)
+            yield f"\n\nRouter contract issue — retrying once: {exc}\n"
+            repair_prompt = _router_repair_prompt(user_prompt, response, str(exc))
             retry_response = get_llm_response(
                 repair_prompt, model_name, system_prompt, provider=provider
             )
             yield retry_response
             data = _parse_routing_response(retry_response)
+            data = _validate_routing_contract(data, user_prompt)
             input_text += "\n" + repair_prompt
             output_text += "\n" + retry_response
             data["router_retry"] = True
-        data["input_tokens"] = _approx_tokens(input_text)
-        data["output_tokens"] = _approx_tokens(output_text)
+        data["input_tokens"] = estimate_tokens(input_text)
+        data["output_tokens"] = estimate_tokens(output_text)
         yield data
         return
 
@@ -257,25 +282,27 @@ def route_intent_stream(
     output_text = full_response
     try:
         data = _parse_routing_response(full_response)
+        data = _validate_routing_contract(data, user_prompt)
     except RouterContractError as exc:
         logger.warning(f"{exc}; retrying router once.")
-        yield "\n\nRouter returned multiple blueprints — retrying once...\n"
-        repair_prompt = _router_repair_prompt(user_prompt, full_response)
+        yield f"\n\nRouter contract issue — retrying once: {exc}\n"
+        repair_prompt = _router_repair_prompt(user_prompt, full_response, str(exc))
         retry_response = get_llm_response(
             repair_prompt, model_name, system_prompt, provider=provider
         )
         logger.info(f"--- LLM RESPONSE (router retry) ---\n{retry_response}")
         yield retry_response
         data = _parse_routing_response(retry_response)
+        data = _validate_routing_contract(data, user_prompt)
         input_text += "\n" + repair_prompt
         output_text += "\n" + retry_response
         data["router_retry"] = True
 
     if data.get("router_retry"):
-        data["input_tokens"] = _approx_tokens(input_text)
-        data["output_tokens"] = _approx_tokens(output_text)
+        data["input_tokens"] = estimate_tokens(input_text)
+        data["output_tokens"] = estimate_tokens(output_text)
     else:
-        data["input_tokens"] = input_tokens or _approx_tokens(input_text)
-        data["output_tokens"] = output_tokens or _approx_tokens(output_text)
+        data["input_tokens"] = input_tokens or estimate_tokens(input_text)
+        data["output_tokens"] = output_tokens or estimate_tokens(output_text)
     log_token_usage(provider, model_name, data["input_tokens"], data["output_tokens"])
     yield data

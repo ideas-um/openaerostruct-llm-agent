@@ -37,7 +37,20 @@ matplotlib.rcParams.update(
 
 
 def _isa_temperature(altitude_m):
-    return max(288.15 - 0.0065 * altitude_m, 216.65)
+    return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
+
+
+def _isa_pressure(altitude_m):
+    altitude_m = np.asarray(altitude_m)
+    T = _isa_temperature(altitude_m)
+    p_trop = 101325.0 * (T / 288.15) ** 5.255877
+    p_11 = 101325.0 * (216.65 / 288.15) ** 5.255877
+    p_strat = p_11 * np.exp(-9.80665 * (altitude_m - 11000.0) / (287.058 * 216.65))
+    return np.where(altitude_m <= 11000.0, p_trop, p_strat)
+
+
+def _isa_density(altitude_m):
+    return _isa_pressure(altitude_m) / (287.058 * _isa_temperature(altitude_m))
 
 
 def _isa_speed_of_sound(altitude_m):
@@ -152,16 +165,21 @@ prob = om.Problem()
 # === AGENT EDITABLE SECTION START ===
 # Mission and flight condition parameters. Derive speed and Reynolds number
 # from Mach, altitude, and rho.
-# CT = thrust-specific fuel consumption [1/s] = grav_constant * TSFC_in_per_hour * (1/3600)
+# If the user gives rho, use it directly. If altitude is given and rho is
+# omitted, set rho = _isa_density(altitude).
+# CT is the fuel consumption coefficient passed to OAS in units [1/s].
+# If the user gives CT in [1/s], use that value directly.
+# Only multiply by grav_constant when the user gives a TSFC value that explicitly
+# requires conversion, not when the user already gives CT [1/s].
 #
 # CRITICAL WARNING: Never set CT to 0.0. A zero thrust-specific fuel consumption rate
 # forces fuel burn calculations to evaluate as exactly 0.0. This flattens the
 # optimization landscape, removing all gradients and causing Line Search failures.
-# Keep CT set to a realistic non-zero value (e.g. grav_constant * 17.0e-6).
+# Keep CT set to a realistic non-zero value.
 #
 altitude = 11000.0  # Altitude [m]
 Mach_number = 0.84
-rho = 0.38  # Cruise altitude density [kg/m^3]
+rho = 0.38  # Explicit density [kg/m^3]; use _isa_density(altitude) only if rho is omitted.
 speed_of_sound = _isa_speed_of_sound(altitude)
 v = Mach_number * speed_of_sound
 re = rho * v / _sutherland_mu(altitude)
@@ -172,7 +190,7 @@ indep_var_comp.add_output("alpha", val=5.0, units="deg")  # Initial trim guess; 
 indep_var_comp.add_output("Mach_number", val=Mach_number)
 indep_var_comp.add_output("re", val=re, units="1/m")
 indep_var_comp.add_output("rho", val=rho, units="kg/m**3")
-indep_var_comp.add_output("CT", val=grav_constant * 17.0e-6, units="1/s")  # Thrust-specific fuel consumption (CRITICAL: NEVER SET TO 0.0!)
+indep_var_comp.add_output("CT", val=grav_constant * 17.0e-6, units="1/s")  # Blueprint default converted from TSFC; direct user CT [1/s] should replace this expression directly.
 indep_var_comp.add_output("R", val=11.165e6, units="m")  # Range [m]
 indep_var_comp.add_output("W0", val=0.4 * 3e5, units="kg")  # Aircraft weight excl. wing+fuel [kg]
 indep_var_comp.add_output("speed_of_sound", val=speed_of_sound, units="m/s")
@@ -284,6 +302,7 @@ prob.model.add_constraint("AS_point_0.L_equals_W", equals=0.0)
 #   "AS_point_0.wing_perf.CD"   — drag coefficient
 #   "wing.structural_mass"      — structural mass [kg]
 
+# Preserve the objective scaler unless a runtime scaling/conditioning error specifically requires changing it.
 prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
 # === AGENT EDITABLE SECTION END ===
 

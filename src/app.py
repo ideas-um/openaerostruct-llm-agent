@@ -265,7 +265,9 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 if r_match:
                     content = r_match.group(1).strip()
                     if content:
-                        state["reasoning_placeholder"].info(f"**Thinking:** {content}")
+                        state["reasoning_placeholder"].info(
+                            f"**Reasoning summary:** {content}"
+                        )
                 elif "REASONING:" in txt:
                     legacy_text = (
                         txt.split("##### REASONING ENDS #####")[0]
@@ -274,7 +276,7 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                     )
                     if legacy_text:
                         state["reasoning_placeholder"].info(
-                            f"**Thinking:** {legacy_text}"
+                            f"**Reasoning summary:** {legacy_text}"
                         )
 
                 if c_match:
@@ -324,9 +326,18 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             report = data.get("report", {})
             if report.get("passed", True):
                 st.success("✅ Blueprint consistency check passed.")
+                if report.get("warning"):
+                    st.warning(report["warning"])
             else:
-                feedback = report.get("feedback_for_coder", "")
-                st.error("❌ Blueprint consistency check failed.")
+                if report.get("audit_infrastructure_error"):
+                    feedback = "Auditor failed to produce a valid review after retry."
+                    reasons = report.get("invalid_audit_reasons") or []
+                    if reasons:
+                        feedback += "\n" + "\n".join(f"- {reason}" for reason in reasons)
+                    st.error("❌ Blueprint auditor failed.")
+                else:
+                    feedback = report.get("feedback_for_coder", "")
+                    st.error("❌ Blueprint consistency check failed.")
                 if feedback:
                     st.code(feedback, language="text")
 
@@ -334,9 +345,9 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 st.session_state["active_attempts"][-1]["audit"] = report
                 if not report.get("passed", True):
                     st.session_state["active_attempts"][-1]["status"] = "audit_failed"
-                    st.session_state["active_attempts"][-1]["logs"] = report.get(
-                        "feedback_for_coder", ""
-                    )
+                    st.session_state["active_attempts"][-1]["logs"] = feedback
+                elif report.get("warning"):
+                    st.session_state["active_attempts"][-1]["logs"] = report["warning"]
 
         elif event == "exec_success":
             st.success("✅ Execution completed successfully.")
@@ -511,11 +522,17 @@ for message in st.session_state.messages:
                     if att["status"] == "success":
                         st.success("✅ Execution completed successfully.")
                         # Database summary and plots for the successful run are shown once at the bottom
+                        if att.get("logs"):
+                            st.warning(att["logs"])
                     elif att["status"] == "error":
                         st.error("❌ Python error occurred.")
                         st.code(att["logs"], language="text")
                     elif att["status"] == "audit_failed":
-                        st.error("❌ Blueprint consistency check failed.")
+                        audit = att.get("audit") or {}
+                        if audit.get("audit_infrastructure_error"):
+                            st.error("❌ Blueprint auditor failed.")
+                        else:
+                            st.error("❌ Blueprint consistency check failed.")
                         st.code(att["logs"], language="text")
                     elif att["status"] == "no_converge":
                         st.warning("⚠️ Optimiser did not converge.")

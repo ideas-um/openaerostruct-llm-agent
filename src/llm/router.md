@@ -15,6 +15,9 @@ Each entry lists what the blueprint does and the minimum information needed to r
 Computes aerodynamic performance (CL, CD, L/D, polar sweeps) for a **fixed** wing — no optimisation.
 **Needs:** a wing (any geometry or named type) + at least one flight condition (Mach or speed, altitude or density).
 **Vague if:** no wing geometry AND no flight condition at all.
+Use this for analysis, evaluate, run_model, plot, polar, alpha sweep, Mach sweep,
+or "CL/CD/L/D versus ..." requests, even when the user gives multiple Mach
+numbers or flight conditions, unless the user also asks for optimisation.
 
 ### `aero_opt.py`
 Optimises a wing's aerodynamic shape at a **single** flight condition.
@@ -25,6 +28,8 @@ Optimises a wing's aerodynamic shape at a **single** flight condition.
 Optimises a wing across **two or more** flight conditions simultaneously.
 Same needs as `aero_opt.py`, plus at least 2 distinct flight conditions (different Mach, altitude, or speed).
 **Vague if:** fewer than 2 flight conditions, OR objective/DV missing.
+Do not use this for a polar sweep or analysis-only request. Multiple Mach
+numbers alone are not multipoint optimisation.
 
 ### `struct_optimization.py`
 Optimises a wing structure under **applied loads only** — no aerodynamics.

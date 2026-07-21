@@ -6,6 +6,7 @@ import re  # 1. Added re for regex parsing
 from .config import (
     get_llm_response,
     get_llm_client,
+    estimate_tokens,
     LLMBackendTransientError,
     is_gemini_transient_error,
     is_gemini_provider,
@@ -17,17 +18,6 @@ logger = logging.getLogger("LLM_Backend")
 _LLM_DIR = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR = os.path.dirname(_LLM_DIR)
 _BLUEPRINTS_DIR = os.path.realpath(os.path.join(_SRC_DIR, "blueprints"))
-
-
-def _approx_tokens(text: str) -> int:
-    if not text:
-        return 0
-    try:
-        import tiktoken
-
-        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
-    except ImportError:
-        return len(str(text)) // 4
 
 
 def _build_prompt(
@@ -55,10 +45,12 @@ def _build_prompt(
 
     prompt += (
         "### BASE BLUEPRINTS (SOURCE SCRIPTS TO EDIT) ###\n"
-        "Copy the selected blueprint structure. Do not rewrite or compact it. "
-        "Only change requested quantities and their direct wiring; preserve all "
-        "other values exactly. Keep fixed arrays, comments that identify required "
-        "OAS wiring, reporting, and plotting/post-processing blocks in place.\n"
+        "Use the selected blueprint as the executable base. Preserve its code "
+        "structure, values, formulas, OAS wiring, recording, reporting, output "
+        "paths, and plotting/post-processing blocks unless the user request or "
+        "retry feedback requires a change. Do not copy long instructional comment "
+        "blocks, DV catalogs, prompt guidance, or editable-section markers into "
+        "the final script.\n"
         f"{blueprints_context}\n"
     )
 
@@ -66,6 +58,23 @@ def _build_prompt(
         prompt += f"\n### ERROR FEEDBACK FROM PREVIOUS ATTEMPT ###\n{feedback}\nFix the code above."
 
     return system_prompt, prompt
+
+
+def _strip_comment_only_lines(code: str) -> str:
+    lines = []
+    blank_pending = False
+    for line in code.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if not line.strip():
+            if lines and not blank_pending:
+                lines.append("")
+            blank_pending = True
+            continue
+        lines.append(line.rstrip())
+        blank_pending = False
+    return "\n".join(lines).strip() + "\n"
 
 
 def _parse_response(response: str) -> tuple[str, str]:
@@ -102,6 +111,8 @@ def _parse_response(response: str) -> tuple[str, str]:
     if starts:
         code = code[min(starts) :].strip()
 
+    code = _strip_comment_only_lines(code)
+
     return reasoning, code
 
 
@@ -113,7 +124,7 @@ def generate_code(
     resp = get_llm_response(p, model_name, sys, provider=provider)
     logger.info(f"--- RESPONSE ---\n{resp}")
     reasoning, code = _parse_response(resp)
-    return code, reasoning, _approx_tokens(sys + p), _approx_tokens(resp)
+    return code, reasoning, estimate_tokens(sys + p), estimate_tokens(resp)
 
 
 def generate_code_stream(
@@ -126,7 +137,7 @@ def generate_code_stream(
         resp = get_llm_response(p, model_name, sys, provider=provider)
         yield resp
         reasoning, code = _parse_response(resp)
-        yield (code, reasoning, _approx_tokens(sys + p), _approx_tokens(resp))
+        yield (code, reasoning, estimate_tokens(sys + p), estimate_tokens(resp))
         return
 
     logger.info(f"--- PROMPT (Stream) ---\n{p}")
@@ -171,6 +182,6 @@ def generate_code_stream(
     yield (
         code,
         reasoning,
-        in_t or _approx_tokens(sys + p),
-        out_t or _approx_tokens(full_resp),
+        in_t or estimate_tokens(sys + p),
+        out_t or estimate_tokens(full_resp),
     )
