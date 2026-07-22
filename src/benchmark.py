@@ -7,6 +7,7 @@ import logging
 import statistics
 import difflib
 import hashlib
+import re
 from datetime import datetime
 
 from llm.config import LLMBackendTransientError
@@ -82,6 +83,18 @@ SUMMARY_HEADERS = [
     "max_retry_count",
 ]
 
+ATTEMPT_HEADERS = [
+    "id",
+    "category",
+    "rep",
+    "attempt",
+    "event",
+    "passed_audit",
+    "status",
+    "summary",
+    "details_path",
+]
+
 
 def _append_result(results_file: str, row: dict, headers: list, write_header: bool):
     with open(results_file, "a", newline="") as f:
@@ -137,6 +150,37 @@ def _safe_name(name: str) -> str:
 def _write_json(path: str, data: dict):
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, sort_keys=True)
+
+
+def _summarize_error(error: str) -> str:
+    text = " ".join(str(error).split())
+    if not text:
+        return ""
+
+    if "python: can't open file" in text:
+        return "Python error: generated script path missing in execution sandbox"
+
+    if "Blueprint consistency error:" in text:
+        item = ""
+        reason = ""
+        item_match = re.search(r"\b1\.\s+(.+?)\s+Reason:", text)
+        if item_match:
+            item = item_match.group(1).strip()
+        reason_match = re.search(r"Reason:\s+(.+?)(?:\s+Replace generated snippet:|\s+With blueprint snippet:|\s+Instruction:|$)", text)
+        if reason_match:
+            reason = reason_match.group(1).strip()
+        if item or reason:
+            return f"Blueprint consistency error: {item} - {reason}".strip(" -")
+        return "Blueprint consistency error"
+
+    if "Python error:" in text:
+        detail = text.split("Python error:", 1)[1].strip()
+        return f"Python error: {detail[:180]}" if detail else "Python error"
+
+    if "Safety block:" in text:
+        return text[:220]
+
+    return text[:220]
 
 
 def _compact_metrics_for_csv(metrics: dict) -> dict:
@@ -304,6 +348,10 @@ def _run_single_rep(
         print(f"    Routing Error: {e}")
 
     attempt_dirs: dict[int, str] = {}
+    attempt_records: list[dict] = []
+
+    def _rel(path: str) -> str:
+        return os.path.relpath(path, os.path.dirname(rep_dir))
 
     def bench_callback(event: str, data: dict):
         attempt = data.get("attempt", 0)
@@ -312,12 +360,38 @@ def _run_single_rep(
             attempt_dir = os.path.join(rep_dir, f"attempt_{attempt}")
             os.makedirs(attempt_dir, exist_ok=True)
             attempt_dirs[attempt] = attempt_dir
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": "",
+                    "status": "started",
+                    "summary": "",
+                    "details_path": _rel(attempt_dir),
+                }
+            )
         elif event == "code_ready":
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             code = data.get("code", "")
             code_path = os.path.join(attempt_dir, "code.py")
             with open(code_path, "w", encoding="utf-8") as fh:
                 fh.write(code)
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": "",
+                    "status": "code_generated",
+                    "summary": (data.get("reasoning") or "")[:240],
+                    "details_path": _rel(code_path),
+                }
+            )
         elif event == "blueprint_audit":
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             report = data.get("report", {})
@@ -329,9 +403,51 @@ def _run_single_rep(
             if diff_text:
                 with open(diff_path, "w", encoding="utf-8") as fh:
                     fh.write(diff_text)
+            violations = report.get("violations") or []
+            summary = "passed"
+            if violations:
+                first = violations[0]
+                summary = (
+                    f"{first.get('changed_item', 'violation')}: "
+                    f"{first.get('reason', '')}"
+                )
+            elif report.get("warning"):
+                summary = report["warning"]
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": report.get("passed", True),
+                    "status": "audit_passed" if report.get("passed", True) else "audit_failed",
+                    "summary": summary[:240],
+                    "details_path": _rel(report_path),
+                }
+            )
         elif event in ("exec_success", "exec_error", "no_converge"):
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             _copy_artifacts(attempt_dir)
+            if event == "exec_success":
+                summary = "execution completed"
+            elif event == "exec_error":
+                summary = _summarize_error("Python error: " + data.get("stderr_tail", ""))
+            else:
+                summary = _summarize_error(data.get("stdout_tail", "optimizer did not converge"))
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": "",
+                    "status": event,
+                    "summary": summary[:240],
+                    "details_path": _rel(attempt_dir),
+                }
+            )
 
     # 2. Execution
     try:
@@ -379,6 +495,7 @@ def _run_single_rep(
         "result_metrics": result.result_metrics,
         "input_tokens": routing_data.get("input_tokens", 0) + result.input_tokens,
         "output_tokens": routing_data.get("output_tokens", 0) + result.output_tokens,
+        "attempt_records": attempt_records,
     }
 
 
@@ -401,6 +518,7 @@ def run_benchmark(
     os.makedirs(run_dir, exist_ok=True)
 
     rep_results_file = os.path.join(run_dir, "rep_results.csv")
+    attempt_results_file = os.path.join(run_dir, "attempt_results.csv")
     summary_results_file = os.path.join(run_dir, "benchmark_results.csv")
     metadata_file = os.path.join(run_dir, "run_metadata.json")
 
@@ -430,7 +548,7 @@ def run_benchmark(
 
     print(f"--- Starting Benchmark ({len(queries)} cases × {num_reps} reps) ---")
 
-    total_success, total_runs, rep_row_idx, sum_row_idx = 0, 0, 0, 0
+    total_success, total_runs, rep_row_idx, attempt_row_idx, sum_row_idx = 0, 0, 0, 0, 0
 
     for idx, q in enumerate(queries):
         case_id = q["id"]
@@ -523,6 +641,14 @@ def run_benchmark(
                 rep_results_file, rep_row, REP_HEADERS, write_header=(rep_row_idx == 0)
             )
             rep_row_idx += 1
+            for attempt_record in res.get("attempt_records", []):
+                _append_result(
+                    attempt_results_file,
+                    attempt_record,
+                    ATTEMPT_HEADERS,
+                    write_header=(attempt_row_idx == 0),
+                )
+                attempt_row_idx += 1
             print(f"Done (success={res['success']}, {elapsed}s)")
             rep += 1
 
@@ -557,7 +683,7 @@ def run_benchmark(
             "output_tokens_mean": int(statistics.mean(rep_out_tok)),
             "unique_result_metrics": len(set(h for h in rep_metric_hashes if h)),
             "error_categories": " ||| ".join(
-                sorted(set(e.splitlines()[0][:100] for e in all_errors if e))
+                sorted(set(_summarize_error(e) for e in all_errors if e))
             ),
             "model": model,
             "max_retry_count": max_retries,

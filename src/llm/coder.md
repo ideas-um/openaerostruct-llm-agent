@@ -33,6 +33,7 @@ Treat related quantities as separate decisions unless the user links them explic
 - Mach/rho/altitude edits must update derived `speed_of_sound`, `v`, and `re` using the blueprint formula
 - If the user gives `rho`, use that explicit density. If altitude is given and `rho` is omitted, derive density with the blueprint `_isa_density(...)` helper.
 - If the user gives `CT` in units `1/s` or `/s`, use that value directly. Only multiply by `grav_constant` when the user gives a TSFC value that explicitly requires conversion.
+- Do not infer `with_wave` from Mach number or altitude. Change `with_wave` only when the user explicitly says wave drag on/off. Change `with_viscous` only when the user explicitly says viscous drag on/off.
 - objective path/meaning is separate from objective scaling
 - design-variable bounds/control points are separate from initial values
 - one structural variable is separate from fixed companion structural variables
@@ -97,6 +98,7 @@ For numerical scaling:
 - Multipoint geometry DV paths use `wing_geom.<var>`, not `wing.<var>`.
 - `MultiCD` does not accept weights; use `ExecComp` for weighted multipoint CD.
 - `struct_optimization.py` uses `SpatialBeamAlone`; do not replace it with `AerostructPoint`.
+- Structural `loads` has shape `(ny, 6)`. For an upward/vertical load, start with zeros and assign only column 2, e.g. `loads[:, 2] = load_per_node`; do not fill all six force/moment columns.
 - Wingbox thickness-to-chord uses `wing.geometry.t_over_c_cp`, not `wing.t_over_c_cp`.
 - Always preserve the `SqliteRecorder` block.
 - Derive output paths from `__file__`; save plots under `_PLOTS_DIR`.

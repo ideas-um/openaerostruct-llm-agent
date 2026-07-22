@@ -98,9 +98,13 @@ prob = om.Problem()
 # === AGENT EDITABLE SECTION START ===
 ny = surf_dict["mesh"].shape[1]
 
-# Define independent variables for loads
+# OAS structural loads are (ny, 6): Fx, Fy, Fz, Mx, My, Mz.
+# Upward load belongs in the vertical force component only.
+loads = np.zeros((ny, 6))
+loads[:, 2] = 2e5
+
 indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("loads", val=np.ones((ny, 6)) * 2e5, units="N")
+indep_var_comp.add_output("loads", val=loads, units="N")
 indep_var_comp.add_output("load_factor", val=1.0)
 # === AGENT EDITABLE SECTION END ===
 

@@ -347,6 +347,7 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
     image = _docker_image_name()
     host_output_dir = _host_output_dir_for(script_path)
     staged_root, staged_script_path = _stage_container_workspace(script_path)
+    staged_script_name = os.path.basename(staged_script_path)
     staged_out_dir = os.path.join(staged_root, "openaerostruct_out")
     staged_src_run_out_dir = os.path.join(staged_root, "src", "generated_run_out")
     seccomp_profile = os.path.abspath(_docker_seccomp_profile())
@@ -389,7 +390,7 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
             (
                 "type=bind,"
                 f"source={staged_script_path},"
-                "target=/workspace/src/generated_run.py,"
+                f"target=/workspace/src/{staged_script_name},"
                 "readonly"
             ),
             "--mount",
@@ -407,7 +408,7 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
             cmd.extend(["--user", f"{uid}:{gid}"])
 
         cmd.extend(
-            [image, "python", f"/workspace/src/{os.path.basename(staged_script_path)}"]
+            [image, "python", f"/workspace/src/{staged_script_name}"]
         )
 
         proc = subprocess.run(

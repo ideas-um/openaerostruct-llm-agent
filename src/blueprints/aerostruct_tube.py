@@ -186,7 +186,7 @@ re = rho * v / _sutherland_mu(altitude)
 
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("v", val=v, units="m/s")
-indep_var_comp.add_output("alpha", val=5.0, units="deg")  # Initial trim guess; final alpha is optimized.
+indep_var_comp.add_output("alpha", val=5.0, units="deg")  # Starting point for the L=W trim solve; final alpha is optimized, keep this initial guess reasonable to prevent SVD issues.
 indep_var_comp.add_output("Mach_number", val=Mach_number)
 indep_var_comp.add_output("re", val=re, units="1/m")
 indep_var_comp.add_output("rho", val=rho, units="kg/m**3")

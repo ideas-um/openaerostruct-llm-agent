@@ -203,3 +203,5 @@ paper_tests/
 
 .plot_history/
 .uv-cache/ 
+
+codex_pilot/

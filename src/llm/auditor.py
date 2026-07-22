@@ -128,6 +128,11 @@ _WATCHED_ASSIGNMENTS = {
     "mesh_dict",
     "surf_dict",
     "surface",
+    "loads",
+    "loads_array",
+    "forces",
+    "forces_val",
+    "forces_array",
     "_altitudes",
     "_Mach_numbers",
     "_rho_vals",
@@ -234,6 +239,19 @@ _INITIAL_DICT_KEYS = {
     "skin_thickness_cp",
     "radius_cp",
 }
+_AERO_SOLVER_KEYS = {
+    "CL0",
+    "CD0",
+    "S_ref_type",
+    "with_viscous",
+    "with_wave",
+    "k_lam",
+    "c_max_t",
+}
+_UPWARD_LOAD_RE = re.compile(
+    r"\b(upward|vertical|lift\s+load|z[-\s]*force|force\s+column\s*2|loads?\s*\[:,\s*2\])\b",
+    re.IGNORECASE,
+)
 
 
 def _ast_code(node: ast.AST) -> str:
@@ -429,6 +447,23 @@ def _collect_semantic_units(code: str) -> dict[str, str]:
                 units[f"assign:{target}"] = _ast_code(node)
 
         elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            call = node.value
+            func = call.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "update"
+                and _target_name(func.value) in {"mesh_dict", "surf_dict", "surface"}
+                and call.args
+                and isinstance(call.args[0], ast.Dict)
+            ):
+                target = _target_name(func.value)
+                for key_node, val_node in zip(call.args[0].keys, call.args[0].values):
+                    if key_node is None:
+                        continue
+                    key = _dict_key_name(key_node)
+                    if key in _WATCHED_DICT_KEYS:
+                        units[f"dict:{target}.{key}"] = f"{target}[{key!r}] = {_ast_code(val_node)}"
+
             sig = _call_signature(node.value)
             if sig:
                 units[f"call:{sig[0]}:{sig[1]}"] = _ast_code(node)
@@ -676,6 +711,14 @@ def _var_initial_requested(user_prompt: str, var_name: str) -> bool:
     return False
 
 
+def _var_requested(user_prompt: str, var_name: str) -> bool:
+    if var_name == "t_over_c_cp" and _T_OVER_C_ALIAS_RE.search(user_prompt):
+        return True
+    if var_name == "twist_cp" and _prompt_requests_twist(user_prompt):
+        return True
+    return bool(re.search(rf"\b{re.escape(var_name)}\b", user_prompt, re.IGNORECASE))
+
+
 def _changed_index(change: dict[str, str], index: int) -> dict[str, str] | None:
     for element in change.get("element_changes", []) or []:
         if int(element.get("index", -1)) == index and element.get("status") == "changed":
@@ -730,6 +773,101 @@ def _prompt_requests_twist(user_prompt: str) -> bool:
     return bool(_TWIST_REQUEST_RE.search(user_prompt))
 
 
+def _prompt_requests_aero_solver_key(user_prompt: str, key: str) -> bool:
+    patterns = {
+        "with_viscous": r"\b(with_viscous|viscous(?:\s+drag)?(?:\s+(?:on|off|true|false))?)\b",
+        "with_wave": r"\b(with_wave|wave(?:\s+drag)?(?:\s+(?:on|off|true|false))?)\b",
+        "CL0": r"\b(CL0|zero[-\s]*lift\s+lift)\b",
+        "CD0": r"\b(CD0|profile\s+drag|zero[-\s]*lift\s+drag)\b",
+        "S_ref_type": r"\b(S_ref_type|reference\s+area|wetted|projected)\b",
+        "k_lam": r"\b(k_lam|laminar)\b",
+        "c_max_t": r"\b(c_max_t|max(?:imum)?\s+thickness\s+location)\b",
+    }
+    pattern = patterns.get(key)
+    return bool(pattern and re.search(pattern, user_prompt, re.IGNORECASE))
+
+
+def _prompt_requests_upward_load(user_prompt: str) -> bool:
+    return bool(_UPWARD_LOAD_RE.search(user_prompt))
+
+
+def _load_change_fills_all_components(change: dict[str, str]) -> bool:
+    generated = _compact_code(change.get("generated", ""))
+    if not generated:
+        return False
+    if "[:,2]" in generated or "[:, 2]" in change.get("generated", ""):
+        return False
+    return bool(
+        re.search(r"ones\(\(?[^)]*,6\)?\)", generated)
+        or re.search(r"ones_like\(", generated)
+    )
+
+
+def _call_change_text(change: dict[str, str]) -> str:
+    return " ".join(
+        str(change.get(field, "")) for field in ("item", "blueprint", "generated")
+    )
+
+
+def _call_marker_set(text: str) -> set[str]:
+    markers = set()
+    checks = {
+        "cl": r"(?<![A-Za-z0-9_])CL(?![A-Za-z0-9_])|wing_perf\.CL|\.CL\b",
+        "cd": r"(?<![A-Za-z0-9_])CD(?![A-Za-z0-9_])|wing_perf\.CD|\.CD\b|weighted_CD",
+        "weighted_cd": r"weighted_CD|weighted_cd",
+        "l_equals_w": r"L_equals_W",
+        "failure": r"\bfailure\b",
+        "fuel_vol_delta": r"fuel_vol_delta",
+        "fuel_diff": r"fuel_diff",
+        "fuelburn": r"fuelburn",
+        "structural_mass": r"structural_mass",
+    }
+    for marker, pattern in checks.items():
+        if re.search(pattern, text, re.IGNORECASE):
+            markers.add(marker)
+    return markers
+
+
+def _call_replacement_exists(
+    change: dict[str, str], semantic_changes: list[dict[str, str]], user_prompt: str
+) -> bool:
+    item = change.get("item", "")
+    if item.startswith("call:add_constraint:"):
+        old_markers = _call_marker_set(_call_change_text(change))
+        if not old_markers:
+            return False
+        return any(
+            other.get("status") == "added"
+            and other.get("item", "").startswith("call:add_constraint:")
+            and bool(old_markers & _call_marker_set(_call_change_text(other)))
+            for other in semantic_changes
+        )
+
+    if item.startswith("call:add_objective:"):
+        objective_requested = bool(
+            re.search(
+                r"\b(objective|minimi[sz]e|maximi[sz]e|weighted|drag|CD|fuel\s*burn|fuelburn|mass)\b",
+                user_prompt,
+                re.IGNORECASE,
+            )
+        )
+        if not objective_requested:
+            return False
+        old_markers = _call_marker_set(_call_change_text(change))
+        return any(
+            other.get("status") == "added"
+            and other.get("item", "").startswith("call:add_objective:")
+            and (
+                not old_markers
+                or bool(old_markers & _call_marker_set(_call_change_text(other)))
+                or ("cd" in old_markers and "weighted_cd" in _call_marker_set(_call_change_text(other)))
+            )
+            for other in semantic_changes
+        )
+
+    return False
+
+
 def _contract_violations(
     user_prompt: str, semantic_changes: list[dict[str, str]]
 ) -> list[dict[str, str]]:
@@ -739,6 +877,7 @@ def _contract_violations(
     scaling_requested = _prompt_requests_scaling(user_prompt)
     mesh_resolution_requested = _prompt_requests_mesh_resolution(user_prompt)
     twist_requested = _prompt_requests_twist(user_prompt)
+    upward_load_requested = _prompt_requests_upward_load(user_prompt)
 
     for change in semantic_changes:
         item = change.get("item", "")
@@ -793,6 +932,7 @@ def _contract_violations(
             change.get("status") == "removed"
             and item.startswith(("call:add_constraint:", "call:add_objective:"))
             and not removal_requested
+            and not _call_replacement_exists(change, semantic_changes, user_prompt)
         ):
             violations.append(
                 {
@@ -807,7 +947,25 @@ def _contract_violations(
 
         if item.startswith(("dict:surf_dict.", "dict:surface.")):
             key = _dict_key_from_item(item)
-            if (
+            if key in _AERO_SOLVER_KEYS and not _prompt_requests_aero_solver_key(
+                user_prompt, key
+            ):
+                violations.append(
+                    {
+                        "severity": "blocking",
+                        "changed_item": item,
+                        "blueprint_value": change.get("blueprint", ""),
+                        "generated_value": change.get("generated", ""),
+                        "reason": (
+                            f"The user did not request changing aerodynamic solver assumption {key}."
+                        ),
+                        "repair_instruction": (
+                            f"Restore the blueprint {key} value. Do not infer {key} "
+                            "from Mach, altitude, or neighboring aero settings."
+                        ),
+                    }
+                )
+            elif (
                 key == "twist_cp"
                 and change.get("status") in {"added", "changed"}
                 and not twist_requested
@@ -829,7 +987,7 @@ def _contract_violations(
             elif (
                 key in _INITIAL_DICT_KEYS
                 and change.get("status") != "removed"
-                and not _var_initial_requested(user_prompt, key)
+                and not _var_requested(user_prompt, key)
             ):
                 violations.append(
                     {
@@ -870,6 +1028,38 @@ def _contract_violations(
                         ),
                     }
                 )
+
+        if (
+            upward_load_requested
+            and (
+                item.startswith("call:add_output:loads")
+                or item
+                in {
+                    "assign:loads",
+                    "assign:loads_array",
+                    "assign:forces",
+                    "assign:forces_val",
+                    "assign:forces_array",
+                }
+            )
+            and _load_change_fills_all_components(change)
+        ):
+            violations.append(
+                {
+                    "severity": "blocking",
+                    "changed_item": item,
+                    "blueprint_value": change.get("blueprint", ""),
+                    "generated_value": change.get("generated", ""),
+                    "reason": (
+                        "The user requested an upward/vertical load, but the generated "
+                        "loads expression fills all six force/moment components."
+                    ),
+                    "repair_instruction": (
+                        "Use a zero loads array and assign only the vertical force "
+                        "component, e.g. loads[:, 2] = load_per_node."
+                    ),
+                }
+            )
 
     return violations
 

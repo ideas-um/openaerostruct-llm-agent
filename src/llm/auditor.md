@@ -48,7 +48,14 @@ Editable section markers are navigation hints, not permission boundaries:
 - A changed line outside editable markers is not automatically forbidden.
 - Judge every executable change by the user request, required wiring, repair context, and blueprint semantics.
 
-Deleted executable setup is a change. If a blueprint constraint, objective, DV, fixed structural value, fixed flight value, or recorder block disappears, fail unless the user explicitly asked for removal or the diff shows an equivalent replacement.
+Deleted executable setup is a change, but deletion is not automatically wrong.
+Fail unreplaced deletion of required physics, assumptions, or infrastructure:
+constraints, objectives, fixed structural values, fixed flight values, recorder
+blocks, required OAS connections, and feasibility constraints. Allow deletion or
+deactivation of optional design variables or optional surface keys when they are
+not requested and not required by the selected geometry/model. Example: removing
+`twist_cp` for a rectangular analysis wing with no twist request is correct;
+removing `L_equals_W`, failure, fuel-volume, or fuel-mass constraints is not.
 
 Review high-risk semantic statement changes one by one. Do not hide them inside broad labels such as "constraints", "flight conditions", "mesh configuration", or "structural setup".
 
@@ -82,6 +89,9 @@ The top-level `"passed"` is only the aggregate:
 - A request for one flight point does not permit changing other points.
 - If the user requested point 0 only, point 1 must preserve the blueprint value unless explicitly requested.
 - If the user says to preserve the maneuver/secondary flight condition, changing point 1 Mach/rho/altitude/speed/Reynolds values is a blocking violation. Do not call this a "consistent update". A separate requested load-factor change is allowed only for `load_factor`.
+- Do not infer `with_wave` from Mach number or altitude. Change `with_wave` only when the user explicitly requests wave drag on/off. Change `with_viscous` only when the user explicitly requests viscous drag on/off.
+- Do not change aerodynamic bookkeeping assumptions (`CL0`, `CD0`, `S_ref_type`, `k_lam`, `c_max_t`) unless the user explicitly names that assumption.
+- For structural `loads` with shape `(ny, 6)`, an upward/vertical load must only populate the vertical force component, column 2. Filling all six force/moment components with `np.ones((ny, 6)) * scalar` is a blocking violation.
 - A request for bounds/control points does not permit changing fixed companion variables.
 - A requested constraint/objective does not permit deleting preserved constraints/objectives.
 - A changed existing `ref`/`scaler` must fail unless the user requested scaling or the retry error explicitly required scaling/conditioning repair. Same objective/DV/constraint path is not enough.
