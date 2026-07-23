@@ -23,6 +23,12 @@ numbers or flight conditions, unless the user also asks for optimisation.
 Optimises a wing's aerodynamic shape at a **single** flight condition.
 **Needs:** an objective (e.g. minimise drag, maximise L/D) + at least one design variable (what changes) + a flight condition + a physics constraint (e.g. CL = 0.5 if minimising drag).
 **Vague if:** objective missing, OR no design variable named, OR no flight condition.
+Do not treat a blueprint default design variable as user intent. In particular,
+do not assume `alpha` is a design variable unless the user explicitly says it is
+a DV/design variable, gives alpha bounds, or asks to vary/optimize alpha.
+If the user says only "optimize/minimize drag at Mach ... with/keeping CL = ..."
+and does not name any DV, set `is_vague=true` and ask which design variable(s)
+the optimizer may change.
 
 ### `aero_multipoint.py`
 Optimises a wing across **two or more** flight conditions simultaneously.
@@ -30,6 +36,10 @@ Same needs as `aero_opt.py`, plus at least 2 distinct flight conditions (differe
 **Vague if:** fewer than 2 flight conditions, OR objective/DV missing.
 Do not use this for a polar sweep or analysis-only request. Multiple Mach
 numbers alone are not multipoint optimisation.
+As above, default `alpha` variables do not satisfy the DV requirement unless the
+user explicitly names alpha as something the optimizer may change.
+For multipoint optimization, per-point `alpha` is not implied by multiple flight
+conditions; the user must still explicitly name `alpha` or another DV.
 
 ### `struct_optimization.py`
 Optimises a wing structure under **applied loads only** — no aerodynamics.

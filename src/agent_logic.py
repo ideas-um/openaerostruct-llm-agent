@@ -274,6 +274,27 @@ def _get_relaxation_suggestion(
     return suggest_relaxation(user_prompt, error_logs, model_name, provider)
 
 
+APPROVED_RELAXATION_HEADER = (
+    "### USER-APPROVED RELAXATION AFTER NON-CONVERGENCE ###"
+)
+
+
+def build_approved_relaxation_prompt(
+    user_prompt: str, relaxation_instructions: str
+) -> str:
+    return (
+        f"{user_prompt.rstrip()}\n\n"
+        f"{APPROVED_RELAXATION_HEADER}\n"
+        "The following changes were explicitly approved by the user after a "
+        "non-convergent run. Treat them as requested changes and authorized "
+        "runtime repair for this retry. If they conflict with the original "
+        "request, the approved relaxation wins only for the named variables, "
+        "bounds, solver settings, constraints, or initial values. Preserve all "
+        "unrelated blueprint assumptions.\n\n"
+        f"{relaxation_instructions.strip()}"
+    )
+
+
 def _build_feedback(error_history: list[str]) -> str:
     parts = []
 

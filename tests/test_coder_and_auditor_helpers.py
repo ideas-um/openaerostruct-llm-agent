@@ -1,3 +1,4 @@
+from agent_logic import APPROVED_RELAXATION_HEADER, build_approved_relaxation_prompt
 from llm.auditor import _contract_violations, _make_diff, _semantic_changes
 from llm.coder import _parse_response
 
@@ -166,6 +167,38 @@ def test_contract_allows_explicit_wave_drag_request():
     ]
 
     assert _contract_violations("Turn wave drag on.", changes) == []
+
+
+def test_approved_relaxation_prompt_marks_retry_scope():
+    prompt = build_approved_relaxation_prompt(
+        "Minimize drag with CL = 0.5.",
+        "Apply these relaxations and retry:\nIncrease alpha upper bound to 10 deg.",
+    )
+
+    assert APPROVED_RELAXATION_HEADER in prompt
+    assert "explicitly approved by the user" in prompt
+    assert "Preserve all unrelated blueprint assumptions." in prompt
+    assert "Increase alpha upper bound to 10 deg." in prompt
+
+
+def test_approved_relaxation_still_blocks_unrelated_mesh_drift():
+    prompt = build_approved_relaxation_prompt(
+        "Minimize drag with CL = 0.5.",
+        "Apply these relaxations and retry:\nIncrease alpha upper bound to 10 deg.",
+    )
+    changes = [
+        {
+            "item": "dict:mesh_dict.num_y",
+            "status": "changed",
+            "blueprint": "mesh_dict['num_y'] = 7",
+            "generated": "mesh_dict['num_y'] = 15",
+        }
+    ]
+
+    violations = _contract_violations(prompt, changes)
+
+    assert len(violations) == 1
+    assert violations[0]["changed_item"] == "dict:mesh_dict.num_y"
 
 
 def test_contract_blocks_upward_load_filling_all_six_components():

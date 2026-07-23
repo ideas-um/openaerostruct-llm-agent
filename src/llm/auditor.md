@@ -36,12 +36,19 @@ changed executable value for that point is a blocking violation.
 A changed executable line is allowed only if it is:
 - **requested_change**: explicitly requested by the user for that exact variable, point, or index
 - **required_wiring**: necessary to implement a requested change
+- **approved_relaxation**: explicitly listed under `USER-APPROVED RELAXATION AFTER NON-CONVERGENCE`; treat these listed changes as user-requested runtime repair for the retry
 - **optimized_initial_value**: initial guesses for optimized variables may change when they stay inside requested bounds and do not change fixed physics assumptions; warn rather than block unless the value is outside bounds, replaces a fixed analysis condition, or caused a runtime repair issue
 - **numerical_scaling**: a `ref`/`scaler` value for a newly added DV/objective/constraint, or an existing `ref`/`scaler` repair after a specific runtime scaling/conditioning error
 - **harmless_reporting**: printing, plotting, artifact paths, or comments only
 - **equivalent_formatting**: same executable value, different formatting
 
 Everything else is unrequested assumption drift and must fail.
+
+If the prompt contains `USER-APPROVED RELAXATION AFTER NON-CONVERGENCE`, do not
+force those named relaxation changes back to the original blueprint value. The
+approval only authorizes the variables, bounds, solver settings, constraints,
+or initial values named in that section. Continue to fail unrelated blueprint
+assumption drift.
 
 Editable section markers are navigation hints, not permission boundaries:
 - A changed line inside editable markers is not automatically allowed.

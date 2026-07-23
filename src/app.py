@@ -7,6 +7,7 @@ import streamlit as st
 from llm.router import route_intent_stream
 from llm.config import is_ollama_provider
 from agent_logic import (
+    build_approved_relaxation_prompt,
     run_agent,
     cleanup_artifacts,
     get_generated_plots,
@@ -206,6 +207,26 @@ st.title("OpenAeroStruct — LLM Agent")
 # ---------------------------------------------------------------------------
 
 
+def _audit_inspection_payload(report: dict, diff: str = "") -> dict:
+    """Return the full audit payload shown in expandable JSON inspectors."""
+    if not report and not diff:
+        return {}
+
+    payload = dict(report or {})
+    if diff and "diff" not in payload:
+        payload["diff"] = diff
+    return payload
+
+
+def show_blueprint_audit_json(report: dict, diff: str = ""):
+    payload = _audit_inspection_payload(report, diff)
+    if not payload:
+        return
+
+    with st.expander("Show Blueprint Audit (JSON)", expanded=False):
+        st.json(payload)
+
+
 def _make_ui_callback(stream_state: dict, no_converge_store: dict):
     """Return a callback that routes agent events to Streamlit UI elements."""
 
@@ -324,6 +345,7 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
 
         elif event == "blueprint_audit":
             report = data.get("report", {})
+            audit_payload = _audit_inspection_payload(report, data.get("diff", ""))
             if report.get("passed", True):
                 st.success("✅ Blueprint consistency check passed.")
                 if report.get("warning"):
@@ -341,8 +363,10 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 if feedback:
                     st.code(feedback, language="text")
 
+            show_blueprint_audit_json(audit_payload)
+
             if st.session_state["active_attempts"]:
-                st.session_state["active_attempts"][-1]["audit"] = report
+                st.session_state["active_attempts"][-1]["audit"] = audit_payload
                 if not report.get("passed", True):
                     st.session_state["active_attempts"][-1]["status"] = "audit_failed"
                     st.session_state["active_attempts"][-1]["logs"] = feedback
@@ -545,6 +569,8 @@ for message in st.session_state.messages:
                             for plot_path in att["plots"]:
                                 show_plot(plot_path)
 
+                    show_blueprint_audit_json(att.get("audit") or {})
+
         if "code" in message:
             with st.expander("Show Generated Code", expanded=False):
                 st.code(message["code"], language="python")
@@ -584,8 +610,8 @@ if st.session_state["pending_relaxation"]:
                     )
                 else:
                     extra = "Apply these relaxations and retry:\n" + pr["suggestion"]
-                st.session_state["relaxation_prompt"] = (
-                    pr["user_prompt"] + "\n\n" + extra
+                st.session_state["relaxation_prompt"] = build_approved_relaxation_prompt(
+                    pr["user_prompt"], extra
                 )
                 st.session_state["relaxation_blueprints"] = pr["blueprints"]
                 st.session_state["relaxation_error_logs"] = pr.get("error_logs", [])
