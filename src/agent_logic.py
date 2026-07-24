@@ -3,10 +3,10 @@ agent_logic.py — Hardened Memory & Error Feedback
 """
 
 from __future__ import annotations
+import csv
 import os
 import re
 import shutil
-import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from llm.relaxer import suggest_relaxation
@@ -17,17 +17,6 @@ _OUT_DIR = os.path.join(_PROJECT_DIR, "openaerostruct_out")
 _PLOTS_DIR = os.path.join(_OUT_DIR, "agent_plots")
 _GEN_RUN_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 _GEN_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
-
-
-def _approx_tokens(text: str) -> int:
-    if not text:
-        return 0
-    try:
-        import tiktoken
-
-        return len(tiktoken.get_encoding("cl100k_base").encode(str(text)))
-    except ImportError:
-        return len(str(text)) // 4
 
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[mK]")
@@ -130,6 +119,7 @@ class AgentResult:
     converged: str = "n/a"
     input_tokens: int = 0
     output_tokens: int = 0
+    result_metrics: dict = field(default_factory=dict)
 
 
 def _find_db_summary() -> str:
@@ -156,13 +146,175 @@ def _find_db_summary() -> str:
     return "No optimization database found."
 
 
+def _find_db_metrics() -> dict:
+    """Return structured optimization metrics when an OpenMDAO DB exists."""
+    try:
+        from tools.db_reader import extract_optimization_metrics
+    except ImportError:
+        try:
+            from src.tools.db_reader import extract_optimization_metrics
+        except ImportError:
+            return {}
+
+    paths = [
+        os.path.join(_GEN_RUN_DIR, "aero.db"),
+        os.path.join(_OUT_DIR, "aero.db"),
+        os.path.join(_OUT_DIR, "aerostruct.db"),
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            metrics = extract_optimization_metrics(p)
+            if metrics:
+                return metrics
+    return {}
+
+
+def _find_analysis_csv_metrics() -> dict:
+    """Return aero-analysis polar rows when a generated script writes a CSV artifact."""
+    for p in [
+        os.path.join(_OUT_DIR, "OptimizedWing_Polars.csv"),
+        os.path.join(_GEN_RUN_DIR, "OptimizedWing_Polars.csv"),
+    ]:
+        if not os.path.exists(p):
+            continue
+        with open(p, newline="", encoding="utf-8") as fh:
+            rows = []
+            core_columns = ("Mach", "Alpha", "CL", "CD", "L/D")
+            for row in csv.DictReader(fh):
+                rows.append(
+                    {
+                        key: round(float(row[key]), 12)
+                        for key in core_columns
+                        if row.get(key) not in ("", None)
+                    }
+                )
+        if rows:
+            return {
+                "path": os.path.basename(p),
+                "columns": [key for key in core_columns if key in rows[0]],
+                "rows": rows,
+            }
+    return {}
+
+
+def _extract_stdout_metrics(stdout: str) -> dict:
+    """Pull compact numeric result lines from generated-script stdout."""
+    interesting = (
+        "cl",
+        "cd",
+        "drag",
+        "lift",
+        "alpha",
+        "twist",
+        "fuel",
+        "mass",
+        "failure",
+        "objective",
+        "s_ref",
+        "l/d",
+    )
+    number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    metrics = {}
+    lines = []
+    analysis_points = []
+
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line or not any(token in line.lower() for token in interesting):
+            continue
+        lines.append(line)
+
+        pairs = re.findall(rf"([A-Za-z][A-Za-z0-9_./]*)\s*=\s*({number})", line)
+        is_analysis_point = line.startswith("AnalysisPoint:")
+        if is_analysis_point:
+            point = {name: float(val) for name, val in pairs}
+            if point:
+                analysis_points.append(point)
+        else:
+            for name, val in pairs:
+                metrics[name] = float(val)
+
+        if ":" in line and not is_analysis_point:
+            label, rest = line.split(":", 1)
+            vals = [float(v) for v in re.findall(number, rest)]
+            if vals:
+                key = re.sub(r"[^A-Za-z0-9_]+", "_", label.strip()).strip("_")
+                metrics[key] = vals[0] if len(vals) == 1 else vals
+
+        if len(lines) >= 120:
+            break
+
+    result = {"values": metrics, "lines": lines}
+    if analysis_points:
+        result["analysis_points"] = analysis_points
+    return result
+
+
+def _collect_result_metrics(stdout: str) -> dict:
+    metrics = {}
+    db_metrics = _find_db_metrics()
+    if db_metrics:
+        metrics["db"] = db_metrics
+    csv_metrics = _find_analysis_csv_metrics()
+    if csv_metrics:
+        metrics["analysis_csv"] = csv_metrics
+        stdout_metrics = _extract_stdout_metrics(stdout)
+        if stdout_metrics["values"]:
+            metrics["stdout"] = {"values": stdout_metrics["values"]}
+        return metrics
+    stdout_metrics = _extract_stdout_metrics(stdout)
+    if stdout_metrics["values"] or stdout_metrics["lines"]:
+        metrics["stdout"] = stdout_metrics
+    return metrics
+
+
 def _get_relaxation_suggestion(
-    user_prompt: str, error_logs: list, model_name: str, provider: str
+    user_prompt: str,
+    error_logs: list,
+    model_name: str,
+    provider: str,
+    *,
+    blueprints: list[str],
+    optimizer_status: str,
+    db_summary: str,
+    result_metrics: dict,
+    generated_code: str,
 ) -> tuple[str, int, int]:
-    return suggest_relaxation(user_prompt, error_logs, model_name, provider)
+    return suggest_relaxation(
+        user_prompt,
+        error_logs,
+        model_name,
+        provider,
+        blueprints=blueprints,
+        optimizer_status=optimizer_status,
+        db_summary=db_summary,
+        result_metrics=result_metrics,
+        generated_code=generated_code,
+    )
 
 
-def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
+APPROVED_RELAXATION_HEADER = (
+    "### USER-APPROVED RELAXATION AFTER NON-CONVERGENCE ###"
+)
+
+
+def build_approved_relaxation_prompt(
+    user_prompt: str, relaxation_instructions: str
+) -> str:
+    return (
+        f"{user_prompt.rstrip()}\n\n"
+        f"{APPROVED_RELAXATION_HEADER}\n"
+        "The following changes were explicitly approved by the user after a "
+        "non-convergent run. Treat them as requested changes and authorized "
+        "runtime repair for this retry. If they conflict with the original "
+        "request, the approved relaxation wins only for the named variables, "
+        "bounds, solver settings, constraints, or initial values. Preserve all "
+        "unrelated blueprint assumptions.\n\n"
+        f"{relaxation_instructions.strip()}"
+    )
+
+
+def _build_feedback(error_history: list[str]) -> str:
     parts = []
 
     if error_history:
@@ -171,6 +323,27 @@ def _build_feedback(error_history: list[str], prior_code: str = "") -> str:
             parts.append(f"--- Attempt {i} error ---\n{err}")
 
     return "\n\n".join(parts) if parts else "Initial generation"
+
+
+def _is_non_retryable_environment_error(stderr: str) -> bool:
+    """Detect dependency/install failures that code regeneration cannot fix."""
+    text = stderr.lower()
+    if "site-packages" in text and any(
+        marker in text
+        for marker in [
+            "importerror: dlopen",
+            "library not loaded",
+            "symbol not found",
+        ]
+    ):
+        return True
+    return any(
+        marker in text
+        for marker in [
+            "modulenotfounderror: no module named 'openmdao'",
+            "modulenotfounderror: no module named 'openaerostruct'",
+        ]
+    )
 
 
 def run_agent(
@@ -185,9 +358,12 @@ def run_agent(
     prior_error_logs: Optional[list[str]] = None,
     retry_on_no_converge: bool = False,
     prior_code: str = "",
+    routing_data: Optional[dict] = None,
 ) -> AgentResult:
 
     from llm.coder import generate_code, generate_code_stream
+    from llm.auditor import audit_blueprint_consistency
+    from llm.config import LLMBackendTransientError
     from tools.executor import execute_run
 
     script_path = gen_script_path or _GEN_SCRIPT
@@ -199,15 +375,22 @@ def run_agent(
     result = AgentResult()
     error_history = prior_error_logs or []
     attempt = 0
+    last_optimizer_status = ""
 
     while attempt < max_retries:
         emit("attempt_start", {"max_retries": max_retries})
-        feedback = _build_feedback(error_history, prior_code)
+        feedback = _build_feedback(error_history)
 
         try:
             if stream and callback:
                 for chunk in generate_code_stream(
-                    user_prompt, blueprints, feedback, model_name, provider, prior_code=prior_code
+                    user_prompt,
+                    blueprints,
+                    feedback,
+                    model_name,
+                    provider,
+                    prior_code=prior_code,
+                    routing_context=routing_data,
                 ):
                     if isinstance(chunk, tuple):
                         code, reasoning, in_tok, out_tok = chunk
@@ -217,10 +400,18 @@ def run_agent(
                         emit("code_chunk", {"chunk": chunk})
             else:
                 code, reasoning, in_tok, out_tok = generate_code(
-                    user_prompt, blueprints, feedback, model_name, provider, prior_code=prior_code
+                    user_prompt,
+                    blueprints,
+                    feedback,
+                    model_name,
+                    provider,
+                    prior_code=prior_code,
+                    routing_context=routing_data,
                 )
                 result.input_tokens += in_tok
                 result.output_tokens += out_tok
+        except LLMBackendTransientError:
+            raise
         except Exception as exc:
             err = f"Generation error: {sanitize_feedback(str(exc))}"
             error_history.append(err)
@@ -243,6 +434,49 @@ def run_agent(
             attempt += 1
             continue
 
+        audit_report, audit_in_tok, audit_out_tok = audit_blueprint_consistency(
+            user_prompt=user_prompt,
+            blueprints=blueprints,
+            generated_code=code,
+            model_name=model_name,
+            provider=provider,
+            routing_context=routing_data,
+        )
+        result.input_tokens += audit_in_tok
+        result.output_tokens += audit_out_tok
+        audit_diff = audit_report.pop("diff", "")
+        emit("blueprint_audit", {"report": audit_report, "diff": audit_diff})
+        audit_warning = audit_report.get("warning")
+        if audit_warning:
+            result.error_logs.append(f"[attempt {attempt + 1}] {audit_warning}")
+        if (
+            not audit_report.get("passed", True)
+            and audit_report.get("audit_infrastructure_error")
+        ):
+            reasons = audit_report.get("invalid_audit_reasons") or [
+                "auditor returned an invalid or contradictory response"
+            ]
+            err = (
+                "Blueprint auditor error:\n"
+                "The generated code was not executed because the auditor could not "
+                "produce a valid review. This is an audit/schema failure, not coder "
+                f"repair feedback.\nReasons: {sanitize_feedback(str(reasons), 1000)}"
+            )
+            result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+            result.attempts = attempt + 1
+            emit("done", {"success": False, "attempts": result.attempts})
+            return result
+        if not audit_report.get("passed", True):
+            feedback = audit_report.get("feedback_for_coder") or (
+                "Restore unrequested blueprint assumptions. Violations: "
+                f"{audit_report.get('violations', [])}"
+            )
+            err = "Blueprint consistency error:\n" + sanitize_feedback(feedback, 2000)
+            error_history.append(err)
+            result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+            attempt += 1
+            continue
+
         exec_res = execute_run(script_path, timeout=120)
         _stderr = exec_res.stderr.lower()
         _is_solver_fail = any(
@@ -252,10 +486,19 @@ def run_agent(
 
         if exec_res.exit_code == 0:
             db_sum = _find_db_summary()
+            result.result_metrics = _collect_result_metrics(exec_res.stdout)
             result.final_summary = db_sum
             result.plots = get_generated_plots()
-            emit("exec_success", {"db_summary": db_sum, "plots": result.plots})
-            
+            emit(
+                "exec_success",
+                {
+                    "db_summary": db_sum,
+                    "plots": result.plots,
+                    "result_metrics": result.result_metrics,
+                    "stdout_tail": sanitize_feedback(exec_res.stdout, 1000),
+                },
+            )
+
             # Guard 1: Verify code is not empty or truncated
             if not code or len(code.strip()) < 100:
                 err = "Python error: Generated script was empty or incomplete."
@@ -266,10 +509,17 @@ def run_agent(
 
             # Guard 2: Enforce optimization convergence for optimization tasks
             is_opt_blueprint = any(
-                b in ["aero_opt.py", "aero_multipoint.py", "struct_optimization.py", "aerostruct_tube.py", "aerostruct_wingbox.py"]
+                b
+                in [
+                    "aero_opt.py",
+                    "aero_multipoint.py",
+                    "struct_optimization.py",
+                    "aerostruct_tube.py",
+                    "aerostruct_wingbox.py",
+                ]
                 for b in blueprints
             )
-            
+
             # If the blueprint is optimization but 'run_driver()' is omitted,
             # we force a retry with a clear warning message.
             if is_opt_blueprint and "run_driver()" not in code:
@@ -293,9 +543,17 @@ def run_agent(
                 return result
             else:
                 result.converged = "no"
+                last_optimizer_status = sanitize_feedback(exec_res.stdout, 2000)
                 err = f"Optimizer failed to converge. Stdout tail:\n{sanitize_feedback(exec_res.stdout, 400)}"
                 result.error_logs.append(err)
-                emit("no_converge", {"db_summary": db_sum, "stdout_tail": err})
+                emit(
+                    "no_converge",
+                    {
+                        "db_summary": db_sum,
+                        "result_metrics": result.result_metrics,
+                        "stdout_tail": err,
+                    },
+                )
                 if retry_on_no_converge:
                     error_history.append(f"Code:\n{code}\nError:\n{err}")
                 else:
@@ -303,7 +561,18 @@ def run_agent(
                     break
 
         else:
+            result.result_metrics = _collect_result_metrics(exec_res.stdout)
             err = f"Python error:\n{sanitize_feedback(exec_res.stderr)}"
+            if _is_non_retryable_environment_error(exec_res.stderr):
+                err = (
+                    "Non-retryable environment error:\n"
+                    f"{sanitize_feedback(exec_res.stderr)}"
+                )
+                result.error_logs.append(f"[attempt {attempt + 1}] {err}")
+                emit("exec_error", {"stderr_tail": exec_res.stderr[-500:]})
+                result.attempts = attempt + 1
+                emit("done", {"success": False, "attempts": result.attempts})
+                return result
             error_history.append(f"Code:\n{code}\nError:\n{err}")
             result.error_logs.append(f"[attempt {attempt + 1}] {err}")
             emit("exec_error", {"stderr_tail": exec_res.stderr[-500:]})
@@ -313,7 +582,15 @@ def run_agent(
     # Only provide suggestion if we didn't succeed and are in non-retry (App) mode
     if result.converged == "no" and not retry_on_no_converge:
         suggestion, s_in, s_out = _get_relaxation_suggestion(
-            user_prompt, result.error_logs, model_name, provider
+            user_prompt,
+            result.error_logs,
+            model_name,
+            provider,
+            blueprints=blueprints,
+            optimizer_status=last_optimizer_status,
+            db_summary=result.final_summary,
+            result_metrics=result.result_metrics,
+            generated_code=result.final_code,
         )
         result.input_tokens += s_in
         result.output_tokens += s_out
@@ -321,6 +598,7 @@ def run_agent(
             "no_converge_final",
             {
                 "db_summary": result.final_summary,
+                "result_metrics": result.result_metrics,
                 "error_logs": result.error_logs,
                 "suggestion": suggestion,
             },

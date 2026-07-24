@@ -48,8 +48,8 @@ uv sync --python-preference only-managed
 Using Conda:
 
 ```bash
-conda create -n openaerostruct-agent python=3.12
-conda activate openaerostruct-agent
+conda create -n openaerostruct python=3.12
+conda activate openaerostruct
 pip install -e .
 ```
 
@@ -113,6 +113,7 @@ uv run streamlit run src/app.py
 Using Conda:
 
 ```bash
+conda activate openaerostruct
 streamlit run src/app.py
 ```
 
@@ -135,13 +136,15 @@ The benchmark does not use the Streamlit interface. Instead, you choose the prov
 Gemini example:
 
 ```bash
-uv run python src/benchmark.py --max-retries 5 --provider "Gemini API" --model "gemini-flash-lite-latest"
+conda activate openaerostruct
+python src/benchmark.py --max-retries 5 --provider "Gemini API" --model "gemini-flash-lite-latest"
 ```
 
 Ollama example:
 
 ```bash
-uv run python src/benchmark.py --max-retries 5 --provider "Ollama" --model "gemini-2.0-flash"
+conda activate openaerostruct
+python src/benchmark.py --max-retries 5 --provider "Ollama" --model "gemini-2.0-flash"
 ```
 
 In these commands, `--provider` selects the LLM backend, `--model` selects the exact model name passed to that backend, and `--max-retries 5` sets the maximum number of coder retry attempts used when the benchmark tries to recover from execution errors or failed runs.

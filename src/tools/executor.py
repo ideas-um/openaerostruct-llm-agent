@@ -2,9 +2,6 @@ import subprocess
 import sys
 import os
 import ast
-import ctypes
-import platform
-import struct
 import shutil
 import tempfile
 import uuid
@@ -19,6 +16,7 @@ _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 _DEFAULT_SCRIPT = os.path.join(_SRC_DIR, "generated_run.py")
 _DOCKER_IMAGE_ENV = "OAS_SANDBOX_IMAGE"
 _DOCKER_BACKEND_ENV = "OAS_EXECUTION_BACKEND"
+_HOST_PYTHON_ENV = "OAS_HOST_PYTHON"
 _DEFAULT_DOCKER_IMAGE = "openaerostruct-sandbox:latest"
 _DOCKER_STAGE_DIR_ENV = "OAS_DOCKER_STAGE_DIR"
 _DOCKER_SECCOMP_ENV = "OAS_DOCKER_SECCOMP_PROFILE"
@@ -56,11 +54,8 @@ ALLOWED_TOP_LEVEL_IMPORTS: frozenset = frozenset(
         # Simulation frameworks
         "openaerostruct",
         "openmdao",
-        # Plotting – niceplots is a project dependency used by several blueprints
-        # for styled matplotlib figures; plotly is used by the analysis blueprint
+        # Plotting
         "matplotlib",
-        "plotly",
-        "niceplots",
         # Data handling
         "pandas",
         # Safe standard-library modules for computation scripts
@@ -148,107 +143,6 @@ def validate_generated_code(code: str) -> tuple:
                 return False, f"Disallowed method call: '.{func.attr}()'"
 
     return True, "OK"
-
-
-# ---------------------------------------------------------------------------
-# Optional seccomp BPF sandbox (Linux / x86_64 only)
-# ---------------------------------------------------------------------------
-# Deny-list: network I/O + process-spawning syscalls.
-# Everything else is allowed (Python / NumPy / SciPy need many syscalls).
-_BLOCKED_SYSCALLS_X86_64: tuple = (
-    41,  # socket
-    42,  # connect
-    43,  # accept
-    44,  # sendto
-    45,  # recvfrom
-    46,  # sendmsg
-    47,  # recvmsg
-    48,  # shutdown
-    49,  # bind
-    50,  # listen
-    56,  # clone
-    57,  # fork
-    58,  # vfork
-    59,  # execve
-    322,  # execveat
-)
-
-_PR_SET_NO_NEW_PRIVS = 38
-_PR_SET_SECCOMP = 22
-_SECCOMP_MODE_FILTER = 2
-_SECCOMP_RET_ALLOW = 0x7FFF0000
-_SECCOMP_RET_ERRNO = 0x00050001  # ERRNO(EPERM) – returns clear error instead of KILL
-
-
-def _build_seccomp_preexec():
-    """
-    Build and return a preexec_fn that applies a seccomp BPF deny-list in the
-    child process before exec.  Linux / x86_64 only; returns None on any other
-    platform or on any setup error so the caller degrades gracefully.
-
-    BPF program layout (n = len(_BLOCKED_SYSCALLS_X86_64)):
-        [0]       LD W ABS 0          – load syscall number
-        [1..n]    JEQ <nr>, jt, 0     – if match jump to ERRNO, else fall through
-        [n+1]     RET ALLOW           – default path
-        [n+2]     RET ERRNO(EPERM)    – blocked path
-    """
-    if platform.system() != "Linux" or platform.machine() != "x86_64":
-        return None
-
-    try:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    except OSError:
-        return None
-
-    blocked = _BLOCKED_SYSCALLS_X86_64
-
-    def _bpf_stmt(code: int, k: int) -> bytes:
-        return struct.pack("<HBBI", code, 0, 0, k)
-
-    def _bpf_jump(code: int, k: int, jt: int, jf: int) -> bytes:
-        return struct.pack("<HBBI", code, jt, jf, k)
-
-    BPF_LD = 0x00
-    BPF_JMP = 0x05
-    BPF_RET = 0x06
-    BPF_W = 0x00
-    BPF_ABS = 0x20
-    BPF_JEQ = 0x10
-    BPF_K = 0x00
-
-    n = len(blocked)
-    instructions = [_bpf_stmt(BPF_LD | BPF_W | BPF_ABS, 0)]
-    for i, nr in enumerate(blocked):
-        # Layout: [0]=LD  [1..n]=JEQ  [n+1]=ALLOW  [n+2]=ERRNO
-        # The instruction after JEQ[i] is at index i+2; ERRNO is at n+2.
-        # Forward jump distance = (n+2) - (i+2) = n - i.
-        jump_to_errno = n - i
-        instructions.append(_bpf_jump(BPF_JMP | BPF_JEQ | BPF_K, nr, jump_to_errno, 0))
-    instructions.append(_bpf_stmt(BPF_RET | BPF_K, _SECCOMP_RET_ALLOW))
-    instructions.append(_bpf_stmt(BPF_RET | BPF_K, _SECCOMP_RET_ERRNO))
-
-    filter_bytes = b"".join(instructions)
-    # Keep the buffer alive for the lifetime of this module so the child
-    # process (forked copy of this process) can safely reference it.
-    filter_buf = ctypes.create_string_buffer(filter_bytes)
-    filter_ptr = ctypes.cast(filter_buf, ctypes.c_void_p).value
-
-    class _SockFprog(ctypes.Structure):
-        _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.c_void_p)]
-
-    fprog = _SockFprog(len=len(instructions), filter=filter_ptr)
-
-    def _apply():
-        try:
-            libc.prctl(_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
-            libc.prctl(_PR_SET_SECCOMP, _SECCOMP_MODE_FILTER, ctypes.byref(fprog))
-        except Exception:
-            pass  # fail open – static scan is the primary guard
-
-    return _apply
-
-
-_SECCOMP_PREEXEC = _build_seccomp_preexec()
 
 
 # ---------------------------------------------------------------------------
@@ -415,15 +309,22 @@ def _stage_container_workspace(script_path: str) -> tuple[str, str]:
     return tmp_root, staged_script_path
 
 
+def _host_python_executable() -> str:
+    requested = os.getenv(_HOST_PYTHON_ENV)
+    if requested:
+        return requested
+    return sys.executable
+
+
 def _execute_on_host(script_path: str, timeout: int) -> ExecutionResult:
     """Run the validated script directly on the host Python interpreter."""
     try:
+        python_exe = _host_python_executable()
         proc = subprocess.run(
-            [sys.executable, script_path],
+            [python_exe, script_path],
             capture_output=True,
             text=True,
             timeout=timeout,
-            preexec_fn=_SECCOMP_PREEXEC,  # None → no-op; non-None → apply filter
         )
         return ExecutionResult(proc.returncode, proc.stdout, proc.stderr)
     except subprocess.TimeoutExpired as exc:
@@ -446,6 +347,7 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
     image = _docker_image_name()
     host_output_dir = _host_output_dir_for(script_path)
     staged_root, staged_script_path = _stage_container_workspace(script_path)
+    staged_script_name = os.path.basename(staged_script_path)
     staged_out_dir = os.path.join(staged_root, "openaerostruct_out")
     staged_src_run_out_dir = os.path.join(staged_root, "src", "generated_run_out")
     seccomp_profile = os.path.abspath(_docker_seccomp_profile())
@@ -488,7 +390,7 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
             (
                 "type=bind,"
                 f"source={staged_script_path},"
-                "target=/workspace/src/generated_run.py,"
+                f"target=/workspace/src/{staged_script_name},"
                 "readonly"
             ),
             "--mount",
@@ -498,18 +400,16 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
                 "target=/workspace/src/generated_run_out"
             ),
             "--mount",
-            (
-                "type=bind,"
-                f"source={staged_out_dir},"
-                "target=/workspace/openaerostruct_out"
-            ),
+            (f"type=bind,source={staged_out_dir},target=/workspace/openaerostruct_out"),
             "-w",
             "/workspace/src",
         ]
         if uid is not None and gid is not None:
             cmd.extend(["--user", f"{uid}:{gid}"])
 
-        cmd.extend([image, "python", f"/workspace/src/{os.path.basename(staged_script_path)}"])
+        cmd.extend(
+            [image, "python", f"/workspace/src/{staged_script_name}"]
+        )
 
         proc = subprocess.run(
             cmd,
@@ -537,7 +437,9 @@ def _execute_in_docker(script_path: str, timeout: int) -> ExecutionResult:
         )
         stdout = _decode_timeout_output(exc.stdout)
         stderr = _decode_timeout_output(exc.stderr)
-        stderr += f"\nTimeoutError: Docker sandbox execution exceeded {timeout} seconds."
+        stderr += (
+            f"\nTimeoutError: Docker sandbox execution exceeded {timeout} seconds."
+        )
         return ExecutionResult(-1, stdout, stderr)
     except Exception as exc:
         return ExecutionResult(-1, "", f"DockerSandboxException: {str(exc)}")
@@ -553,9 +455,8 @@ def execute_run(script_path=_DEFAULT_SCRIPT, timeout=120):
     disallowed imports or dangerous calls the script is rejected immediately
     and no subprocess is spawned.
 
-    On Linux/x86_64 an optional seccomp BPF filter is applied in the child
-    process to block network and process-spawning syscalls as an additional
-    defence-in-depth layer.
+    Docker execution adds the sandbox boundary when configured; host execution
+    relies on the static AST scan.
     """
     # ── Read generated code ────────────────────────────────────────────────
     try:

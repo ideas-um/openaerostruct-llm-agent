@@ -13,7 +13,6 @@ dependencies = [
     "openaerostruct",
     "openmdao>=3.38.0",
     "pandas>=2.2.3",
-    "plotly>=6.0.1",
     "python-dotenv>=1.1.1",
     "streamlit>=1.56.0",
 ]

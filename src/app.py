@@ -7,6 +7,7 @@ import streamlit as st
 from llm.router import route_intent_stream
 from llm.config import is_ollama_provider
 from agent_logic import (
+    build_approved_relaxation_prompt,
     run_agent,
     cleanup_artifacts,
     get_generated_plots,
@@ -74,9 +75,7 @@ def _snapshot_plot_files(plot_paths: list[str], scope: str) -> list[str]:
         return []
 
     os.makedirs(_PLOT_ARCHIVE_DIR, exist_ok=True)
-    snapshot_dir = os.path.join(
-        _PLOT_ARCHIVE_DIR, f"{scope}_{uuid.uuid4().hex[:10]}"
-    )
+    snapshot_dir = os.path.join(_PLOT_ARCHIVE_DIR, f"{scope}_{uuid.uuid4().hex[:10]}")
     os.makedirs(snapshot_dir, exist_ok=True)
 
     snap_paths = []
@@ -208,6 +207,26 @@ st.title("OpenAeroStruct — LLM Agent")
 # ---------------------------------------------------------------------------
 
 
+def _audit_inspection_payload(report: dict, diff: str = "") -> dict:
+    """Return the full audit payload shown in expandable JSON inspectors."""
+    if not report and not diff:
+        return {}
+
+    payload = dict(report or {})
+    if diff and "diff" not in payload:
+        payload["diff"] = diff
+    return payload
+
+
+def show_blueprint_audit_json(report: dict, diff: str = ""):
+    payload = _audit_inspection_payload(report, diff)
+    if not payload:
+        return
+
+    with st.expander("Show Blueprint Audit (JSON)", expanded=False):
+        st.json(payload)
+
+
 def _make_ui_callback(stream_state: dict, no_converge_store: dict):
     """Return a callback that routes agent events to Streamlit UI elements."""
 
@@ -232,6 +251,7 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 "code": "",
                 "status": "running",
                 "logs": "",
+                "audit": {},
                 "db_summary": "",
                 "plots": [],
             }
@@ -242,11 +262,17 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             state["text"] = state.get("text", "") + data["chunk"]
             txt = state["text"]
 
-            # Robust live extraction supporting both XML and legacy headers
+            # Live extraction expects XML, with raw-Python fallback for malformed streams.
             r_match = re.search(r"<reasoning>(.*?)(?:</reasoning>|$)", txt, re.S | re.I)
             c_match = re.search(r"<code>(.*?)(?:</code>|$)", txt, re.S | re.I)
+            raw_code = re.search(r"(?m)^(?:import|from)\s+", txt)
 
-            if not r_match and not c_match and "REASONING:" not in txt:
+            if raw_code and not r_match and not c_match:
+                code_content = txt[raw_code.start() :].strip()
+                state.get("placeholder", st.empty()).markdown(
+                    f"```python\n{code_content}\n```"
+                )
+            elif not r_match and not c_match and "REASONING:" not in txt:
                 state.get("placeholder", st.empty()).markdown(f"```text\n{txt}\n```")
             else:
                 if "placeholder" in state and state["placeholder"]:
@@ -260,7 +286,9 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 if r_match:
                     content = r_match.group(1).strip()
                     if content:
-                        state["reasoning_placeholder"].info(f"**Thinking:** {content}")
+                        state["reasoning_placeholder"].info(
+                            f"**Reasoning summary:** {content}"
+                        )
                 elif "REASONING:" in txt:
                     legacy_text = (
                         txt.split("##### REASONING ENDS #####")[0]
@@ -269,7 +297,7 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                     )
                     if legacy_text:
                         state["reasoning_placeholder"].info(
-                            f"**Thinking:** {legacy_text}"
+                            f"**Reasoning summary:** {legacy_text}"
                         )
 
                 if c_match:
@@ -323,6 +351,36 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 st.session_state["active_attempts"][-1]["status"] = "blocked"
                 st.session_state["active_attempts"][-1]["logs"] = violation_text
 
+        elif event == "blueprint_audit":
+            report = data.get("report", {})
+            audit_payload = _audit_inspection_payload(report, data.get("diff", ""))
+            if report.get("passed", True):
+                st.success("✅ Blueprint consistency check passed.")
+                if report.get("warning"):
+                    st.warning(report["warning"])
+            else:
+                if report.get("audit_infrastructure_error"):
+                    feedback = "Auditor failed to produce a valid review after retry."
+                    reasons = report.get("invalid_audit_reasons") or []
+                    if reasons:
+                        feedback += "\n" + "\n".join(f"- {reason}" for reason in reasons)
+                    st.error("❌ Blueprint auditor failed.")
+                else:
+                    feedback = report.get("feedback_for_coder", "")
+                    st.error("❌ Blueprint consistency check failed.")
+                if feedback:
+                    st.code(feedback, language="text")
+
+            show_blueprint_audit_json(audit_payload)
+
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["audit"] = audit_payload
+                if not report.get("passed", True):
+                    st.session_state["active_attempts"][-1]["status"] = "audit_failed"
+                    st.session_state["active_attempts"][-1]["logs"] = feedback
+                elif report.get("warning"):
+                    st.session_state["active_attempts"][-1]["logs"] = report["warning"]
+
         elif event == "exec_success":
             st.success("✅ Execution completed successfully.")
             db_sum = data.get("db_summary", "")
@@ -340,10 +398,8 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "success"
                 st.session_state["active_attempts"][-1]["db_summary"] = db_sum
-                st.session_state["active_attempts"][-1]["plots"] = (
-                    _snapshot_plot_files(
-                        data.get("plots", []), f"attempt_{attempt}_success"
-                    )
+                st.session_state["active_attempts"][-1]["plots"] = _snapshot_plot_files(
+                    data.get("plots", []), f"attempt_{attempt}_success"
                 )
 
         elif event == "exec_error":
@@ -368,10 +424,8 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
             if st.session_state["active_attempts"]:
                 st.session_state["active_attempts"][-1]["status"] = "no_converge"
                 st.session_state["active_attempts"][-1]["db_summary"] = db_sum
-                st.session_state["active_attempts"][-1]["plots"] = (
-                    _snapshot_plot_files(
-                        data.get("plots", []), f"attempt_{attempt}_no_converge"
-                    )
+                st.session_state["active_attempts"][-1]["plots"] = _snapshot_plot_files(
+                    data.get("plots", []), f"attempt_{attempt}_no_converge"
                 )
 
         elif event == "no_converge_final":
@@ -500,11 +554,17 @@ for message in st.session_state.messages:
                     if att["status"] == "success":
                         st.success("✅ Execution completed successfully.")
                         # Database summary and plots for the successful run are shown once at the bottom
+                        if att.get("logs"):
+                            st.warning(att["logs"])
                     elif att["status"] == "error":
                         st.error("❌ Python error occurred.")
                         st.code(att["logs"], language="text")
-                    elif att["status"] == "generation_error":
-                        st.error("❌ Code generation failed before execution.")
+                    elif att["status"] == "audit_failed":
+                        audit = att.get("audit") or {}
+                        if audit.get("audit_infrastructure_error"):
+                            st.error("❌ Blueprint auditor failed.")
+                        else:
+                            st.error("❌ Blueprint consistency check failed.")
                         st.code(att["logs"], language="text")
                     elif att["status"] == "no_converge":
                         st.warning("⚠️ Optimiser did not converge.")
@@ -516,6 +576,8 @@ for message in st.session_state.messages:
                         if att.get("plots"):
                             for plot_path in att["plots"]:
                                 show_plot(plot_path)
+
+                    show_blueprint_audit_json(att.get("audit") or {})
 
         if "code" in message:
             with st.expander("Show Generated Code", expanded=False):
@@ -556,8 +618,8 @@ if st.session_state["pending_relaxation"]:
                     )
                 else:
                     extra = "Apply these relaxations and retry:\n" + pr["suggestion"]
-                st.session_state["relaxation_prompt"] = (
-                    pr["user_prompt"] + "\n\n" + extra
+                st.session_state["relaxation_prompt"] = build_approved_relaxation_prompt(
+                    pr["user_prompt"], extra
                 )
                 st.session_state["relaxation_blueprints"] = pr["blueprints"]
                 st.session_state["relaxation_error_logs"] = pr.get("error_logs", [])
@@ -582,6 +644,14 @@ if _relaxation_prompt:
     cleanup_artifacts()
     st.session_state["stop_run"] = False
     st.session_state["active_attempts"] = []  # Clear for retry
+    prev_routing = next(
+        (
+            message["routing_json"]
+            for message in reversed(st.session_state.messages)
+            if "routing_json" in message
+        ),
+        {},
+    )
 
     with st.chat_message("assistant"):
         thought_expander = st.expander(
@@ -602,16 +672,8 @@ if _relaxation_prompt:
                 callback=_make_ui_callback(_rs, _rn),
                 prior_error_logs=_relaxation_error_logs,
                 prior_code=st.session_state.pop("relaxation_prior_code", ""),
+                routing_data=prev_routing,
             )
-        # Pull latest available routing to satisfy 5-param signature
-        prev_routing = next(
-            (
-                m["routing_json"]
-                for m in reversed(st.session_state.messages)
-                if "routing_json" in m
-            ),
-            {},
-        )
         _handle_agent_result(
             result, _rn, _relaxation_prompt, _relaxation_blueprints or [], prev_routing
         )
@@ -683,6 +745,7 @@ if user_prompt:
                 max_retries=max_retries,
                 stream=True,
                 callback=_make_ui_callback(_ss, _nc),
+                routing_data=routing_data,
             )
 
         _handle_agent_result(

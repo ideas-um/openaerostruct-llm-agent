@@ -1,13 +1,16 @@
 import os
 import csv
-import sys
 import time
 import json
 import shutil
 import logging
 import statistics
+import difflib
+import hashlib
+import re
 from datetime import datetime
 
+from llm.config import LLMBackendTransientError
 from llm.router import route_intent_stream
 from agent_logic import run_agent, AgentResult
 
@@ -23,9 +26,11 @@ _PLOTS_DIR = os.path.join(_OAS_OUT_DIR, "agent_plots")
 _GEN_RUN_DIR = os.path.join(_OAS_OUT_DIR, "generated_run_out")
 _BENCH_OUT_DIR = os.path.join(_PROJECT_DIR, "benchmark_run_out")
 _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
+_BLUEPRINTS_DIR = os.path.join(_SRC_DIR, "blueprints")
 
 DEFAULT_MAX_RETRIES = 5
 NUM_REPS = 10
+MAX_BACKEND_RETRIES_PER_REP = int(os.getenv("MAX_BACKEND_RETRIES_PER_REP", "3"))
 
 # ---------------------------------------------------------------------------
 # CSV headers
@@ -45,6 +50,8 @@ REP_HEADERS = [
     "input_tokens",
     "output_tokens",
     "success",
+    "result_metrics",
+    "result_metrics_hash",
     "error_log",
 ]
 
@@ -70,9 +77,22 @@ SUMMARY_HEADERS = [
     "elapsed_s_max",
     "input_tokens_mean",
     "output_tokens_mean",
+    "unique_result_metrics",
     "error_categories",
     "model",
     "max_retry_count",
+]
+
+ATTEMPT_HEADERS = [
+    "id",
+    "category",
+    "rep",
+    "attempt",
+    "event",
+    "passed_audit",
+    "status",
+    "summary",
+    "details_path",
 ]
 
 
@@ -103,16 +123,170 @@ def _copy_artifacts(attempt_dir: str):
     artifacts_dst = os.path.join(attempt_dir, "artifacts")
     os.makedirs(artifacts_dst, exist_ok=True)
     if os.path.exists(_OAS_OUT_DIR):
-        for fname in os.listdir(_OAS_OUT_DIR):
-            src = os.path.join(_OAS_OUT_DIR, fname)
-            dst = os.path.join(artifacts_dst, fname)
-            try:
-                if os.path.isfile(src):
+        keep_ext = {".db", ".csv", ".png", ".jpg", ".jpeg", ".pdf"}
+        for root, _, files in os.walk(_OAS_OUT_DIR):
+            rel_root = os.path.relpath(root, _OAS_OUT_DIR)
+            for fname in files:
+                if os.path.splitext(fname)[1].lower() not in keep_ext:
+                    continue
+                src = os.path.join(root, fname)
+                dst_dir = (
+                    artifacts_dst
+                    if rel_root == "."
+                    else os.path.join(artifacts_dst, rel_root)
+                )
+                dst = os.path.join(dst_dir, fname)
+                try:
+                    os.makedirs(dst_dir, exist_ok=True)
                     shutil.copy2(src, dst)
-                elif os.path.isdir(src):
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-            except Exception:
-                pass
+                except Exception:
+                    pass
+
+
+def _safe_name(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "_" for c in name)
+
+
+def _write_json(path: str, data: dict):
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+
+
+def _summarize_error(error: str) -> str:
+    text = " ".join(str(error).split())
+    if not text:
+        return ""
+
+    if "python: can't open file" in text:
+        return "Python error: generated script path missing in execution sandbox"
+
+    if "Blueprint consistency error:" in text:
+        item = ""
+        reason = ""
+        item_match = re.search(r"\b1\.\s+(.+?)\s+Reason:", text)
+        if item_match:
+            item = item_match.group(1).strip()
+        reason_match = re.search(r"Reason:\s+(.+?)(?:\s+Replace generated snippet:|\s+With blueprint snippet:|\s+Instruction:|$)", text)
+        if reason_match:
+            reason = reason_match.group(1).strip()
+        if item or reason:
+            return f"Blueprint consistency error: {item} - {reason}".strip(" -")
+        return "Blueprint consistency error"
+
+    if "Python error:" in text:
+        detail = text.split("Python error:", 1)[1].strip()
+        return f"Python error: {detail[:180]}" if detail else "Python error"
+
+    if "Safety block:" in text:
+        return text[:220]
+
+    return text[:220]
+
+
+def _compact_metrics_for_csv(metrics: dict) -> dict:
+    """Keep rep_results.csv readable; full metrics still go to final_result_metrics.json."""
+    if not metrics:
+        return {}
+
+    compact = dict(metrics)
+    analysis_csv = compact.get("analysis_csv")
+    if isinstance(analysis_csv, dict) and isinstance(analysis_csv.get("rows"), list):
+        rows = analysis_csv["rows"]
+        compact["analysis_csv"] = {
+            "path": analysis_csv.get("path"),
+            "columns": analysis_csv.get("columns"),
+            "row_count": len(rows),
+            "first": rows[0] if rows else None,
+            "last": rows[-1] if rows else None,
+        }
+
+    stdout = compact.get("stdout")
+    if isinstance(stdout, dict):
+        compact_stdout = dict(stdout)
+        compact_stdout.pop("analysis_points", None)
+        compact_stdout.pop("lines", None)
+        compact["stdout"] = compact_stdout
+
+    return compact
+
+
+def _round_metric_number(value: float):
+    value = float(value)
+    if abs(value) < 1e-4:
+        return 0.0
+    return round(value, 6)
+
+
+def _normalize_metric_value(value):
+    if isinstance(value, dict):
+        return {str(k): _normalize_metric_value(v) for k, v in sorted(value.items())}
+    if isinstance(value, list):
+        return [_normalize_metric_value(v) for v in value]
+    if isinstance(value, tuple):
+        return [_normalize_metric_value(v) for v in value]
+    if isinstance(value, float):
+        return _round_metric_number(value)
+    if isinstance(value, int):
+        return value
+    return value
+
+
+def _metrics_for_hash(metrics: dict) -> dict:
+    """Hash stable numeric results only; stdout/reporting differences are logged separately."""
+    if not metrics:
+        return {}
+    selected = {}
+    if "db" in metrics:
+        selected["db"] = _normalize_metric_value(metrics["db"])
+    if "analysis_csv" in metrics:
+        rows = metrics.get("analysis_csv", {}).get("rows", [])
+        selected["analysis_csv"] = _normalize_metric_value({"rows": rows})
+    return selected
+
+
+def _write_code_diffs(
+    code: str, blueprints: list[str], out_dir: str, stem: str
+) -> list[str]:
+    """Save unified and HTML diffs comparing generated code to each blueprint."""
+    paths = []
+    code_lines = code.splitlines()
+    for blueprint in blueprints:
+        blueprint_path = os.path.join(_BLUEPRINTS_DIR, blueprint)
+        if not os.path.exists(blueprint_path):
+            continue
+
+        with open(blueprint_path, "r", encoding="utf-8") as fh:
+            blueprint_text = fh.read()
+        blueprint_lines = blueprint_text.splitlines()
+
+        base = f"{stem}_{_safe_name(blueprint)}"
+        diff_path = os.path.join(out_dir, base + ".diff")
+        html_path = os.path.join(out_dir, base + ".html")
+
+        diff = difflib.unified_diff(
+            blueprint_lines,
+            code_lines,
+            fromfile=f"blueprints/{blueprint}",
+            tofile="generated/code.py",
+            lineterm="",
+        )
+        with open(diff_path, "w", encoding="utf-8") as fh:
+            for line in diff:
+                fh.write(line + "\n")
+
+        html = difflib.HtmlDiff(wrapcolumn=120).make_file(
+            blueprint_text.splitlines(),
+            code.splitlines(),
+            fromdesc=f"blueprints/{blueprint}",
+            todesc="generated/code.py",
+            context=True,
+            numlines=3,
+        )
+        with open(html_path, "w", encoding="utf-8") as fh:
+            fh.write(html)
+
+        paths.extend([diff_path, html_path])
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -164,12 +338,20 @@ def _run_single_rep(
         expected_set = set(_norm(b) for b in json.loads(q["expected_blueprints"]))
         routing_correct = expected_set == set(blueprints)
         print(f"    Routing: {selected}  (correct={routing_correct})")
+    except LLMBackendTransientError:
+        backend_logger.removeHandler(file_handler)
+        file_handler.close()
+        raise
     except Exception as e:
         selected = "ERROR"
         blueprints = [json.loads(q["expected_blueprints"])[0]]
         print(f"    Routing Error: {e}")
 
     attempt_dirs: dict[int, str] = {}
+    attempt_records: list[dict] = []
+
+    def _rel(path: str) -> str:
+        return os.path.relpath(path, os.path.dirname(rep_dir))
 
     def bench_callback(event: str, data: dict):
         attempt = data.get("attempt", 0)
@@ -178,30 +360,124 @@ def _run_single_rep(
             attempt_dir = os.path.join(rep_dir, f"attempt_{attempt}")
             os.makedirs(attempt_dir, exist_ok=True)
             attempt_dirs[attempt] = attempt_dir
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": "",
+                    "status": "started",
+                    "summary": "",
+                    "details_path": _rel(attempt_dir),
+                }
+            )
         elif event == "code_ready":
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
-            with open(os.path.join(attempt_dir, "code.py"), "w") as fh:
-                fh.write(data.get("code", ""))
+            code = data.get("code", "")
+            code_path = os.path.join(attempt_dir, "code.py")
+            with open(code_path, "w", encoding="utf-8") as fh:
+                fh.write(code)
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": "",
+                    "status": "code_generated",
+                    "summary": (data.get("reasoning") or "")[:240],
+                    "details_path": _rel(code_path),
+                }
+            )
+        elif event == "blueprint_audit":
+            attempt_dir = attempt_dirs.get(attempt, rep_dir)
+            report = data.get("report", {})
+            diff_text = data.get("diff", "") or report.get("diff", "")
+            report = {k: v for k, v in report.items() if k != "diff"}
+            report_path = os.path.join(attempt_dir, "blueprint_audit.json")
+            diff_path = os.path.join(attempt_dir, "blueprint_audit.diff")
+            _write_json(report_path, report)
+            if diff_text:
+                with open(diff_path, "w", encoding="utf-8") as fh:
+                    fh.write(diff_text)
+            violations = report.get("violations") or []
+            summary = "passed"
+            if violations:
+                first = violations[0]
+                summary = (
+                    f"{first.get('changed_item', 'violation')}: "
+                    f"{first.get('reason', '')}"
+                )
+            elif report.get("warning"):
+                summary = report["warning"]
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": report.get("passed", True),
+                    "status": "audit_passed" if report.get("passed", True) else "audit_failed",
+                    "summary": summary[:240],
+                    "details_path": _rel(report_path),
+                }
+            )
         elif event in ("exec_success", "exec_error", "no_converge"):
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             _copy_artifacts(attempt_dir)
+            if event == "exec_success":
+                summary = "execution completed"
+            elif event == "exec_error":
+                summary = _summarize_error("Python error: " + data.get("stderr_tail", ""))
+            else:
+                summary = _summarize_error(data.get("stdout_tail", "optimizer did not converge"))
+            attempt_records.append(
+                {
+                    "id": q["id"],
+                    "category": q["category"],
+                    "rep": os.path.basename(rep_dir).replace("rep_", ""),
+                    "attempt": attempt,
+                    "event": event,
+                    "passed_audit": "",
+                    "status": event,
+                    "summary": summary[:240],
+                    "details_path": _rel(attempt_dir),
+                }
+            )
 
     # 2. Execution
-    result: AgentResult = run_agent(
-        user_prompt=q["query"],
-        blueprints=blueprints,
-        model_name=model,
-        provider=provider,
-        max_retries=max_retries,
-        stream=True,
-        callback=bench_callback,
-        gen_script_path=_BENCH_SCRIPT,
-        retry_on_no_converge=True,
-    )
+    try:
+        result: AgentResult = run_agent(
+            user_prompt=q["query"],
+            blueprints=blueprints,
+            model_name=model,
+            provider=provider,
+            max_retries=max_retries,
+            stream=True,
+            callback=bench_callback,
+            gen_script_path=_BENCH_SCRIPT,
+            retry_on_no_converge=True,
+            routing_data=routing_data,
+        )
+    except LLMBackendTransientError:
+        backend_logger.removeHandler(file_handler)
+        file_handler.close()
+        raise
 
     if result.final_code:
-        with open(os.path.join(rep_dir, "final_code.py"), "w") as fh:
+        with open(os.path.join(rep_dir, "final_code.py"), "w", encoding="utf-8") as fh:
             fh.write(result.final_code)
+        _write_code_diffs(result.final_code, blueprints, rep_dir, "final_vs_blueprint")
+
+    if result.result_metrics:
+        _write_json(
+            os.path.join(rep_dir, "final_result_metrics.json"),
+            result.result_metrics,
+        )
 
     exit_code = 0 if result.success else -1
 
@@ -217,8 +493,10 @@ def _run_single_rep(
         "converged": result.converged,
         "success": result.success,
         "error_logs": result.error_logs,
+        "result_metrics": result.result_metrics,
         "input_tokens": routing_data.get("input_tokens", 0) + result.input_tokens,
         "output_tokens": routing_data.get("output_tokens", 0) + result.output_tokens,
+        "attempt_records": attempt_records,
     }
 
 
@@ -230,15 +508,18 @@ def run_benchmark(
     model="gemini-flash-lite-latest",
     provider="Gemini API",
     max_retries=DEFAULT_MAX_RETRIES,
+    num_reps=NUM_REPS,
+    case_ids=None,
 ):
     os.makedirs(_OAS_OUT_DIR, exist_ok=True)
     os.makedirs(_BENCH_OUT_DIR, exist_ok=True)
 
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(_BENCH_OUT_DIR, f"run_{run_ts}")
+    run_dir = os.path.join(_BENCH_OUT_DIR, f"run_{run_ts}_{_safe_name(model)}")
     os.makedirs(run_dir, exist_ok=True)
 
     rep_results_file = os.path.join(run_dir, "rep_results.csv")
+    attempt_results_file = os.path.join(run_dir, "attempt_results.csv")
     summary_results_file = os.path.join(run_dir, "benchmark_results.csv")
     metadata_file = os.path.join(run_dir, "run_metadata.json")
 
@@ -248,7 +529,8 @@ def run_benchmark(
                 "model": model,
                 "provider": provider,
                 "max_retry_count": max_retries,
-                "num_reps": NUM_REPS,
+                "num_reps": num_reps,
+                "case_ids": sorted(case_ids) if case_ids else None,
                 "timestamp": run_ts,
             },
             fh,
@@ -262,10 +544,12 @@ def run_benchmark(
             queries.append(row)
     if limit:
         queries = queries[:limit]
+    if case_ids:
+        queries = [q for q in queries if q["id"] in case_ids]
 
-    print(f"--- Starting Benchmark ({len(queries)} cases × {NUM_REPS} reps) ---")
+    print(f"--- Starting Benchmark ({len(queries)} cases × {num_reps} reps) ---")
 
-    total_success, total_runs, rep_row_idx, sum_row_idx = 0, 0, 0, 0
+    total_success, total_runs, rep_row_idx, attempt_row_idx, sum_row_idx = 0, 0, 0, 0, 0
 
     for idx, q in enumerate(queries):
         case_id = q["id"]
@@ -277,14 +561,30 @@ def run_benchmark(
         rep_successes, rep_converged_count, opt_reps = 0, 0, 0
         rep_attempts_list, rep_elapsed_list, rep_in_tok, rep_out_tok = [], [], [], []
         rep_routing_correct, all_errors = [], []
+        rep_metric_hashes = []
         selected_last = "ERROR"
 
-        for rep in range(1, NUM_REPS + 1):
-            print(f"  [Rep {rep}/{NUM_REPS}]", end=" ", flush=True)
+        rep = 1
+        backend_retries = 0
+        while rep <= num_reps:
+            print(f"  [Rep {rep}/{num_reps}]", end=" ", flush=True)
             rep_dir = os.path.join(case_dir, f"rep_{rep}")
             start_time = time.time()
-            res = _run_single_rep(q, rep_dir, model, provider, max_retries)
+            try:
+                res = _run_single_rep(q, rep_dir, model, provider, max_retries)
+            except LLMBackendTransientError as exc:
+                backend_retries += 1
+                elapsed = round(time.time() - start_time, 2)
+                if backend_retries > MAX_BACKEND_RETRIES_PER_REP:
+                    print(f"Backend retries exhausted after {elapsed}s: {exc}")
+                    raise
+                print(
+                    f"Backend retry {backend_retries}/{MAX_BACKEND_RETRIES_PER_REP} "
+                    f"after {elapsed}s: {exc}"
+                )
+                continue
             elapsed = round(time.time() - start_time, 2)
+            backend_retries = 0
 
             if res["success"]:
                 rep_successes += 1
@@ -302,6 +602,22 @@ def run_benchmark(
             selected_last = res["selected_blueprints"]
             total_runs += 1
             all_errors.extend(res["error_logs"])
+            hash_metrics_json = json.dumps(
+                _metrics_for_hash(res["result_metrics"]),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            csv_metrics_json = json.dumps(
+                _compact_metrics_for_csv(res["result_metrics"]),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            metrics_hash = (
+                hashlib.sha1(hash_metrics_json.encode("utf-8")).hexdigest()[:12]
+                if hash_metrics_json != "{}"
+                else ""
+            )
+            rep_metric_hashes.append(metrics_hash)
 
             rep_row = {
                 "id": case_id,
@@ -318,13 +634,24 @@ def run_benchmark(
                 "input_tokens": res["input_tokens"],
                 "output_tokens": res["output_tokens"],
                 "success": res["success"],
+                "result_metrics": csv_metrics_json,
+                "result_metrics_hash": metrics_hash,
                 "error_log": " ||| ".join(res["error_logs"]).replace("\n", " "),
             }
             _append_result(
                 rep_results_file, rep_row, REP_HEADERS, write_header=(rep_row_idx == 0)
             )
             rep_row_idx += 1
+            for attempt_record in res.get("attempt_records", []):
+                _append_result(
+                    attempt_results_file,
+                    attempt_record,
+                    ATTEMPT_HEADERS,
+                    write_header=(attempt_row_idx == 0),
+                )
+                attempt_row_idx += 1
             print(f"Done (success={res['success']}, {elapsed}s)")
+            rep += 1
 
         n_reps = len(rep_attempts_list)
         summary_row = {
@@ -355,8 +682,9 @@ def run_benchmark(
             "elapsed_s_max": max(rep_elapsed_list),
             "input_tokens_mean": int(statistics.mean(rep_in_tok)),
             "output_tokens_mean": int(statistics.mean(rep_out_tok)),
+            "unique_result_metrics": len(set(h for h in rep_metric_hashes if h)),
             "error_categories": " ||| ".join(
-                sorted(set(e.splitlines()[0][:100] for e in all_errors if e))
+                sorted(set(_summarize_error(e) for e in all_errors if e))
             ),
             "model": model,
             "max_retry_count": max_retries,
@@ -369,7 +697,7 @@ def run_benchmark(
         )
         sum_row_idx += 1
 
-    print(f"\n--- Benchmark Complete! ---")
+    print("\n--- Benchmark Complete! ---")
     print(
         f"Overall Success Rate: {total_success}/{total_runs} ({total_success / total_runs * 100:.1f}%)"
     )
@@ -380,6 +708,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, help="Limit test cases")
+    parser.add_argument("--num-reps", type=int, default=NUM_REPS, help="Number of reps per selected case")
+    parser.add_argument("--case-ids", type=str, help="Comma-separated benchmark case ids to run, e.g. 4,5")
     parser.add_argument("--model", type=str, default="gemini-flash-lite-latest")
     parser.add_argument("--provider", type=str, default="Gemini API")
     parser.add_argument(
@@ -389,9 +719,14 @@ if __name__ == "__main__":
         help="Maximum number of coder retry attempts per benchmark case",
     )
     args = parser.parse_args()
+    case_ids = None
+    if args.case_ids:
+        case_ids = {item.strip() for item in args.case_ids.split(",") if item.strip()}
     run_benchmark(
         limit=args.limit,
         model=args.model,
         provider=args.provider,
         max_retries=args.max_retries,
+        num_reps=args.num_reps,
+        case_ids=case_ids,
     )
