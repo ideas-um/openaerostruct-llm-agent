@@ -23,12 +23,58 @@ _RUN_OUT_DIR = os.path.join(_OUT_DIR, "generated_run_out")
 os.makedirs(_PLOTS_DIR, exist_ok=True)
 os.makedirs(_RUN_OUT_DIR, exist_ok=True)
 
+matplotlib.rcParams.update(
+    {
+        "font.family": "serif",
+        "axes.titlesize": 16,
+        "axes.labelsize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 12,
+    }
+)
+
+
+def _plot_path(name: str) -> str:
+    safe = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
+    return os.path.join(_PLOTS_DIR, safe + ".png")
+
+
+def _isa_temperature(altitude_m):
+    return np.maximum(288.15 - 0.0065 * np.asarray(altitude_m), 216.65)
+
+
+def _isa_pressure(altitude_m):
+    altitude_m = np.asarray(altitude_m)
+    T = _isa_temperature(altitude_m)
+    p_trop = 101325.0 * (T / 288.15) ** 5.255877
+    p_11 = 101325.0 * (216.65 / 288.15) ** 5.255877
+    p_strat = p_11 * np.exp(-9.80665 * (altitude_m - 11000.0) / (287.058 * 216.65))
+    return np.where(altitude_m <= 11000.0, p_trop, p_strat)
+
+
+def _isa_density(altitude_m):
+    return _isa_pressure(altitude_m) / (287.058 * _isa_temperature(altitude_m))
+
+
+def _isa_speed_of_sound(altitude_m):
+    return np.sqrt(1.4 * 287.058 * _isa_temperature(altitude_m))
+
+
+def _sutherland_mu(altitude_m):
+    T = _isa_temperature(altitude_m)
+    return 1.716e-5 * (T / 273.15) ** 1.5 * (273.15 + 110.4) / (T + 110.4)
+
+
 # =============================================================================
 # 1. MESH GENERATION
 # =============================================================================
 # CRM mesh is built-in — span and root_chord are not required for "CRM".
 # num_twist_cp controls how many twist control points are initialized from the CRM geometry.
-# generate_mesh returns TWO values for CRM — always unpack as (mesh, twist_cp).
+# generate_mesh returns (mesh, twist_cp) for CRM, or just mesh for rect.
+# Keep this tuple-handling pattern when switching wing_type.
+# num_y/num_x are mesh resolution assumptions. Preserve them unless the user
+# explicitly asks for mesh resolution, panel count, or discretization changes.
 # === AGENT EDITABLE SECTION START ===
 mesh_dict = {
     "num_y": 5,
@@ -40,7 +86,12 @@ mesh_dict = {
 }
 # === AGENT EDITABLE SECTION END ===
 
-mesh, twist_cp = generate_mesh(mesh_dict)
+_mesh_result = generate_mesh(mesh_dict)
+if isinstance(_mesh_result, tuple):
+    mesh, twist_cp = _mesh_result
+else:
+    mesh = _mesh_result
+    twist_cp = np.zeros(mesh_dict.get("num_twist_cp", 3))
 
 # =============================================================================
 # 2. SURFACE DEFINITION
@@ -106,18 +157,31 @@ n_points = 2
 #   e.g. "wing_geom.twist_cp", "wing_geom.taper", "wing_geom.xshear_cp".
 #   Using "wing.<var>" will fail — that path does not exist in this blueprint.
 #
+# Flight-condition arrays are indexed by point. If the user gives rho, use it
+# directly. If altitude is given and rho is omitted, set _rho_vals =
+# _isa_density(_altitudes).
+# Keep altitude, Mach, rho, v,
+# Reynolds number, and CL targets aligned by index.
 # alpha is a vector of length n_points — one AoA value per flight condition.
 # === AGENT EDITABLE SECTION START ===
 prob = om.Problem()
 
+_altitudes = np.ones(n_points) * 11000.0  # Altitude per point [m]
+_Mach_numbers = np.ones(n_points) * 0.84  # Mach per point
+_rho_vals = np.ones(n_points) * 0.38  # Explicit density per point [kg/m^3]; use _isa_density(_altitudes) only if rho is omitted.
+_a_vals = _isa_speed_of_sound(_altitudes)  # Speed of sound per point [m/s]
+_v_vals = _Mach_numbers * _a_vals  # Velocity per point [m/s]
+_mu_vals = _sutherland_mu(_altitudes)  # Dynamic viscosity per point [kg/(m*s)]
+
 indep_var_comp = om.IndepVarComp()
-indep_var_comp.add_output("v", val=248.136, units="m/s")
-indep_var_comp.add_output(
-    "alpha", val=np.ones(n_points) * 6.64, units="deg"
-)  # shape=(n_points,)
-indep_var_comp.add_output("Mach_number", val=0.84)
-indep_var_comp.add_output("re", val=1.0e6, units="1/m")
-indep_var_comp.add_output("rho", val=0.38, units="kg/m**3")
+indep_var_comp.add_output("v", val=_v_vals, units="m/s")
+# np.ones(n_points) already resizes this initializer when the number of points
+# changes. Preserve 6.64 unless the user explicitly requests another initial alpha.
+indep_var_comp.add_output("alpha", val=np.ones(n_points) * 6.64, units="deg")  # shape=(n_points,)
+indep_var_comp.add_output("Mach_number", val=_Mach_numbers)
+indep_var_comp.add_output("re", val=_rho_vals * _v_vals / _mu_vals, units="1/m")
+indep_var_comp.add_output("rho", val=_rho_vals, units="kg/m**3")
+indep_var_comp.add_output("speed_of_sound", val=_a_vals, units="m/s")
 indep_var_comp.add_output("cg", val=np.zeros((3)), units="m")
 # === AGENT EDITABLE SECTION END ===
 
@@ -133,23 +197,19 @@ for i in range(n_points):
     point_name = "aero_point_{}".format(i)
     prob.model.add_subsystem(point_name, aero_group)
 
-    prob.model.connect("v", point_name + ".v")
+    prob.model.connect("v", point_name + ".v", src_indices=[i])
     prob.model.connect("alpha", point_name + ".alpha", src_indices=[i])
-    prob.model.connect("Mach_number", point_name + ".Mach_number")
-    prob.model.connect("re", point_name + ".re")
-    prob.model.connect("rho", point_name + ".rho")
+    prob.model.connect("Mach_number", point_name + ".Mach_number", src_indices=[i])
+    prob.model.connect("re", point_name + ".re", src_indices=[i])
+    prob.model.connect("rho", point_name + ".rho", src_indices=[i])
     prob.model.connect("cg", point_name + ".cg")
 
     for surface in surfaces:
         name = surface["name"]
         prob.model.connect(point_name + ".CD", "multi_CD." + str(i) + "_CD")
         prob.model.connect(name + "_geom.mesh", point_name + "." + name + ".def_mesh")
-        prob.model.connect(
-            name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh"
-        )
-        prob.model.connect(
-            name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c"
-        )
+        prob.model.connect(name + "_geom.mesh", point_name + ".aero_states." + name + "_def_mesh")
+        prob.model.connect(name + "_geom.t_over_c", point_name + "." + name + "_perf." + "t_over_c")
 
 prob.model.add_subsystem(
     "multi_CD", MultiCD(n_points=n_points), promotes_outputs=["CD"]
@@ -199,15 +259,20 @@ prob.model.add_design_var("wing_geom.twist_cp", lower=-5, upper=8)
 #   "aero_point_1.wing_perf.CL"       — CL at flight condition 1
 #   "aero_point_0.wing_perf.S_ref"    — reference area at point 0 (NOT "wing.S_ref")
 #   "aero_point_0.wing_perf.CD"       — drag at point 0
-#   "CD"                              — total weighted drag (output of MultiCD)
+#   "CD"                              — unweighted sum of drag (output of MultiCD)
 
-prob.model.add_constraint("aero_point_0.wing_perf.CL", equals=0.45)
-prob.model.add_constraint("aero_point_1.wing_perf.CL", equals=0.5)
+# If n_points changes, this CL target list must be changed to the same length.
+for i in range(n_points):
+    prob.model.add_constraint(f"aero_point_{i}.wing_perf.CL", equals=[0.45, 0.5][i])
 
 # --- Objective ---
-# "CD" is the sum of drag across all flight points (output of MultiCD component).
+# "CD" is the unweighted sum of drag across all flight points.
+# If the user requests a weighted objective, replace MultiCD with explicit weighted wiring.
+# Define ExecComp inputs as CD_0, CD_1, ... and connect each
+# aero_point_i.CD directly to weighted_cd.CD_i. Do not use i_CD names or keep
+# duplicate direct and MultiCD connections.
 # FULL OBJECTIVE PATH REFERENCE:
-#   "CD"                              — weighted sum of drag (MultiCD output)
+#   "CD"                              — unweighted sum of drag (MultiCD output)
 #   "aero_point_0.wing_perf.CD"       — drag at a single flight point
 prob.model.add_objective("CD", scaler=1e4)
 # === AGENT EDITABLE SECTION END ===
@@ -222,38 +287,55 @@ print("\n--- Multipoint Optimization Results ---")
 print(f"Final CD (Sum): {prob.get_val('CD')[0]:.6f}")
 print(f"Final alpha:    {prob.get_val('alpha')}")
 print(f"Final twist_cp: {prob.get_val('wing_geom.twist_cp')}")
+for i in range(n_points):
+    print(
+        f"Point {i}: "
+        f"CL={prob.get_val(f'aero_point_{i}.wing_perf.CL')[0]:.4f}, "
+        f"CD={prob.get_val(f'aero_point_{i}.wing_perf.CD')[0]:.6f}"
+    )
+print("\n--- Aerodynamic Bookkeeping ---")
+print("OAS reports CL = CL1 + CL0 and CD = CDi + CDv + CDw + CD0 at each point.")
+print(f"CL0={surf_dict['CL0']:.6f}, CD0={surf_dict['CD0']:.6f}")
+print(
+    f"with_viscous={surf_dict['with_viscous']}, with_wave={surf_dict['with_wave']}, "
+    f"S_ref_type='{surf_dict['S_ref_type']}'"
+)
 
 # =============================================================================
 # 6. PLOTTING
 # =============================================================================
 try:
-    alpha_vals = prob.get_val("alpha")
-    CL_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CL")[0] for i in range(n_points)]
-    CD_vals = [prob.get_val(f"aero_point_{i}.wing_perf.CD")[0] for i in range(n_points)]
     twist_cp_vals = prob.get_val("wing_geom.twist_cp")
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    point_labels = [f"Point {i}" for i in range(n_points)]
-    axes[0].bar(point_labels, CL_vals, color="steelblue", label="CL", alpha=0.7)
-    ax2 = axes[0].twinx()
-    ax2.bar(point_labels, CD_vals, color="tomato", label="CD", alpha=0.5, width=0.4)
-    axes[0].set_ylabel("CL", color="steelblue")
-    ax2.set_ylabel("CD", color="tomato")
-    axes[0].set_title("CL and CD per Flight Condition")
-
     cp_indices = np.arange(len(twist_cp_vals))
-    axes[1].plot(cp_indices, twist_cp_vals, "o-", color="green")
-    axes[1].set_xlabel("Control Point Index")
-    axes[1].set_ylabel("Twist (deg)")
-    axes[1].set_title("Optimized Twist Distribution")
-    axes[1].grid(True)
-
-    fig.tight_layout()
-    fig.savefig(
-        os.path.join(_PLOTS_DIR, "aero_multipoint_results.png"), bbox_inches="tight"
+    fig_twist, ax_twist = plt.subplots(figsize=(8, 4))
+    ax_twist.plot(cp_indices, twist_cp_vals, "o-", color="green")
+    ax_twist.set_xlabel("Control Point Index")
+    ax_twist.set_ylabel("Twist (deg)")
+    ax_twist.set_title("Optimized Twist Distribution")
+    ax_twist.grid(True)
+    fig_twist.tight_layout()
+    fig_twist.savefig(
+        _plot_path("aero_multipoint_twist_distribution"), bbox_inches="tight", dpi=150
     )
-    plt.close(fig)
+    plt.close(fig_twist)
+
+    _mesh_out = prob.get_val("wing_geom.mesh", units="m")
+    fig_wing, ax_wing = plt.subplots(figsize=(8, 4))
+    for i in range(_mesh_out.shape[0]):
+        ax_wing.plot(_mesh_out[i, :, 1], _mesh_out[i, :, 0], color="black", lw=1)
+    for j in range(_mesh_out.shape[1]):
+        ax_wing.plot(_mesh_out[:, j, 1], _mesh_out[:, j, 0], color="black", lw=1)
+    ax_wing.set_aspect("equal")
+    ax_wing.set_xlabel("Spanwise y [m]")
+    ax_wing.set_ylabel("Chordwise x [m]")
+    ax_wing.set_title("Optimized Wing Planform")
+    fig_wing.tight_layout()
+    fig_wing.savefig(
+        _plot_path("aero_multipoint_wing_planform"), bbox_inches="tight", dpi=150
+    )
+    plt.close(fig_wing)
+
     print(f"Plot saved to {_PLOTS_DIR}")
 except Exception as e:
     print(f"Plotting warning: {e}")

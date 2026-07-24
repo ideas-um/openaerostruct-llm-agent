@@ -50,13 +50,12 @@ matplotlib.rcParams.update(
 # =============================================================================
 # === AGENT EDITABLE SECTION START ===
 # Create a dictionary to store options about the mesh
+# For "rect" meshes: use "span" and "root_chord"; "chord" is not a generate_mesh option.
 mesh_dict = {
     "num_y": 7,
-    "num_x": 2,
-    "wing_type": "rect",
-    "span": 8.0,
-    "root_chord": 1.5,
+    "wing_type": "CRM",
     "symmetry": True,
+    "num_twist_cp": 5,
 }
 # === AGENT EDITABLE SECTION END ===
 
@@ -77,13 +76,14 @@ surf_dict = {
     "E": 70.0e9,  # [Pa] Young's modulus of the spar
     "G": 30.0e9,  # [Pa] shear modulus of the spar
     "yield": 500.0e6,  # [Pa] yield stress
-    "safety_factor": 1.5,  # yield stress divided by safety factor for limiting case
-    "mrho": 2700.0,  # [kg/m^3] material density
+    "safety_factor": 2.5,  # yield stress divided by safety factor for limiting case
+    "mrho": 3.0e3,  # [kg/m^3] material density
     # Structural design parameters
     "fem_origin": 0.35,  # normalized chordwise location of the spar
+    # Fixed physical assumption: preserve 0.15 unless the user explicitly requests t/c.
     "t_over_c_cp": np.array([0.15]),  # maximum airfoil thickness ratio
+    # This is the DV initializer, not its bound. Preserve it when it remains feasible.
     "thickness_cp": np.ones((3)) * 0.1,
-    "radius_cp": np.ones((3)) * 0.2,  # Tube radius [m]
     # Weight and coupling flags
     "wing_weight_ratio": 2.0,
     "struct_weight_relief": False,
@@ -100,15 +100,19 @@ prob = om.Problem()
 # === AGENT EDITABLE SECTION START ===
 ny = surf_dict["mesh"].shape[1]
 
-# Define independent variables for loads
-indep_var_comp = om.IndepVarComp()
-# loads shape must be (ny, 6): [Fx, Fy, Fz, Mx, My, Mz]
-# Here we distribute a total load of 4e4 N vertically (Fz is index 2)
-total_load = 4e4
-load_val = np.zeros((ny, 6))
-load_val[:, 2] = total_load / ny
+# OAS structural loads are (ny, 6): Fx, Fy, Fz, Mx, My, Mz.
+# Upward load belongs in the vertical force component only.
+# With symmetry=True, a user-stated total wing load must be divided by two
+# and then divided by ny before assignment to every modeled half-wing node.
+# For a user-stated total T:
+#   loads[:, 2] = T / (2.0 * ny)  # symmetry=True
+# The required check is np.sum(loads[:, 2]) == T / 2.0.
+# Do not use loads[:, 2] = T / 2.0; that applies T/2 at every node.
+loads = np.zeros((ny, 6))
+loads[:, 2] = 2e5
 
-indep_var_comp.add_output("loads", val=load_val, units="N")
+indep_var_comp = om.IndepVarComp()
+indep_var_comp.add_output("loads", val=loads, units="N")
 indep_var_comp.add_output("load_factor", val=1.0)
 # === AGENT EDITABLE SECTION END ===
 
@@ -124,7 +128,7 @@ prob.model.add_subsystem(surf_dict["name"], struct_group)
 # =============================================================================
 prob.driver = om.ScipyOptimizeDriver()
 prob.driver.options["disp"] = True
-prob.driver.options["tol"] = 1e-8
+prob.driver.options["tol"] = 1e-9
 
 recorder = om.SqliteRecorder(os.path.join(_RUN_OUT_DIR, "aero.db"))
 prob.driver.add_recorder(recorder)
@@ -140,8 +144,8 @@ prob.model.add_constraint("wing.failure", upper=0.0)
 prob.model.add_constraint("wing.thickness_intersects", upper=0.0)
 
 # --- Objective ---
-# Use scaler to bring mass [kg] to order ~1.0 (e.g., 1e-2 or 1e-3).
-prob.model.add_objective("wing.structural_mass", scaler=1e-2)
+# Preserve this existing scaler unless runtime feedback specifically requires repair.
+prob.model.add_objective("wing.structural_mass", scaler=1e-5)
 # === AGENT EDITABLE SECTION END ===
 
 prob.setup()
