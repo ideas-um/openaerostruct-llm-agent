@@ -49,7 +49,7 @@ def _build_prompt(
                 )
             blueprints_context += f"\n--- BLUEPRINT: {name} ---\n{blueprint_code}\n"
 
-    with open(os.path.join(_LLM_DIR, "coder.md"), "r") as f:
+    with open(os.path.join(_LLM_DIR, "coder.md"), "r", encoding="utf-8") as f:
         system_prompt = f.read()
 
     prompt = f"User Request: {user_prompt}\n\n"

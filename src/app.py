@@ -333,6 +333,14 @@ def _make_ui_callback(stream_state: dict, no_converge_store: dict):
                 st.session_state["active_attempts"][-1]["reasoning"] = reasoning_val
                 st.session_state["active_attempts"][-1]["code"] = data["code"]
 
+        elif event == "generation_error":
+            st.error("❌ Code generation failed before execution.")
+            st.code(data["message"], language="text")
+
+            if st.session_state["active_attempts"]:
+                st.session_state["active_attempts"][-1]["status"] = "generation_error"
+                st.session_state["active_attempts"][-1]["logs"] = data["message"]
+
         elif event == "safety_blocked":
             violation_text = "\n".join(f"- {v}" for v in data["violations"])
             st.error(
