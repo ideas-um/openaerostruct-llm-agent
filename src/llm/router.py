@@ -59,23 +59,6 @@ class RouterContractError(ValueError):
     pass
 
 
-_ANALYSIS_INTENT_RE = re.compile(
-    r"\b(analy[sz]e|analysis|evaluate|run_model|sweep|polar|plot|cl\s+vs|cd\s+vs|l/d\s+vs|drag\s+polar)\b",
-    re.IGNORECASE,
-)
-_OPTIMIZATION_INTENT_RE = re.compile(
-    r"\b(optimi[sz]e|minimi[sz]e|maximi[sz]e|objective|design\s+variable|"
-    r"\bDV\b|constraint|run_driver|target\s+CL|weighted\s+objective)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_analysis_without_optimization(user_prompt: str) -> bool:
-    return bool(_ANALYSIS_INTENT_RE.search(user_prompt)) and not bool(
-        _OPTIMIZATION_INTENT_RE.search(user_prompt)
-    )
-
-
 def _parse_routing_response(response: str) -> dict:
     """
     Extract JSON from <routing> tags, with plain-JSON fallback.
@@ -117,8 +100,11 @@ def _parse_routing_response(response: str) -> dict:
                 f"Router returned multiple blueprint entries: {raw}"
             )
         validated = [b for b in raw if b in VALID_BLUEPRINTS]
-        validated = validated[:1]
-        data["blueprints"] = validated if validated else ["aero_opt.py"]
+        if len(validated) != 1:
+            raise RouterContractError(
+                f"Router must return exactly one supported blueprint, received: {raw}"
+            )
+        data["blueprints"] = validated
 
         return data
 
@@ -126,22 +112,10 @@ def _parse_routing_response(response: str) -> dict:
         raise
     except Exception as e:
         logger.error(f"Routing parse error: {e}. Raw response: {response}")
-        return {
-            "blueprints": ["aero_opt.py"],
-            "is_vague": False,
-            "reason": f"Parsing failure: {str(e)}",
-        }
+        raise RouterContractError(f"Router response could not be parsed: {e}") from e
 
 
 def _validate_routing_contract(data: dict, user_prompt: str) -> dict:
-    blueprints = data.get("blueprints") or []
-    selected = blueprints[0] if blueprints else ""
-    if selected == "aero_multipoint.py" and _is_analysis_without_optimization(user_prompt):
-        raise RouterContractError(
-            "Router selected aero_multipoint.py for an analysis/polar sweep request "
-            "with no optimization objective, design variable, or constraint. Multiple "
-            "Mach numbers alone still route to aero_analysis.py."
-        )
     parameters = data.get("parameters")
     if not isinstance(parameters, dict):
         parameters = {}
@@ -159,8 +133,7 @@ def _router_repair_prompt(user_prompt: str, previous_response: str, error: str) 
         "Router contract error: "
         f"{error}\n"
         "Return exactly one best blueprint in blueprints. Do not combine "
-        "blueprints. Analysis/polar/plot/sweep requests without optimization "
-        "must use aero_analysis.py, even with multiple Mach numbers. Previous response:\n"
+        "blueprints. Previous response:\n"
         f"{previous_response}"
     )
 

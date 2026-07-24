@@ -175,6 +175,8 @@ _mu_vals = _sutherland_mu(_altitudes)  # Dynamic viscosity per point [kg/(m*s)]
 
 indep_var_comp = om.IndepVarComp()
 indep_var_comp.add_output("v", val=_v_vals, units="m/s")
+# np.ones(n_points) already resizes this initializer when the number of points
+# changes. Preserve 6.64 unless the user explicitly requests another initial alpha.
 indep_var_comp.add_output("alpha", val=np.ones(n_points) * 6.64, units="deg")  # shape=(n_points,)
 indep_var_comp.add_output("Mach_number", val=_Mach_numbers)
 indep_var_comp.add_output("re", val=_rho_vals * _v_vals / _mu_vals, units="1/m")
@@ -266,6 +268,9 @@ for i in range(n_points):
 # --- Objective ---
 # "CD" is the unweighted sum of drag across all flight points.
 # If the user requests a weighted objective, replace MultiCD with explicit weighted wiring.
+# Define ExecComp inputs as CD_0, CD_1, ... and connect each
+# aero_point_i.CD directly to weighted_cd.CD_i. Do not use i_CD names or keep
+# duplicate direct and MultiCD connections.
 # FULL OBJECTIVE PATH REFERENCE:
 #   "CD"                              — unweighted sum of drag (MultiCD output)
 #   "aero_point_0.wing_perf.CD"       — drag at a single flight point

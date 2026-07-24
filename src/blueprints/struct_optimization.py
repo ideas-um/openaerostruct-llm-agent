@@ -100,6 +100,8 @@ ny = surf_dict["mesh"].shape[1]
 
 # OAS structural loads are (ny, 6): Fx, Fy, Fz, Mx, My, Mz.
 # Upward load belongs in the vertical force component only.
+# With symmetry=True, a user-stated total wing load must be divided by two
+# before it is distributed over these modeled half-wing nodes.
 loads = np.zeros((ny, 6))
 loads[:, 2] = 2e5
 

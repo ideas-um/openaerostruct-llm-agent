@@ -43,6 +43,9 @@ Treat related quantities as separate decisions unless the user links them explic
 - Do not infer `with_wave` from Mach number or altitude. Change `with_wave` only when the user explicitly says wave drag on/off. Change `with_viscous` only when the user explicitly says viscous drag on/off.
 - objective path/meaning is separate from objective scaling
 - design-variable bounds/control points are separate from initial values
+- A fixed physical value such as `t/c = 0.12` changes `t_over_c_cp`; a
+  `t_over_c_cp` design-variable bound does not authorize changing its initial
+  values when the blueprint initialization remains feasible.
 - one structural variable is separate from fixed companion structural variables
 - cruise-point values are separate from maneuver/secondary-point values
 - If the user says to preserve a maneuver/secondary point, keep that point's Mach/rho/altitude/speed/Reynolds values exactly as in the blueprint.
@@ -75,6 +78,10 @@ For fuel-weight setup:
 
 For numerical scaling:
 - Preserve existing `ref`/`scaler` values. Do not tune them to chase a better solution.
+- In `aerostruct_tube.py`, preserve the blueprint's W0-relative fuel-burn
+  objective reference. When the user changes W0, update the named `W0` value so
+  the objective reference follows automatically; do not replace it with a fixed
+  CRM-scale fuel-burn scaler.
 - Add scaling only for a newly added DV/objective/constraint that has no existing blueprint scaling value; use the local order-of-magnitude style.
 - Change existing scaling only during runtime repair when the previous error explicitly points to scaling, conditioning, line-search, positive directional derivative, or iteration-limit trouble from badly scaled variables.
 - If a problem already runs or the user did not report a scaling-related runtime error, do not change existing `ref`/`scaler`.
@@ -86,6 +93,9 @@ For numerical scaling:
 
 - Only use imports already present in the blueprint.
 - `generate_mesh` returns `(mesh, twist_cp)` for CRM/uCRM and a plain mesh array for `rect`; preserve the blueprint's tuple-handling pattern.
+- OpenAeroStruct's canonical built-in uCRM mesh name is `"uCRM_based"`. Treat a
+  user request for a "uCRM" wing as that mesh type; do not write
+  `wing_type="uCRM"`, which silently selects the ordinary CRM fallback geometry.
 - Rectangular `generate_mesh` uses `"root_chord"` for chord length; do not use `"chord"` in `mesh_dict`.
 - Do not add or keep `twist_cp` for a rectangular analysis wing unless the
   user requests twist. Preserve CRM/uCRM twist only when the mesh generator
@@ -99,13 +109,23 @@ For numerical scaling:
 - `ScipyOptimizeDriver` accepts exactly one objective; aggregate multiple objectives with `ExecComp`.
 - Assign `prob.driver` before `add_design_var`, `add_constraint`, and `add_objective`.
 - Keep only requested design variables active, except `alpha` may be kept/added when needed to satisfy a CL or L=W trim constraint.
+- Before returning code, verify that every explicitly requested design variable
+  has both its required surface/geometry declaration and an `add_design_var`
+  call. Never omit a requested DV during cleanup or runtime repair.
 - Remove or leave inactive any design-variable keys that are not requested and
   are not required fixed blueprint wiring. Do not activate optional geometry
   keys just because they appear in a blueprint catalog or example block.
 - Multipoint geometry DV paths use `wing_geom.<var>`, not `wing.<var>`.
 - `MultiCD` does not accept weights; use `ExecComp` for weighted multipoint CD.
+  Name its inputs `CD_0`, `CD_1`, and so on, then connect
+  `aero_point_i.CD` directly to `weighted_cd.CD_i`. Do not use `i_CD`,
+  promoted bare `CD_i` targets, or duplicate direct and `MultiCD` connections.
 - `struct_optimization.py` uses `SpatialBeamAlone`; do not replace it with `AerostructPoint`.
 - Structural `loads` has shape `(ny, 6)`. For an upward/vertical load, start with zeros and assign only column 2, e.g. `loads[:, 2] = load_per_node`; do not fill all six force/moment columns.
+- A user-stated total wing load is the load for the whole wing. When
+  `symmetry=True`, distribute half of that total over the modeled half-wing
+  nodes. Apply the full total only when the user explicitly says it is a
+  half-wing or modeled-domain load.
 - Wingbox thickness-to-chord uses `wing.geometry.t_over_c_cp`, not `wing.t_over_c_cp`.
 - Always preserve the `SqliteRecorder` block.
 - Derive output paths from `__file__`; save plots under `_PLOTS_DIR`.

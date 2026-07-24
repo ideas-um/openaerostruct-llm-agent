@@ -59,6 +59,10 @@ _GEMINI_TRANSIENT_MESSAGES = (
     "timeout",
     "timed out",
     "deadline",
+    "server disconnected",
+    "connection reset",
+    "connection aborted",
+    "remote protocol error",
 )
 
 

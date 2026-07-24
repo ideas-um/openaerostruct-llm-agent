@@ -180,6 +180,7 @@ prob = om.Problem()
 altitude = 11000.0  # Altitude [m]
 Mach_number = 0.84
 rho = 0.38  # Explicit density [kg/m^3]; use _isa_density(altitude) only if rho is omitted.
+W0 = 0.4 * 3e5  # Aircraft weight excl. wing+fuel [kg]
 speed_of_sound = _isa_speed_of_sound(altitude)
 v = Mach_number * speed_of_sound
 re = rho * v / _sutherland_mu(altitude)
@@ -192,7 +193,7 @@ indep_var_comp.add_output("re", val=re, units="1/m")
 indep_var_comp.add_output("rho", val=rho, units="kg/m**3")
 indep_var_comp.add_output("CT", val=grav_constant * 17.0e-6, units="1/s")  # Blueprint default converted from TSFC; direct user CT [1/s] should replace this expression directly.
 indep_var_comp.add_output("R", val=11.165e6, units="m")  # Range [m]
-indep_var_comp.add_output("W0", val=0.4 * 3e5, units="kg")  # Aircraft weight excl. wing+fuel [kg]
+indep_var_comp.add_output("W0", val=W0, units="kg")
 indep_var_comp.add_output("speed_of_sound", val=speed_of_sound, units="m/s")
 indep_var_comp.add_output("load_factor", val=1.0)
 indep_var_comp.add_output("empty_cg", val=np.zeros((3)), units="m")
@@ -302,8 +303,10 @@ prob.model.add_constraint("AS_point_0.L_equals_W", equals=0.0)
 #   "AS_point_0.wing_perf.CD"   — drag coefficient
 #   "wing.structural_mass"      — structural mass [kg]
 
-# Preserve the objective scaler unless a runtime scaling/conditioning error specifically requires changing it.
-prob.model.add_objective("AS_point_0.fuelburn", scaler=1e-5)
+# Preserve the objective reference unless a runtime scaling/conditioning error specifically requires changing it.
+# Keep the fuel-burn objective near order one as the requested aircraft mass
+# changes. A fixed CRM-scale scaler can cause premature convergence for small aircraft.
+prob.model.add_objective("AS_point_0.fuelburn", ref=max(0.1 * W0, 1.0))
 # === AGENT EDITABLE SECTION END ===
 
 # =============================================================================

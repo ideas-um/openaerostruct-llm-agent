@@ -99,9 +99,25 @@ The top-level `"passed"` is only the aggregate:
 - Do not infer `with_wave` from Mach number or altitude. Change `with_wave` only when the user explicitly requests wave drag on/off. Change `with_viscous` only when the user explicitly requests viscous drag on/off.
 - Do not change aerodynamic bookkeeping assumptions (`CL0`, `CD0`, `S_ref_type`, `k_lam`, `c_max_t`) unless the user explicitly names that assumption.
 - For structural `loads` with shape `(ny, 6)`, an upward/vertical load must only populate the vertical force component, column 2. Filling all six force/moment components with `np.ones((ny, 6)) * scalar` is a blocking violation.
+- A total wing load is a whole-wing quantity. With `symmetry=True`, the modeled
+  half-wing must receive half of that total. Applying the full stated total to
+  the half-wing is a blocking violation unless the user explicitly describes
+  the value as a half-wing or modeled-domain load.
+- OpenAeroStruct's built-in uCRM mesh identifier is `"uCRM_based"`. A generated
+  `wing_type="uCRM"` silently falls through to the ordinary CRM geometry and
+  must fail an explicit uCRM request.
+- A fixed value such as `t/c = 0.12` is a requested physical change to
+  `t_over_c_cp`, not an unrequested initializer change. Bounds on
+  `t_over_c_cp` alone still do not authorize changing a feasible initializer.
 - A request for bounds/control points does not permit changing fixed companion variables.
+- Removing an explicitly requested design variable is a blocking violation,
+  including removal of its `add_design_var` call or required surface key.
 - A requested constraint/objective does not permit deleting preserved constraints/objectives.
 - A changed existing `ref`/`scaler` must fail unless the user requested scaling or the retry error explicitly required scaling/conditioning repair. Same objective/DV/constraint path is not enough.
+- In `aerostruct_tube.py`, preserve the blueprint's W0-relative fuel-burn
+  objective reference. A requested W0 change must flow through the named `W0`
+  value; replacing the relative reference with a fixed CRM-scale scaler is a
+  blocking change.
 - Preserve optimized-variable initial guesses when they remain inside requested bounds. If requested bounds exclude the blueprint initialization, allow a sensible replacement strictly inside those bounds.
 - Resizing an initializer to a user-requested control-point count is required wiring when the initialization pattern and values are otherwise unchanged.
 - Replacing CRM-derived twist with a neutral zero-twist array is required wiring when the user requests a rectangular wing and a specific twist control-point count, because rectangular mesh generation does not return CRM twist values.
