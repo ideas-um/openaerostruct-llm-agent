@@ -564,6 +564,7 @@ def audit_blueprint_consistency(
     generated_code: str,
     model_name: str,
     provider: str,
+    routing_context: dict | None = None,
 ) -> tuple[dict, int, int]:
     """Give the LLM Auditor the evidence and return its decision unchanged."""
     blueprint = blueprints[0] if blueprints else ""
@@ -579,8 +580,18 @@ def audit_blueprint_consistency(
     with open(prompt_path, "r", encoding="utf-8") as fh:
         system_prompt = fh.read()
 
+    router_context = {}
+    if isinstance(routing_context, dict):
+        router_context = {
+            key: routing_context[key]
+            for key in ("blueprints", "parameters")
+            if key in routing_context
+        }
+
     user_message = (
         f"### USER REQUEST ###\n{user_prompt}\n\n"
+        f"### ROUTER CONTEXT ###\n"
+        f"{json.dumps(router_context, indent=2, sort_keys=True)}\n\n"
         f"### SELECTED BLUEPRINT ###\n{blueprint}\n{blueprint_path}\n\n"
         f"### REQUIRED CHANGE-BY-CHANGE REVIEW ({len(semantic_changes)} ITEMS) ###\n"
         "Return exactly one decision for every `item` below. Review the items in "

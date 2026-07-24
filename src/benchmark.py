@@ -29,7 +29,7 @@ _BENCH_SCRIPT = os.path.join(_SRC_DIR, "benchmark_run.py")
 _BLUEPRINTS_DIR = os.path.join(_SRC_DIR, "blueprints")
 
 DEFAULT_MAX_RETRIES = 5
-NUM_REPS = 10
+NUM_REPS = 1
 MAX_BACKEND_RETRIES_PER_REP = int(os.getenv("MAX_BACKEND_RETRIES_PER_REP", "3"))
 
 # ---------------------------------------------------------------------------

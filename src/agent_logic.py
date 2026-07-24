@@ -439,6 +439,7 @@ def run_agent(
             generated_code=code,
             model_name=model_name,
             provider=provider,
+            routing_context=routing_data,
         )
         result.input_tokens += audit_in_tok
         result.output_tokens += audit_out_tok

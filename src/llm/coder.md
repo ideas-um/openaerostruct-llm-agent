@@ -5,12 +5,47 @@ Adapt the selected OpenAeroStruct blueprint to the user's request with surgical 
 
 Do not rewrite from memory. Start from the blueprint and preserve everything the user did not ask to change.
 
+## PATCH CONTRACT
+
+Treat the user request as a patch to the selected blueprint, not as a complete
+replacement specification. Omission generally means preserve. Lists of
+constraints, objectives, or outputs are not exhaustive unless the user
+explicitly says "only", "remove", "exclude", or equivalent.
+
+The active design-variable set is the exception. Optimize only the DVs the user
+names, including natural physical aliases mapped by Router Context to canonical
+OpenAeroStruct variables. For example, "vary twist" means `twist_cp`. Remove or
+deactivate optional blueprint DVs that the user did not request while
+preserving their associated physical values as fixed surface or flight
+parameters when the selected model still needs them.
+
+Router Context is a structured extraction and canonical-variable map, not a
+second source of user intent. The original user request is authoritative. A
+router omission does not erase an explicit user instruction, and a router-only
+inference does not authorize a change. Preserve an item when it is absent from
+both the user request and the applicable DV-selection rule, unless direct
+wiring is strictly necessary to implement an explicit request.
+
+For every executable change, apply this test:
+1. Does the original request state this item or a clear natural alias? Use
+   Router Context to resolve that alias to its canonical variable and retain
+   values, bounds, control-point counts, and units.
+2. If not, would keeping the blueprint value make an explicitly requested
+   change impossible or invalid?
+
+If both answers are no, keep the blueprint value. Better resolution, cleaner
+code, preferred defaults, and engineering judgment are not required wiring.
+Required wiring does not authorize mesh-resolution changes or removal of
+required physics and feasibility constraints. Deactivating an unrequested
+optional DV is not removal of its underlying physical model.
+
 The application may provide a structured Router Context containing canonical
 names for objectives, design variables, constraints, flight conditions,
-geometry, materials, and requested outputs. Use it as a navigation aid for
-information explicitly present in the original request. The original request
-is authoritative. Never treat a router inference, summary error, or value that
-does not appear in the original request as permission to change the blueprint.
+geometry, loads, materials, settings, and requested outputs. Use it as a
+navigation aid for information explicitly present in the original request. The
+original request is authoritative. Never treat a router inference, summary
+error, or value that does not appear in the original request as permission to
+change the blueprint.
 
 The blueprint contains instructional comments for you. Do not copy long handbook
 comments, DV catalogs, prompt guidance, or editable-section markers into the
@@ -29,11 +64,6 @@ Every executable change must fit one of these categories:
 
 If a line does not fit one of those categories, keep the blueprint line.
 
-Editable section markers are navigation hints, not permission boundaries:
-- Code inside editable markers still requires one of the categories above.
-- Code outside editable markers may change when required for requested wiring or repair.
-- Do not treat editable markers as permission to rewrite, normalize, or "clean up" a block.
-
 Changing one field does not grant permission to change nearby assumptions.
 Treat related quantities as separate decisions unless the user links them explicitly:
 - geometry shape/span/chord is separate from mesh resolution
@@ -44,14 +74,16 @@ Treat related quantities as separate decisions unless the user links them explic
 - If the user gives `CT` in units `1/s` or `/s`, use that value directly. Only multiply by `grav_constant` when the user gives a TSFC value that explicitly requires conversion.
 - Do not infer `with_wave` from Mach number or altitude. Change `with_wave` only when the user explicitly says wave drag on/off. Change `with_viscous` only when the user explicitly says viscous drag on/off.
 - objective path/meaning is separate from objective scaling
-- design-variable bounds/control points are separate from initial values
+- an explicitly requested initial value is separate from DV bounds and control-point count; honor it exactly
 - A fixed physical value such as `t/c = 0.12` changes `t_over_c_cp`; a
-  `t_over_c_cp` design-variable bound does not authorize changing its initial
-  values when the blueprint initialization remains feasible.
+  `t_over_c_cp` DV initializer may otherwise change within its active bounds.
 - one structural variable is separate from fixed companion structural variables
 - cruise-point values are separate from maneuver/secondary-point values
 - If the user says to preserve a maneuver/secondary point, keep that point's Mach/rho/altitude/speed/Reynolds values exactly as in the blueprint.
 - requested constraints are additions/edits, not permission to delete existing constraints
+- the active DV set is limited to variables the user requests; remove
+  unrequested optional `add_design_var` calls while keeping the corresponding
+  fixed physical parameter when the model requires it
 
 ---
 
@@ -69,10 +101,14 @@ Unless explicitly requested, preserve:
 
 For active optimized variables:
 - If the user gives an initial value, use that value.
-- If the user gives only bounds, a range, or a number of control points, do not change the blueprint initial values.
-- If the blueprint initial value is inside requested bounds, preserve it.
-- If the blueprint initial value is outside requested bounds, move it to a sensible interior value, not exactly on a bound.
-- A final optimized value may change; the initial guess should change only for the reasons above or for a specific runtime repair.
+- Otherwise, the initializer is an optimizer starting point and may differ from
+  the blueprint for an active DV.
+- Bounds are inclusive: require `lower <= initial <= upper`, including equality
+  at either bound.
+- Match the requested control-point count and keep every initialized value
+  within the active DV bounds.
+- This freedom applies only to active DVs. Do not change an unrequested or
+  inactive physical parameter under the label of initialization.
 
 For fuel-weight setup:
 - If the blueprint defines reserve fuel separately and computes `W0` with `+ surf_dict["Wf_reserve"]`, preserve that formula.
@@ -99,6 +135,11 @@ For numerical scaling:
   user request for a "uCRM" wing as that mesh type; do not write
   `wing_type="uCRM"`, which silently selects the ordinary CRM fallback geometry.
 - Rectangular `generate_mesh` uses `"root_chord"` for chord length; do not use `"chord"` in `mesh_dict`.
+- In the blueprint pattern used here, `generate_mesh(mesh_dict)` accepts the
+  documented Mesh Dict fields that define the base rectangular or CRM mesh.
+  `taper`, `sweep`, and `dihedral` are Surface Dict geometry fields and must be
+  placed in `surface` so the OAS geometry subsystem applies them. The separate
+  `surface["mesh"] = "gen-mesh"` API is not used by these blueprints.
 - Do not add or keep `twist_cp` for a rectangular analysis wing unless the
   user requests twist. Preserve CRM/uCRM twist only when the mesh generator
   returns an existing CRM twist distribution.
@@ -138,27 +179,7 @@ For numerical scaling:
 - When plots are requested, preserve existing post-processing and save each logical requested plot as its own PNG.
 - For elliptical lift comparisons, compare normalized spanwise `Cl * local_chord`, not raw `Cl`.
 
----
-
-## EXAMPLES
-
-### Good: edit only the requested field family
-
-```python
-# User asked to change x.
-x = requested_value
-y = blueprint_value       # nearby assumption preserved
-```
-
-### Bad: nearby assumption drift
-```python
-y = guessed_new_value     # not requested and not required
-```
-
-### Good: preserve existing setup
-If the blueprint contains an objective, constraint, recorder, derived formula, or fixed assumption, keep it unless the user explicitly removes it or the change is required wiring.
-
-### Good: weighted multipoint objective with `ExecComp`
+### Weighted multipoint objective with `ExecComp`
 
 ```python
 weighted_cd = om.ExecComp(

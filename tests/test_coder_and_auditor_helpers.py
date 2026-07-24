@@ -50,17 +50,25 @@ def test_coder_prompt_receives_filtered_router_context():
         "input_tokens": 100,
     }
 
-    _, prompt = _build_prompt(
+    system_prompt, prompt = _build_prompt(
         "Minimize drag using twist.",
         ["aero_opt.py"],
         "Initial generation",
         routing_context=routing_context,
     )
 
+    assert "Omission generally means preserve" in system_prompt
+    assert "lower <= initial <= upper" in system_prompt
+    assert "`taper`, `sweep`, and `dihedral` are Surface Dict" in system_prompt
+    assert "Optimize only the DVs the user" in system_prompt
+    assert "initializer is an optimizer starting point" in system_prompt
     assert "### ROUTER CONTEXT ###" in prompt
     assert '"name": "twist_cp"' in prompt
     assert "original user request remains authoritative" in prompt
-    assert "not an exhaustive replacement for the active blueprint formulation" in prompt
+    assert "Router omission does not erase an explicit user instruction" in prompt
+    assert "design variables as the active optimization freedoms" in prompt
+    assert "geometry, loads, settings, units" in prompt
+    assert "AGENT EDITABLE SECTION" not in prompt
     assert "input_tokens" not in prompt
 
 
@@ -198,9 +206,11 @@ def test_audit_parser_preserves_llm_top_level_decision(passed):
 
 def test_auditor_does_not_override_llm_pass_decision(monkeypatch):
     calls = []
+    system_prompts = []
 
     def fake_response(prompt, model_name, system_prompt, provider):
         calls.append(prompt)
+        system_prompts.append(system_prompt)
         return (
             '<audit>{"passed":true,"reviewed_changes":[],'
             '"violations":[],"warnings":[]}</audit>'
@@ -214,10 +224,20 @@ def test_auditor_does_not_override_llm_pass_decision(monkeypatch):
         generated_code="loads = np.ones((ny, 6)) * (4e4 / ny)\n",
         model_name="test-model",
         provider="test-provider",
+        routing_context={
+            "blueprints": ["struct_optimization.py"],
+            "parameters": {"geometry": {"total_load": 4e4}},
+        },
     )
 
     assert report["passed"] is True
     assert len(calls) == 1
+    assert "Omission generally means preserve" in system_prompts[0]
+    assert '"authorization"' in system_prompts[0]
+    assert "Never classify" in system_prompts[0]
+    assert "including equality at either" in system_prompts[0]
+    assert "### ROUTER CONTEXT ###" in calls[0]
+    assert '"total_load": 40000.0' in calls[0]
     assert "### REQUIRED CHANGE-BY-CHANGE REVIEW" in calls[0]
     assert "### SUPPORTING EXECUTABLE DIFF ###" in calls[0]
     assert "loads = np.ones" in calls[0]

@@ -44,7 +44,10 @@ def _build_prompt(
         p = os.path.join(_BLUEPRINTS_DIR, name)
         if os.path.exists(p):
             with open(p, "r") as f:
-                blueprints_context += f"\n--- BLUEPRINT: {name} ---\n{f.read()}\n"
+                blueprint_code = "".join(
+                    line for line in f if "AGENT EDITABLE SECTION" not in line
+                )
+            blueprints_context += f"\n--- BLUEPRINT: {name} ---\n{blueprint_code}\n"
 
     with open(os.path.join(_LLM_DIR, "coder.md"), "r") as f:
         system_prompt = f.read()
@@ -56,13 +59,13 @@ def _build_prompt(
             "### ROUTER CONTEXT ###\n"
             "This is a structured extraction of the original request. Use it to "
             "locate explicitly stated objectives, design variables, constraints, "
-            "conditions, and geometry. The original user request remains "
-            "authoritative. The extracted lists contain user-stated fields, not an "
-            "exhaustive replacement for the active blueprint formulation. Do not "
-            "delete an existing blueprint constraint, objective, or fixed "
-            "assumption merely because it is absent from Router Context. Do not "
-            "implement any router value that is absent from or conflicts with the "
-            "original request.\n"
+            "conditions, geometry, loads, settings, units, and natural-name mappings. "
+            "The original user request remains authoritative. Router omission does "
+            "not erase an explicit user instruction, and a router-only inference "
+            "does not authorize a change. Treat extracted constraint, objective, "
+            "and output lists as non-exhaustive. Treat explicitly requested design "
+            "variables as the active optimization freedoms and deactivate optional "
+            "blueprint DVs that the user did not request.\n"
             f"{formatted_routing}\n\n"
         )
 

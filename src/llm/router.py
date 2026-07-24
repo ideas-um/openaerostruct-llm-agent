@@ -39,7 +39,9 @@ _ROUTER_PARAMETER_FIELDS: frozenset = frozenset(
         "constraints",
         "flight_conditions",
         "geometry",
+        "loads",
         "materials",
+        "settings",
         "requested_outputs",
         "mapped_vars",
     }
@@ -222,7 +224,7 @@ def route_intent_stream(
     from google.genai import types as _types
 
     stream_config = _types.GenerateContentConfig(
-        system_instruction=system_prompt, temperature=0.2, max_output_tokens=1024
+        system_instruction=system_prompt, temperature=0.2, max_output_tokens=2048
     )
 
     input_tokens, output_tokens = 0, 0

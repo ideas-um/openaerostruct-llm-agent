@@ -87,6 +87,12 @@ means `skin_thickness_cp`, and thickness-to-chord control points mean
 `t_over_c_cp`. Twist, chord, x-shear, and z-shear control points similarly map
 to `twist_cp`, `chord_cp`, `xshear_cp`, and `zshear_cp`.
 
+The `design_variables` list defines the variables the optimizer may change.
+Include every DV the user requests, using the canonical names above, and do not
+add a DV merely because it is available in the selected blueprint. A physical
+name such as "vary twist" authorizes its control-point representation
+`twist_cp`; the user does not need to say the suffix `_cp`.
+
 ### Flight conditions
 | Parameter | Notes |
 |---|---|
@@ -95,6 +101,12 @@ to `twist_cp`, `chord_cp`, `xshear_cp`, and `zshear_cp`.
 | `velocity` | Freestream speed [m/s] — alternative to Mach + altitude |
 | `rho` | Air density [kg/m³] — set directly if preferred |
 | `alpha` | Angle of attack [deg] — can be a DV or a fixed condition |
+
+### Applied loads
+Put applied structural loads in the canonical `loads` list. For each load,
+retain its magnitude and unit, direction, distribution, and whether the user
+describes it as a whole-wing, half-wing, or modeled-domain load. Do not place
+loads in an invented field such as `constraints_applied_loads`.
 
 ### Optimisation objectives
 Aerodynamic: minimise drag (CD), maximise L/D, minimise weighted drag across flight points.
@@ -119,8 +131,19 @@ applicable:
 - `constraints`
 - `flight_conditions`
 - `geometry`
+- `loads`
 - `materials`
+- `settings`
 - `requested_outputs`
+
+Preserve the units attached to every stated dimensional value. Represent a
+scalar quantity as `{"value": ..., "unit": "..."}` and a range or vector as
+`{"values": [...], "unit": "..."}`. Normalize equivalent unit spellings, but
+do not convert the numerical value unless the converted unit is also recorded.
+Use `"dimensionless"` for Mach number, ratios, and coefficients. If the user
+gives a numerical dimensional value without a unit, use `"unit": null`; do not
+invent a unit in the Router Context. Counts and Boolean settings remain plain
+integers and Booleans.
 
 Example:
 <routing>
@@ -132,10 +155,26 @@ Example:
     "intent": "Optimisation",
     "objective": "minimize drag",
     "design_variables": [
-      {"name": "twist_cp", "control_points": 3, "bounds": [-6, 6]}
+      {
+        "name": "twist_cp",
+        "control_points": 3,
+        "bounds": {"values": [-6, 6], "unit": "deg"}
+      }
     ],
-    "constraints": ["CL = 0.5"],
-    "flight_conditions": [{"Mach": 0.8}]
+    "constraints": [
+      {
+        "name": "CL",
+        "relation": "equals",
+        "value": {"value": 0.5, "unit": "dimensionless"}
+      }
+    ],
+    "flight_conditions": [
+      {"Mach": {"value": 0.8, "unit": "dimensionless"}}
+    ],
+    "settings": {
+      "viscous": true,
+      "wave": false
+    }
   },
   "reason": "Single-point aerodynamic optimization for drag."
 }

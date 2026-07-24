@@ -45,7 +45,21 @@ def test_router_keeps_only_supported_parameter_fields():
           "is_vague": false,
           "parameters": {
             "objective": "minimize drag",
-            "design_variables": [{"name": "thickness_cp"}],
+            "design_variables": [
+              {
+                "name": "thickness_cp",
+                "bounds": {"values": [0.005, 0.1], "unit": "m"}
+              }
+            ],
+            "loads": [
+              {
+                "direction": "upward",
+                "magnitude": {"value": 40000, "unit": "N"},
+                "distribution": "spanwise nodes",
+                "domain": "whole wing"
+              }
+            ],
+            "settings": {"viscous": true, "wave": false},
             "unsupported_guess": "do not pass this"
           }
         }
@@ -57,5 +71,19 @@ def test_router_keeps_only_supported_parameter_fields():
 
     assert validated["parameters"] == {
         "objective": "minimize drag",
-        "design_variables": [{"name": "thickness_cp"}],
+        "design_variables": [
+            {
+                "name": "thickness_cp",
+                "bounds": {"values": [0.005, 0.1], "unit": "m"},
+            }
+        ],
+        "loads": [
+            {
+                "direction": "upward",
+                "magnitude": {"value": 40000, "unit": "N"},
+                "distribution": "spanwise nodes",
+                "domain": "whole wing",
+            }
+        ],
+        "settings": {"viscous": True, "wave": False},
     }
