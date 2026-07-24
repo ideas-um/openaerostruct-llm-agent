@@ -263,6 +263,26 @@ def test_contract_allows_requested_cl_and_twist_cp_replacements():
     assert _contract_violations(prompt, changes) == []
 
 
+def test_contract_allows_neutral_twist_initialization_for_rectangular_wing():
+    prompt = (
+        "Optimize a rectangular wing. Vary three twist control points from "
+        "-10 to 15 deg."
+    )
+    changes = [
+        {
+            "item": "dict:surface.twist_cp",
+            "status": "changed",
+            "blueprint": (
+                "surface['twist_cp'] = _crm_twist_cp "
+                "if _crm_twist_cp is not None else np.zeros(5)"
+            ),
+            "generated": "surface['twist_cp'] = np.zeros(3)",
+        }
+    ]
+
+    assert _contract_violations(prompt, changes) == []
+
+
 def test_contract_allows_requested_weighted_cd_objective_replacement():
     prompt = (
         "Use three points with CL targets 0.40, 0.50, 0.55 and minimize a "

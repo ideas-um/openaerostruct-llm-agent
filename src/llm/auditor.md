@@ -104,6 +104,7 @@ The top-level `"passed"` is only the aggregate:
 - A changed existing `ref`/`scaler` must fail unless the user requested scaling or the retry error explicitly required scaling/conditioning repair. Same objective/DV/constraint path is not enough.
 - Preserve optimized-variable initial guesses when they remain inside requested bounds. If requested bounds exclude the blueprint initialization, allow a sensible replacement strictly inside those bounds.
 - Resizing an initializer to a user-requested control-point count is required wiring when the initialization pattern and values are otherwise unchanged.
+- Replacing CRM-derived twist with a neutral zero-twist array is required wiring when the user requests a rectangular wing and a specific twist control-point count, because rectangular mesh generation does not return CRM twist values.
 - Natural physical names map to their canonical control-point variables. For example, tube thickness maps to `thickness_cp`, tube radius to `radius_cp`, spar thickness to `spar_thickness_cp`, and skin thickness to `skin_thickness_cp`.
 
 ---

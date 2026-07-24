@@ -222,6 +222,10 @@ _T_OVER_C_ALIAS_RE = re.compile(
     re.IGNORECASE,
 )
 _TWIST_REQUEST_RE = re.compile(r"\b(twist|twist_cp|washout|washin)\b", re.IGNORECASE)
+_RECTANGULAR_WING_RE = re.compile(
+    r"\b(?:rect|rectangular)\b(?:\s+\w+){0,3}\s+\bwing\b",
+    re.IGNORECASE,
+)
 _VAR_ALIAS_PATTERNS = {
     "twist_cp": re.compile(
         r"\b(twist(?:\s+(?:control\s+points?|CPs?))?|twist_cp|washout|washin)\b",
@@ -262,6 +266,18 @@ _VAR_ALIAS_PATTERNS = {
         re.IGNORECASE,
     ),
     "t_over_c_cp": _T_OVER_C_ALIAS_RE,
+}
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
 }
 _POINT1_WORD_RE = re.compile(
     r"\b(maneuver|manoeuvre|secondary|second\s+point|point\s*1|index\s*1)\b",
@@ -769,14 +785,28 @@ def _requested_control_point_count(user_prompt: str, var_name: str) -> int | Non
         var_name, re.compile(rf"\b{re.escape(var_name)}\b", re.IGNORECASE)
     )
     for match in pattern.finditer(user_prompt):
+        before = user_prompt[max(0, match.start() - 30) : match.start()]
+        leading_count = re.search(
+            r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+            r"\s*$",
+            before,
+            re.IGNORECASE,
+        )
+        if leading_count:
+            value = leading_count.group(1).lower()
+            return int(value) if value.isdigit() else _NUMBER_WORDS[value]
         chunk = user_prompt[
             max(0, match.start() - 80) : min(len(user_prompt), match.end() + 120)
         ]
         count_match = re.search(
-            r"\b(\d+)\s*(?:control\s+points?|CPs?)\b", chunk, re.IGNORECASE
+            r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+            r"\s*(?:control\s+points?|CPs?)\b",
+            chunk,
+            re.IGNORECASE,
         )
         if count_match:
-            return int(count_match.group(1))
+            value = count_match.group(1).lower()
+            return int(value) if value.isdigit() else _NUMBER_WORDS[value]
     return None
 
 
@@ -802,6 +832,20 @@ def _control_point_count_change_only(
         r"(?:np\.)?(?:zeros|ones)\(\(?" + str(requested_count) + r"\)?\)", new
     )
     return bool(generated_count and normalize_count(old) == normalize_count(new))
+
+
+def _rectangular_twist_initialization_is_required(
+    user_prompt: str, change: dict[str, str], var_name: str
+) -> bool:
+    if var_name != "twist_cp" or not _RECTANGULAR_WING_RE.search(user_prompt):
+        return False
+    requested_count = _requested_control_point_count(user_prompt, var_name)
+    if requested_count is None:
+        return False
+    old = _compact_code(change.get("blueprint", ""))
+    new = _compact_code(change.get("generated", ""))
+    expected = f"surface['twist_cp']=np.zeros({requested_count})"
+    return "_crm_twist_cp" in old and new == expected
 
 
 def _changed_index(change: dict[str, str], index: int) -> dict[str, str] | None:
@@ -1119,6 +1163,9 @@ def _contract_violations(
                     user_prompt, change, semantic_changes, key
                 )
                 and not _control_point_count_change_only(user_prompt, change, key)
+                and not _rectangular_twist_initialization_is_required(
+                    user_prompt, change, key
+                )
             ):
                 violations.append(
                     {
