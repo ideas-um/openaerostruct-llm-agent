@@ -39,3 +39,29 @@ def test_router_rejects_multiple_blueprints():
         _parse_routing_response(
             '<routing>{"blueprints":["aero_analysis.py","aero_opt.py"]}</routing>'
         )
+
+
+def test_router_keeps_only_supported_parameter_fields():
+    prompt = "Minimize drag using tube thickness."
+    data = _parse_routing_response(
+        """
+        <routing>
+        {
+          "blueprints": ["aerostruct_tube.py"],
+          "is_vague": false,
+          "parameters": {
+            "objective": "minimize drag",
+            "design_variables": [{"name": "thickness_cp"}],
+            "unsupported_guess": "do not pass this"
+          }
+        }
+        </routing>
+        """
+    )
+
+    validated = _validate_routing_contract(data, prompt)
+
+    assert validated["parameters"] == {
+        "objective": "minimize drag",
+        "design_variables": [{"name": "thickness_cp"}],
+    }

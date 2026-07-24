@@ -1,3 +1,4 @@
+import ast
 import os
 import re
 import json
@@ -6,6 +7,23 @@ from .config import get_llm_response, estimate_tokens
 
 logger = logging.getLogger("LLM_Backend")
 _LLM_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _optimization_formulation(generated_code: str) -> str:
+    if not generated_code:
+        return ""
+    try:
+        tree = ast.parse(generated_code)
+    except SyntaxError:
+        return ""
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in {"add_design_var", "add_constraint", "add_objective"}:
+            continue
+        calls.append((getattr(node, "lineno", 0), ast.unparse(node)))
+    return "\n".join(code for _, code in sorted(calls))
 
 
 def _parse_relaxation_response(response: str) -> str:
@@ -44,7 +62,16 @@ def _parse_relaxation_response(response: str) -> str:
 
 
 def suggest_relaxation(
-    user_prompt: str, error_logs: list, model_name: str, provider: str
+    user_prompt: str,
+    error_logs: list,
+    model_name: str,
+    provider: str,
+    *,
+    blueprints: list[str] | None = None,
+    optimizer_status: str = "",
+    db_summary: str = "",
+    result_metrics: dict | None = None,
+    generated_code: str = "",
 ) -> tuple[str, int, int]:
     """
     Loads relaxer.md and prompts the LLM to analyze the failure path
@@ -60,9 +87,21 @@ def suggest_relaxation(
 
     # Keep only the last two attempts to avoid context bloat and focus on the latest error
     recent_errors = "\n\n".join(error_logs[-2:])
+    formulation = _optimization_formulation(generated_code)
+    metrics_json = json.dumps(
+        result_metrics or {}, indent=2, sort_keys=True, default=str
+    )
 
     formatted_user_prompt = (
         f"### USER'S DESIGN REQUEST ###\n{user_prompt}\n\n"
+        f"### SELECTED BLUEPRINT ###\n{', '.join(blueprints or [])}\n\n"
+        f"### ACTIVE OPTIMIZATION FORMULATION ###\n"
+        f"{formulation or 'Unavailable'}\n\n"
+        f"### INITIAL AND FINAL OPTIMIZATION RECORD ###\n"
+        f"{db_summary or 'Unavailable'}\n\n"
+        f"### STRUCTURED RESULT METRICS ###\n{metrics_json}\n\n"
+        f"### OPTIMIZER TERMINATION OUTPUT ###\n"
+        f"{optimizer_status or 'Unavailable'}\n\n"
         f"### EXECUTION ATTEMPTS & FAILURES ###\n{recent_errors}\n\n"
         f"Generate the relaxation response object:"
     )
@@ -79,7 +118,7 @@ def suggest_relaxation(
     except Exception as e:
         logger.error(f"Failed to generate relaxation suggestion: {e}")
         fallback_msg = (
-            "- **Relax Bounds**: Expand the upper and lower limits of your design variables.\n"
-            "- **Relax Safety Margin**: Reduce the structural safety factor."
+            "- **Review Active Bounds**: Inspect variables that terminate at a bound while a related constraint remains infeasible.\n"
+            "- **Review the Initial Point**: Move only out-of-bounds initial values to a sensible interior point."
         )
         return fallback_msg, in_t, estimate_tokens(fallback_msg)

@@ -269,9 +269,28 @@ def _collect_result_metrics(stdout: str) -> dict:
 
 
 def _get_relaxation_suggestion(
-    user_prompt: str, error_logs: list, model_name: str, provider: str
+    user_prompt: str,
+    error_logs: list,
+    model_name: str,
+    provider: str,
+    *,
+    blueprints: list[str],
+    optimizer_status: str,
+    db_summary: str,
+    result_metrics: dict,
+    generated_code: str,
 ) -> tuple[str, int, int]:
-    return suggest_relaxation(user_prompt, error_logs, model_name, provider)
+    return suggest_relaxation(
+        user_prompt,
+        error_logs,
+        model_name,
+        provider,
+        blueprints=blueprints,
+        optimizer_status=optimizer_status,
+        db_summary=db_summary,
+        result_metrics=result_metrics,
+        generated_code=generated_code,
+    )
 
 
 APPROVED_RELAXATION_HEADER = (
@@ -339,6 +358,7 @@ def run_agent(
     prior_error_logs: Optional[list[str]] = None,
     retry_on_no_converge: bool = False,
     prior_code: str = "",
+    routing_data: Optional[dict] = None,
 ) -> AgentResult:
 
     from llm.coder import generate_code, generate_code_stream
@@ -355,6 +375,7 @@ def run_agent(
     result = AgentResult()
     error_history = prior_error_logs or []
     attempt = 0
+    last_optimizer_status = ""
 
     while attempt < max_retries:
         emit("attempt_start", {"max_retries": max_retries})
@@ -369,6 +390,7 @@ def run_agent(
                     model_name,
                     provider,
                     prior_code=prior_code,
+                    routing_context=routing_data,
                 ):
                     if isinstance(chunk, tuple):
                         code, reasoning, in_tok, out_tok = chunk
@@ -384,6 +406,7 @@ def run_agent(
                     model_name,
                     provider,
                     prior_code=prior_code,
+                    routing_context=routing_data,
                 )
                 result.input_tokens += in_tok
                 result.output_tokens += out_tok
@@ -518,6 +541,7 @@ def run_agent(
                 return result
             else:
                 result.converged = "no"
+                last_optimizer_status = sanitize_feedback(exec_res.stdout, 2000)
                 err = f"Optimizer failed to converge. Stdout tail:\n{sanitize_feedback(exec_res.stdout, 400)}"
                 result.error_logs.append(err)
                 emit(
@@ -556,7 +580,15 @@ def run_agent(
     # Only provide suggestion if we didn't succeed and are in non-retry (App) mode
     if result.converged == "no" and not retry_on_no_converge:
         suggestion, s_in, s_out = _get_relaxation_suggestion(
-            user_prompt, result.error_logs, model_name, provider
+            user_prompt,
+            result.error_logs,
+            model_name,
+            provider,
+            blueprints=blueprints,
+            optimizer_status=last_optimizer_status,
+            db_summary=result.final_summary,
+            result_metrics=result.result_metrics,
+            generated_code=result.final_code,
         )
         result.input_tokens += s_in
         result.output_tokens += s_out
@@ -564,6 +596,7 @@ def run_agent(
             "no_converge_final",
             {
                 "db_summary": result.final_summary,
+                "result_metrics": result.result_metrics,
                 "error_logs": result.error_logs,
                 "suggestion": suggestion,
             },

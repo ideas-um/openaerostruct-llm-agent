@@ -37,7 +37,7 @@ A changed executable line is allowed only if it is:
 - **requested_change**: explicitly requested by the user for that exact variable, point, or index
 - **required_wiring**: necessary to implement a requested change
 - **approved_relaxation**: explicitly listed under `USER-APPROVED RELAXATION AFTER NON-CONVERGENCE`; treat these listed changes as user-requested runtime repair for the retry
-- **optimized_initial_value**: initial guesses for optimized variables may change when they stay inside requested bounds and do not change fixed physics assumptions; warn rather than block unless the value is outside bounds, replaces a fixed analysis condition, or caused a runtime repair issue
+- **optimized_initial_value**: initial guesses for optimized variables may change when the user explicitly requests an initial value, or when newly requested bounds exclude the blueprint initialization and the replacement is strictly inside those bounds
 - **numerical_scaling**: a `ref`/`scaler` value for a newly added DV/objective/constraint, or an existing `ref`/`scaler` repair after a specific runtime scaling/conditioning error
 - **harmless_reporting**: printing, plotting, artifact paths, or comments only
 - **equivalent_formatting**: same executable value, different formatting
@@ -102,8 +102,9 @@ The top-level `"passed"` is only the aggregate:
 - A request for bounds/control points does not permit changing fixed companion variables.
 - A requested constraint/objective does not permit deleting preserved constraints/objectives.
 - A changed existing `ref`/`scaler` must fail unless the user requested scaling or the retry error explicitly required scaling/conditioning repair. Same objective/DV/constraint path is not enough.
-- Optimized-variable initial guesses may vary within sensible/requested bounds. Do not block solely because an initial guess changed.
-- A request for DV bounds or number of control points does not request changing initial/control-point values. For example, `spar_thickness_cp (4 CPs, 0.003 to 0.08 m)` is a bounds request, not permission to replace the blueprint initial `spar_thickness_cp` array.
+- Preserve optimized-variable initial guesses when they remain inside requested bounds. If requested bounds exclude the blueprint initialization, allow a sensible replacement strictly inside those bounds.
+- Resizing an initializer to a user-requested control-point count is required wiring when the initialization pattern and values are otherwise unchanged.
+- Natural physical names map to their canonical control-point variables. For example, tube thickness maps to `thickness_cp`, tube radius to `radius_cp`, spar thickness to `spar_thickness_cp`, and skin thickness to `skin_thickness_cp`.
 
 ---
 

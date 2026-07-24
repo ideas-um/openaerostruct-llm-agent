@@ -636,6 +636,14 @@ if _relaxation_prompt:
     cleanup_artifacts()
     st.session_state["stop_run"] = False
     st.session_state["active_attempts"] = []  # Clear for retry
+    prev_routing = next(
+        (
+            message["routing_json"]
+            for message in reversed(st.session_state.messages)
+            if "routing_json" in message
+        ),
+        {},
+    )
 
     with st.chat_message("assistant"):
         thought_expander = st.expander(
@@ -656,16 +664,8 @@ if _relaxation_prompt:
                 callback=_make_ui_callback(_rs, _rn),
                 prior_error_logs=_relaxation_error_logs,
                 prior_code=st.session_state.pop("relaxation_prior_code", ""),
+                routing_data=prev_routing,
             )
-        # Pull latest available routing to satisfy 5-param signature
-        prev_routing = next(
-            (
-                m["routing_json"]
-                for m in reversed(st.session_state.messages)
-                if "routing_json" in m
-            ),
-            {},
-        )
         _handle_agent_result(
             result, _rn, _relaxation_prompt, _relaxation_blueprints or [], prev_routing
         )
@@ -737,6 +737,7 @@ if user_prompt:
                 max_retries=max_retries,
                 stream=True,
                 callback=_make_ui_callback(_ss, _nc),
+                routing_data=routing_data,
             )
 
         _handle_agent_result(

@@ -1,3 +1,4 @@
+import json
 import os
 import time
 import logging
@@ -20,8 +21,23 @@ _SRC_DIR = os.path.dirname(_LLM_DIR)
 _BLUEPRINTS_DIR = os.path.realpath(os.path.join(_SRC_DIR, "blueprints"))
 
 
+def _format_routing_context(routing_context: dict | None) -> str:
+    if not isinstance(routing_context, dict):
+        return ""
+    payload = {
+        key: routing_context[key]
+        for key in ("blueprints", "parameters")
+        if key in routing_context
+    }
+    return json.dumps(payload, indent=2, sort_keys=True)
+
+
 def _build_prompt(
-    user_prompt: str, blueprint_names: list[str], feedback: str, prior_code: str = ""
+    user_prompt: str,
+    blueprint_names: list[str],
+    feedback: str,
+    prior_code: str = "",
+    routing_context: dict | None = None,
 ) -> tuple[str, str]:
     blueprints_context = ""
     for name in blueprint_names:
@@ -34,6 +50,17 @@ def _build_prompt(
         system_prompt = f.read()
 
     prompt = f"User Request: {user_prompt}\n\n"
+    formatted_routing = _format_routing_context(routing_context)
+    if formatted_routing:
+        prompt += (
+            "### ROUTER CONTEXT ###\n"
+            "This is a structured extraction of the original request. Use it to "
+            "locate explicitly stated objectives, design variables, constraints, "
+            "conditions, and geometry. The original user request remains "
+            "authoritative. Do not implement any router value that is absent from "
+            "or conflicts with the original request.\n"
+            f"{formatted_routing}\n\n"
+        )
 
     if prior_code:
         prompt += (
@@ -117,9 +144,21 @@ def _parse_response(response: str) -> tuple[str, str]:
 
 
 def generate_code(
-    user_prompt, blueprints, feedback, model_name, provider, prior_code=""
+    user_prompt,
+    blueprints,
+    feedback,
+    model_name,
+    provider,
+    prior_code="",
+    routing_context=None,
 ):
-    sys, p = _build_prompt(user_prompt, blueprints, feedback, prior_code)
+    sys, p = _build_prompt(
+        user_prompt,
+        blueprints,
+        feedback,
+        prior_code,
+        routing_context=routing_context,
+    )
     logger.info(f"--- SYSTEM ---\n{sys}\n--- PROMPT ---\n{p}")
     resp = get_llm_response(p, model_name, sys, provider=provider)
     logger.info(f"--- RESPONSE ---\n{resp}")
@@ -128,9 +167,21 @@ def generate_code(
 
 
 def generate_code_stream(
-    user_prompt, blueprints, feedback, model_name, provider, prior_code=""
+    user_prompt,
+    blueprints,
+    feedback,
+    model_name,
+    provider,
+    prior_code="",
+    routing_context=None,
 ):
-    sys, p = _build_prompt(user_prompt, blueprints, feedback, prior_code)
+    sys, p = _build_prompt(
+        user_prompt,
+        blueprints,
+        feedback,
+        prior_code,
+        routing_context=routing_context,
+    )
     client = get_llm_client(provider, model_name)
 
     if not client or not is_gemini_provider(provider):

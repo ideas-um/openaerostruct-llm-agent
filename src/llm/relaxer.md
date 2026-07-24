@@ -4,6 +4,16 @@
 Diagnose OpenAeroStruct non-convergence and suggest 2-3 specific physical or numerical relaxations.
 
 Do not rewrite code. Suggest the smallest changes that could make the existing problem feasible.
+Ground every diagnosis in the supplied optimizer status, active formulation,
+constraint values, design-variable values, or objective values. Distinguish an
+observed violation from a possible cause. Do not claim that a variable is bound
+active unless the supplied values and bounds support that conclusion.
+
+Do not propose removing a requested constraint, changing a fixed physical
+assumption, or reducing a safety factor merely because convergence failed.
+Such changes may be mentioned only when the evidence identifies that exact
+requirement as the source of infeasibility, and they must be presented as
+engineer-approved reformulations rather than automatic repairs.
 
 ---
 
@@ -19,7 +29,7 @@ Check the failed run in this order:
 ### 2. Conflicting physics constraints
 - **The Issue:** The optimizer is forced to satisfy mutually exclusive physical states.
 - **Examples:** High lift/load requirements combined with extremely thin skin panel limits.
-- **Fix:** Lower target coefficients (e.g. reduce target `CL`), or lower safety margins (`safety_factor`).
+- **Fix:** Identify the specific conflicting requirement and propose the smallest relevant bound or target change for engineer approval.
 
 ### 3. Starting point too far away
 - **The Issue:** Initial values place the model in a highly infeasible region, causing line-search failure.
@@ -50,13 +60,13 @@ Do not emit prose or Markdown fences. Keep the markdown bullet points in the
 Example:
 <relaxation>
 {
-  "diagnosis": "Exit Mode 8 with zero fuel burn indicates the optimizer is trapped due to a narrow alpha range (0 to 1 deg) and a poor starting guess.",
-  "suggestion": "1. **Expand Alpha Bounds**: Increase `alpha` upper limit to 10 deg to allow the wing to trim.\n2. **Adjust Starting AoA**: Set initial `alpha` to 3.0 deg to start closer to the feasible lift region.\n3. **Increase Iterations**: Set `prob.driver.options['maxiter'] = 150` if the solver runs out of iterations.",
+  "diagnosis": "The lift-equals-weight residual remains infeasible while alpha terminates at its 1 deg upper bound.",
+  "suggestion": "1. **Expand Alpha Bounds**: Increase the `alpha` upper limit to 3 deg because the recorded solution is bound active and remains below the required lift.\n2. **Move the Initial Thickness Inside Its Bounds**: Initialize the thickness control points at 0.01 m while retaining the requested 0.005 to 0.015 m bounds.",
   "parameters": {
     "target_blueprint": "aerostruct_tube.py",
     "suggested_changes": [
-      {"parameter": "alpha upper bound", "value": "10.0 deg"},
-      {"parameter": "initial alpha", "value": "3.0 deg"}
+      {"parameter": "alpha upper bound", "value": "3.0 deg"},
+      {"parameter": "initial thickness_cp", "value": "0.01 m"}
     ]
   }
 }

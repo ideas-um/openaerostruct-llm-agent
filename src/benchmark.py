@@ -461,6 +461,7 @@ def _run_single_rep(
             callback=bench_callback,
             gen_script_path=_BENCH_SCRIPT,
             retry_on_no_converge=True,
+            routing_data=routing_data,
         )
     except LLMBackendTransientError:
         backend_logger.removeHandler(file_handler)

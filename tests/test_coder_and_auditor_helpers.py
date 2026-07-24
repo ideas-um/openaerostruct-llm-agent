@@ -1,6 +1,14 @@
+import pytest
+
 from agent_logic import APPROVED_RELAXATION_HEADER, build_approved_relaxation_prompt
-from llm.auditor import _contract_violations, _make_diff, _semantic_changes
-from llm.coder import _parse_response
+from llm.auditor import (
+    _contract_violations,
+    _make_diff,
+    _semantic_changes,
+    _var_requested,
+)
+from llm.coder import _build_prompt, _parse_response
+from llm.relaxer import suggest_relaxation
 
 
 def test_generated_code_parser_strips_full_line_comments_only():
@@ -26,6 +34,193 @@ def test_generated_code_parser_strips_full_line_comments_only():
     assert "# === AGENT EDITABLE SECTION START ===" not in code
     assert "x = 1  # useful inline comment" in code
     assert "y = 2" in code
+
+
+@pytest.mark.parametrize(
+    ("natural_name", "canonical_name"),
+    [
+        ("twist control points", "twist_cp"),
+        ("chord distribution", "chord_cp"),
+        ("x-shear control points", "xshear_cp"),
+        ("z-shear control points", "zshear_cp"),
+        ("tube wall thickness", "thickness_cp"),
+        ("tube outer radius", "radius_cp"),
+        ("spar wall thickness", "spar_thickness_cp"),
+        ("skin panel thickness", "skin_thickness_cp"),
+        ("thickness-to-chord control points", "t_over_c_cp"),
+        ("t_over_c_cp", "t_over_c_cp"),
+    ],
+)
+def test_auditor_maps_physical_control_point_aliases(
+    natural_name, canonical_name
+):
+    assert _var_requested(f"Vary the {natural_name}.", canonical_name)
+
+
+def test_contract_allows_initialization_moved_inside_requested_tube_bounds():
+    prompt = "Limit tube thickness to 0.005 to 0.015 m."
+    changes = [
+        {
+            "item": "dict:surface.thickness_cp",
+            "status": "changed",
+            "blueprint": "surface['thickness_cp'] = np.array([0.1, 0.2, 0.3])",
+            "generated": "surface['thickness_cp'] = np.array([0.01, 0.01, 0.01])",
+        },
+        {
+            "item": "call:add_design_var:wing.thickness_cp",
+            "status": "changed",
+            "blueprint": (
+                "prob.model.add_design_var('wing.thickness_cp', lower=0.01, "
+                "upper=0.5, scaler=100.0)"
+            ),
+            "generated": (
+                "prob.model.add_design_var('wing.thickness_cp', lower=0.005, "
+                "upper=0.015, scaler=100.0)"
+            ),
+        },
+    ]
+
+    assert _contract_violations(prompt, changes) == []
+
+
+def test_contract_blocks_initialization_on_requested_bound():
+    prompt = "Limit tube thickness to 0.005 to 0.015 m."
+    changes = [
+        {
+            "item": "dict:surface.thickness_cp",
+            "status": "changed",
+            "blueprint": "surface['thickness_cp'] = np.array([0.1, 0.2, 0.3])",
+            "generated": "surface['thickness_cp'] = np.array([0.005, 0.01, 0.015])",
+        },
+        {
+            "item": "call:add_design_var:wing.thickness_cp",
+            "status": "changed",
+            "blueprint": (
+                "prob.model.add_design_var('wing.thickness_cp', lower=0.01, "
+                "upper=0.5, scaler=100.0)"
+            ),
+            "generated": (
+                "prob.model.add_design_var('wing.thickness_cp', lower=0.005, "
+                "upper=0.015, scaler=100.0)"
+            ),
+        },
+    ]
+
+    violations = _contract_violations(prompt, changes)
+
+    assert len(violations) == 1
+    assert violations[0]["changed_item"] == "dict:surface.thickness_cp"
+
+
+def test_contract_allows_explicit_natural_language_initial_value():
+    changes = [
+        {
+            "item": "dict:surface.thickness_cp",
+            "status": "changed",
+            "blueprint": "surface['thickness_cp'] = np.array([0.1, 0.2, 0.3])",
+            "generated": "surface['thickness_cp'] = np.array([0.01, 0.01, 0.01])",
+        }
+    ]
+
+    assert (
+        _contract_violations(
+            "Initialize the tube thickness to 0.01 m.", changes
+        )
+        == []
+    )
+
+
+def test_contract_blocks_unneeded_initial_change_when_blueprint_is_feasible():
+    prompt = "Limit skin thickness to 0.003 to 0.02 m."
+    changes = [
+        {
+            "item": "dict:surface.skin_thickness_cp",
+            "status": "changed",
+            "blueprint": (
+                "surface['skin_thickness_cp'] = "
+                "np.array([0.003, 0.006, 0.01, 0.012])"
+            ),
+            "generated": (
+                "surface['skin_thickness_cp'] = "
+                "np.array([0.005, 0.005, 0.005, 0.005])"
+            ),
+        },
+        {
+            "item": "call:add_design_var:wing.skin_thickness_cp",
+            "status": "changed",
+            "blueprint": (
+                "prob.model.add_design_var('wing.skin_thickness_cp', lower=0.003, "
+                "upper=0.1, scaler=100.0)"
+            ),
+            "generated": (
+                "prob.model.add_design_var('wing.skin_thickness_cp', lower=0.003, "
+                "upper=0.02, scaler=100.0)"
+            ),
+        },
+    ]
+
+    violations = _contract_violations(prompt, changes)
+
+    assert len(violations) == 1
+    assert violations[0]["changed_item"] == "dict:surface.skin_thickness_cp"
+
+
+def test_coder_prompt_receives_filtered_router_context():
+    routing_context = {
+        "blueprints": ["aero_opt.py"],
+        "is_vague": False,
+        "reason": "Single-point optimization.",
+        "parameters": {
+            "design_variables": [{"name": "twist_cp"}],
+            "objective": "minimize drag",
+        },
+        "input_tokens": 100,
+    }
+
+    _, prompt = _build_prompt(
+        "Minimize drag using twist.",
+        ["aero_opt.py"],
+        "Initial generation",
+        routing_context=routing_context,
+    )
+
+    assert "### ROUTER CONTEXT ###" in prompt
+    assert '"name": "twist_cp"' in prompt
+    assert "original user request remains authoritative" in prompt
+    assert "input_tokens" not in prompt
+
+
+def test_relaxer_receives_structured_optimization_evidence(monkeypatch):
+    captured = {}
+
+    def fake_response(prompt, model_name, system_prompt, provider):
+        captured["prompt"] = prompt
+        return '<relaxation>{"suggestion":"Increase alpha upper bound."}</relaxation>'
+
+    monkeypatch.setattr("llm.relaxer.get_llm_response", fake_response)
+
+    suggestion, _, _ = suggest_relaxation(
+        "Minimize fuel burn.",
+        ["Optimizer failed to converge."],
+        "test-model",
+        "test-provider",
+        blueprints=["aerostruct_tube.py"],
+        optimizer_status="Exit mode 8",
+        db_summary="alpha final: 1.0",
+        result_metrics={"db": {"constraints": {"L_equals_W": {"final": 0.2}}}},
+        generated_code=(
+            "prob.model.add_design_var('alpha', lower=0.0, upper=1.0)\n"
+            "prob.model.add_constraint('AS_point_0.L_equals_W', equals=0.0)\n"
+            "prob.model.add_objective('AS_point_0.fuelburn')\n"
+        ),
+    )
+
+    assert suggestion == "Increase alpha upper bound."
+    assert "### ACTIVE OPTIMIZATION FORMULATION ###" in captured["prompt"]
+    assert "add_design_var('alpha', lower=0.0, upper=1.0)" in captured["prompt"]
+    assert "### STRUCTURED RESULT METRICS ###" in captured["prompt"]
+    assert "L_equals_W" in captured["prompt"]
+    assert "Exit mode 8" in captured["prompt"]
 
 
 def test_auditor_diff_ignores_comment_only_lines_but_keeps_executable_changes():

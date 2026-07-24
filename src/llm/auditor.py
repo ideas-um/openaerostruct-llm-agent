@@ -206,17 +206,63 @@ _PRESERVE_WORD_RE = re.compile(
     re.IGNORECASE,
 )
 _REMOVAL_WORD_RE = re.compile(r"\b(remove|delete|drop|omit|disable)\b", re.IGNORECASE)
-_INITIAL_WORD_RE = re.compile(r"\b(initial|init|initially|guess)\b", re.IGNORECASE)
+_INITIAL_WORD_RE = re.compile(
+    r"\b(initial|init|initially|initiali[sz]e|initiali[sz]ed|"
+    r"initiali[sz]ation|guess)\b",
+    re.IGNORECASE,
+)
 _SCALING_WORD_RE = re.compile(r"\b(ref|scaler|scaling|scale|conditioning)\b", re.IGNORECASE)
 _MESH_RESOLUTION_RE = re.compile(
     r"\b(num_y|num_x|mesh\s+resolution|panel\s+count|panels?|discretization|discretisation)\b",
     re.IGNORECASE,
 )
 _T_OVER_C_ALIAS_RE = re.compile(
-    r"\b(t/c|t\s*over\s*c|thickness[-\s]*to[-\s]*chord|thickness\s+ratio)\b",
+    r"\b(t_over_c_cp|t/c|t\s*over\s*c|thickness[-\s]*to[-\s]*chord|"
+    r"thickness\s+ratio)\b",
     re.IGNORECASE,
 )
 _TWIST_REQUEST_RE = re.compile(r"\b(twist|twist_cp|washout|washin)\b", re.IGNORECASE)
+_VAR_ALIAS_PATTERNS = {
+    "twist_cp": re.compile(
+        r"\b(twist(?:\s+(?:control\s+points?|CPs?))?|twist_cp|washout|washin)\b",
+        re.IGNORECASE,
+    ),
+    "chord_cp": re.compile(
+        r"\b(chord_cp|chord\s+(?:distribution|control\s+points?|CPs?))\b",
+        re.IGNORECASE,
+    ),
+    "xshear_cp": re.compile(
+        r"\b(xshear_cp|x[-\s]*shear(?:\s+(?:control\s+points?|CPs?))?|"
+        r"spanwise\s+x[-\s]*(?:offset|shear))\b",
+        re.IGNORECASE,
+    ),
+    "zshear_cp": re.compile(
+        r"\b(zshear_cp|z[-\s]*shear(?:\s+(?:control\s+points?|CPs?))?|"
+        r"spanwise\s+z[-\s]*(?:offset|shear))\b",
+        re.IGNORECASE,
+    ),
+    "thickness_cp": re.compile(
+        r"\b(thickness_cp|tube(?:\s+wall)?\s+thickness"
+        r"(?:\s+(?:distribution|control\s+points?|CPs?))?)\b",
+        re.IGNORECASE,
+    ),
+    "radius_cp": re.compile(
+        r"\b(radius_cp|tube(?:\s+outer)?\s+radius"
+        r"(?:\s+(?:distribution|control\s+points?|CPs?))?)\b",
+        re.IGNORECASE,
+    ),
+    "spar_thickness_cp": re.compile(
+        r"\b(spar_thickness_cp|spar(?:\s+wall)?\s+thickness"
+        r"(?:\s+(?:distribution|control\s+points?|CPs?))?)\b",
+        re.IGNORECASE,
+    ),
+    "skin_thickness_cp": re.compile(
+        r"\b(skin_thickness_cp|skin(?:\s+panel)?\s+thickness"
+        r"(?:\s+(?:distribution|control\s+points?|CPs?))?)\b",
+        re.IGNORECASE,
+    ),
+    "t_over_c_cp": _T_OVER_C_ALIAS_RE,
+}
 _POINT1_WORD_RE = re.compile(
     r"\b(maneuver|manoeuvre|secondary|second\s+point|point\s*1|index\s*1)\b",
     re.IGNORECASE,
@@ -693,10 +739,10 @@ def _prompt_requests_removal(user_prompt: str) -> bool:
 
 
 def _var_initial_requested(user_prompt: str, var_name: str) -> bool:
-    if var_name == "t_over_c_cp" and _T_OVER_C_ALIAS_RE.search(user_prompt):
-        return True
-    var = re.escape(var_name)
-    for match in re.finditer(rf"\b{var}\b", user_prompt, re.IGNORECASE):
+    pattern = _VAR_ALIAS_PATTERNS.get(
+        var_name, re.compile(rf"\b{re.escape(var_name)}\b", re.IGNORECASE)
+    )
+    for match in pattern.finditer(user_prompt):
         before = user_prompt[max(0, match.start() - 60) : match.start()]
         after = user_prompt[match.end() : match.end() + 140]
         after = re.split(
@@ -712,11 +758,50 @@ def _var_initial_requested(user_prompt: str, var_name: str) -> bool:
 
 
 def _var_requested(user_prompt: str, var_name: str) -> bool:
-    if var_name == "t_over_c_cp" and _T_OVER_C_ALIAS_RE.search(user_prompt):
-        return True
-    if var_name == "twist_cp" and _prompt_requests_twist(user_prompt):
-        return True
-    return bool(re.search(rf"\b{re.escape(var_name)}\b", user_prompt, re.IGNORECASE))
+    pattern = _VAR_ALIAS_PATTERNS.get(
+        var_name, re.compile(rf"\b{re.escape(var_name)}\b", re.IGNORECASE)
+    )
+    return bool(pattern.search(user_prompt))
+
+
+def _requested_control_point_count(user_prompt: str, var_name: str) -> int | None:
+    pattern = _VAR_ALIAS_PATTERNS.get(
+        var_name, re.compile(rf"\b{re.escape(var_name)}\b", re.IGNORECASE)
+    )
+    for match in pattern.finditer(user_prompt):
+        chunk = user_prompt[
+            max(0, match.start() - 80) : min(len(user_prompt), match.end() + 120)
+        ]
+        count_match = re.search(
+            r"\b(\d+)\s*(?:control\s+points?|CPs?)\b", chunk, re.IGNORECASE
+        )
+        if count_match:
+            return int(count_match.group(1))
+    return None
+
+
+def _control_point_count_change_only(
+    user_prompt: str, change: dict[str, str], var_name: str
+) -> bool:
+    requested_count = _requested_control_point_count(user_prompt, var_name)
+    if requested_count is None:
+        return False
+    old = _compact_code(change.get("blueprint", ""))
+    new = _compact_code(change.get("generated", ""))
+    if not old or not new:
+        return False
+
+    def normalize_count(text: str) -> str:
+        return re.sub(
+            r"((?:np\.)?(?:zeros|ones))\(\(?\d+\)?\)",
+            r"\1(<count>)",
+            text,
+        )
+
+    generated_count = re.search(
+        r"(?:np\.)?(?:zeros|ones)\(\(?" + str(requested_count) + r"\)?\)", new
+    )
+    return bool(generated_count and normalize_count(old) == normalize_count(new))
 
 
 def _changed_index(change: dict[str, str], index: int) -> dict[str, str] | None:
@@ -744,6 +829,48 @@ def _call_keyword_value(statement: str, keyword_name: str) -> str | None:
         if keyword.arg == keyword_name:
             return _normalized_statement(keyword.value)
     return None
+
+
+def _design_var_bounds(
+    semantic_changes: list[dict[str, str]], var_name: str
+) -> tuple[float, float] | None:
+    for change in semantic_changes:
+        item = change.get("item", "")
+        if not item.startswith("call:add_design_var:"):
+            continue
+        design_var_path = item.split("call:add_design_var:", 1)[1]
+        if design_var_path.rsplit(".", 1)[-1] != var_name:
+            continue
+        statement = change.get("generated", "")
+        lower = _call_keyword_value(statement, "lower")
+        upper = _call_keyword_value(statement, "upper")
+        try:
+            if lower is not None and upper is not None:
+                return float(lower), float(upper)
+        except ValueError:
+            return None
+    return None
+
+
+def _initial_change_moves_inside_requested_bounds(
+    user_prompt: str,
+    change: dict[str, str],
+    semantic_changes: list[dict[str, str]],
+    var_name: str,
+) -> bool:
+    if not _var_requested(user_prompt, var_name):
+        return False
+    bounds = _design_var_bounds(semantic_changes, var_name)
+    old_values = _statement_array_values(change.get("blueprint", ""))
+    new_values = _statement_array_values(change.get("generated", ""))
+    if bounds is None or old_values is None or new_values is None or not new_values:
+        return False
+    lower, upper = bounds
+    old = [float(value) for value in old_values]
+    new = [float(value) for value in new_values]
+    blueprint_is_outside = any(value < lower or value > upper for value in old)
+    generated_is_strictly_inside = all(lower < value < upper for value in new)
+    return blueprint_is_outside and generated_is_strictly_inside
 
 
 def _call_scaling_changed(change: dict[str, str]) -> bool:
@@ -987,7 +1114,11 @@ def _contract_violations(
             elif (
                 key in _INITIAL_DICT_KEYS
                 and change.get("status") != "removed"
-                and not _var_requested(user_prompt, key)
+                and not _var_initial_requested(user_prompt, key)
+                and not _initial_change_moves_inside_requested_bounds(
+                    user_prompt, change, semantic_changes, key
+                )
+                and not _control_point_count_change_only(user_prompt, change, key)
             ):
                 violations.append(
                     {
@@ -996,12 +1127,14 @@ def _contract_violations(
                         "blueprint_value": change.get("blueprint", ""),
                         "generated_value": change.get("generated", ""),
                         "reason": (
-                            "Changing DV bounds/control-point count does not request "
-                            f"changing the initial {key} values."
+                            f"The initial {key} values changed without an explicit "
+                            "initial-value request and the change was not required to "
+                            "place the starting point inside newly requested bounds."
                         ),
                         "repair_instruction": (
-                            f"Restore the blueprint {key} initial values unless the user "
-                            "explicitly gives new initial values or runtime repair requires it."
+                            f"Restore the blueprint {key} initial values when they remain "
+                            "inside the requested bounds. If requested bounds exclude the "
+                            "blueprint values, use sensible interior initial values."
                         ),
                     }
                 )

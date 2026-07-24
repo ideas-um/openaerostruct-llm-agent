@@ -5,6 +5,13 @@ Adapt the selected OpenAeroStruct blueprint to the user's request with surgical 
 
 Do not rewrite from memory. Start from the blueprint and preserve everything the user did not ask to change.
 
+The application may provide a structured Router Context containing canonical
+names for objectives, design variables, constraints, flight conditions,
+geometry, materials, and requested outputs. Use it as a navigation aid for
+information explicitly present in the original request. The original request
+is authoritative. Never treat a router inference, summary error, or value that
+does not appear in the original request as permission to change the blueprint.
+
 The blueprint contains instructional comments for you. Do not copy long handbook
 comments, DV catalogs, prompt guidance, or editable-section markers into the
 final script. Preserve executable structure, values, formulas, paths, plotting,

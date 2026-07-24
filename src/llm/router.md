@@ -80,6 +80,13 @@ Use this to write concrete `missing_info` responses — list relevant options fr
 | `t_over_c_cp` | Thickness-to-chord ratio — wingbox |
 | `fuel_mass` | Fuel mass [kg] — wingbox fuel loop |
 
+Map natural physical descriptions to these canonical variable names. For
+example, "tube thickness" means `thickness_cp`, "tube radius" means
+`radius_cp`, "spar thickness" means `spar_thickness_cp`, "skin thickness"
+means `skin_thickness_cp`, and thickness-to-chord control points mean
+`t_over_c_cp`. Twist, chord, x-shear, and z-shear control points similarly map
+to `twist_cp`, `chord_cp`, `xshear_cp`, and `zshear_cp`.
+
 ### Flight conditions
 | Parameter | Notes |
 |---|---|
@@ -102,6 +109,19 @@ Your response must be a valid JSON object wrapped in `<routing>` tags.
 Return exactly one blueprint in `blueprints`. Never return multiple blueprints.
 Do not emit prose or Markdown fences.
 
+Populate `parameters` only from information explicitly stated in the user
+request. Do not fill missing values from engineering convention or blueprint
+defaults. Use canonical design-variable names and the following fields when
+applicable:
+- `intent`
+- `objective`
+- `design_variables`
+- `constraints`
+- `flight_conditions`
+- `geometry`
+- `materials`
+- `requested_outputs`
+
 Example:
 <routing>
 {
@@ -110,7 +130,12 @@ Example:
   "missing_info": "",
   "parameters": {
     "intent": "Optimisation",
-    "mapped_vars": ["drag", "twist", "Mach 0.8"]
+    "objective": "minimize drag",
+    "design_variables": [
+      {"name": "twist_cp", "control_points": 3, "bounds": [-6, 6]}
+    ],
+    "constraints": ["CL = 0.5"],
+    "flight_conditions": [{"Mach": 0.8}]
   },
   "reason": "Single-point aerodynamic optimization for drag."
 }

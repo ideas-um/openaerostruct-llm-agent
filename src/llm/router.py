@@ -31,6 +31,19 @@ VALID_BLUEPRINTS: frozenset = frozenset(
         "struct_optimization.py",
     }
 )
+_ROUTER_PARAMETER_FIELDS: frozenset = frozenset(
+    {
+        "intent",
+        "objective",
+        "design_variables",
+        "constraints",
+        "flight_conditions",
+        "geometry",
+        "materials",
+        "requested_outputs",
+        "mapped_vars",
+    }
+)
 
 
 def _load_system_prompt() -> str:
@@ -129,6 +142,14 @@ def _validate_routing_contract(data: dict, user_prompt: str) -> dict:
             "with no optimization objective, design variable, or constraint. Multiple "
             "Mach numbers alone still route to aero_analysis.py."
         )
+    parameters = data.get("parameters")
+    if not isinstance(parameters, dict):
+        parameters = {}
+    data["parameters"] = {
+        key: value
+        for key, value in parameters.items()
+        if key in _ROUTER_PARAMETER_FIELDS
+    }
     return data
 
 
