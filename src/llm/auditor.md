@@ -14,14 +14,15 @@ Do not rewrite code. Return a pass/fail audit with repair instructions for the c
 You receive:
 - `USER REQUEST`
 - `SELECTED BLUEPRINT`
-- `HIGH-RISK SEMANTIC STATEMENT CHANGES TO REVIEW`
-- `RAW HIGH-RISK DIFF LINES FOR DEBUG ONLY`
-- `UNIFIED DIFF`
+- `REQUIRED CHANGE-BY-CHANGE REVIEW`
+- `SUPPORTING EXECUTABLE DIFF`
 
-Use the semantic statement changes as the required review list. The unified diff
-is filtered to executable lines so copied/removed comments do not create fake
-violations. Use the raw high-risk diff only as quick backup evidence. Do not
-block comment-only or formatting-only changes.
+The required review list is the audit task. Return exactly one decision for
+every supplied `item`. Do not skip an item and do not combine multiple items
+under a broad label. The list places removed active formulation elements and
+protected physical or discretization values first. Use the supporting diff only
+to clarify an item or catch a relevant executable change not represented in the
+required list. Do not block comment-only or formatting-only changes.
 
 If a semantic change includes `element_changes`, review those entries by index/point, not as a whole array. For `_Mach_numbers`, `_rho_vals`, `_altitudes`, `_v_vals`, `_a_vals`, `_mu_vals`, and `load_factor`, point 0 and point 1 are separate assumptions.
 
@@ -34,8 +35,8 @@ changed executable value for that point is a blocking violation.
 ## DECISION RULE
 
 A changed executable line is allowed only if it is:
-- **requested_change**: explicitly requested by the user for that exact variable, point, or index
-- **required_wiring**: necessary to implement a requested change
+- **requested_change**: explicitly requested by the user for that exact variable, point, or index; name the authorizing phrase from the request
+- **required_wiring**: necessary to implement a requested change; name that requested change and explain why the blueprint value cannot remain unchanged
 - **approved_relaxation**: explicitly listed under `USER-APPROVED RELAXATION AFTER NON-CONVERGENCE`; treat these listed changes as user-requested runtime repair for the retry
 - **optimized_initial_value**: initial guesses for optimized variables may change when the user explicitly requests an initial value, or when newly requested bounds exclude the blueprint initialization and the replacement is strictly inside those bounds
 - **numerical_scaling**: a `ref`/`scaler` value for a newly added DV/objective/constraint, or an existing `ref`/`scaler` repair after a specific runtime scaling/conditioning error
@@ -43,6 +44,12 @@ A changed executable line is allowed only if it is:
 - **equivalent_formatting**: same executable value, different formatting
 
 Everything else is unrequested assumption drift and must fail.
+
+Before accepting a protected change, ask whether the exact changed item was
+authorized. Similar subject matter is not authorization. Geometry dimensions do
+not authorize mesh resolution. Material or thickness bounds do not authorize a
+fixed thickness-to-chord value. A list of requested constraints is not
+permission to remove an active blueprint constraint.
 
 If the prompt contains `USER-APPROVED RELAXATION AFTER NON-CONVERGENCE`, do not
 force those named relaxation changes back to the original blueprint value. The
@@ -77,7 +84,12 @@ High-risk items:
 - active DVs, DV bounds, constraints, objective path/meaning
 - analysis sweep variables and required result outputs
 
-For each high-risk semantic statement change, `reviewed_changes` or `violations` must name the semantic `item`, include a per-change `"passed": true/false`, and quote the old and new statement values from the semantic-change list. If the generated code preserves the old value by moving it elsewhere, quote both statements and explain the equivalence.
+For each supplied semantic statement change, `reviewed_changes` or `violations`
+must copy the exact semantic `item` into `changed_item` and include a per-change
+`"passed": true/false`. For an accepted `requested_change`, state the exact
+authorizing phrase from the user request. For accepted `required_wiring`, name
+the requested change that makes the wiring necessary. For a violation, quote
+the old and new statement values so the Coding Agent can repair it.
 
 The top-level `"passed"` is only the aggregate:
 - It must be `true` only when every per-change check passed.
@@ -93,6 +105,13 @@ The top-level `"passed"` is only the aggregate:
 - If the user gives `CT` in `1/s` or `/s`, multiplying it by `grav_constant` is assumption drift. Only allow `grav_constant * ...` when the user explicitly gives TSFC requiring conversion.
 - If the blueprint computes `W0` with `+ surf_dict["Wf_reserve"]`, removing that reserve-fuel term is assumption drift unless the user explicitly says W0 already includes reserve fuel.
 - A request for one variable family does not permit neighboring assumption drift.
+- Geometry and discretization are separate decisions. A different span, chord,
+  taper, sweep, dihedral, or wing type does not authorize changing `num_y`,
+  `num_x`, or mesh spacing. Terms such as "analyze", "optimize", "regional
+  wing", or "appropriate mesh density" are not authorization. A mesh
+  resolution change may pass only when the user explicitly requests mesh
+  resolution, panel count, or discretization, or when retry feedback requires
+  that exact numerical repair.
 - A request for one flight point does not permit changing other points.
 - If the user requested point 0 only, point 1 must preserve the blueprint value unless explicitly requested.
 - If the user says to preserve the maneuver/secondary flight condition, changing point 1 Mach/rho/altitude/speed/Reynolds values is a blocking violation. Do not call this a "consistent update". A separate requested load-factor change is allowed only for `load_factor`.
@@ -103,6 +122,13 @@ The top-level `"passed"` is only the aggregate:
   half-wing must receive half of that total. Applying the full stated total to
   the half-wing is a blocking violation unless the user explicitly describes
   the value as a half-wing or modeled-domain load.
+- Check the sum over nodes, not only the scalar written in the assignment. If a
+  total load `T` is uniformly distributed using `loads[:, 2]`, then
+  `symmetry=True` requires `loads[:, 2] = T / (2.0 * ny)` and
+  `np.sum(loads[:, 2]) == T / 2.0`. The assignment
+  `loads[:, 2] = T / 2.0` repeats `T/2` at every node and is a blocking
+  violation. Do not describe that assignment as distributed merely because
+  NumPy fills the slice.
 - OpenAeroStruct's built-in uCRM mesh identifier is `"uCRM_based"`. A generated
   `wing_type="uCRM"` silently falls through to the ordinary CRM geometry and
   must fail an explicit uCRM request.
@@ -134,7 +160,7 @@ The top-level `"passed"` is only the aggregate:
 - Weighted multipoint CD implemented with `ExecComp` when the user requested weights.
 - Runtime-retry fixes that preserve assumptions, such as fixing CRM/rect `generate_mesh` unpacking.
 
-Do not create a blocking violation from memory. A violation must cite a changed/removed statement from the semantic-change list, with the raw diff used only as supporting context.
+Do not create a blocking violation from memory. A violation must cite a changed/removed statement from the semantic-change list, with the supporting diff used only as context.
 For high-risk semantic statement changes, a pass must still cite the changed item explicitly; otherwise return `passed=false` with a repair instruction to restore the blueprint statement.
 For pointwise arrays, a pass must cite every changed index/point explicitly; otherwise return `passed=false` with a repair instruction for the unreviewed point.
 

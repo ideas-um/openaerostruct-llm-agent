@@ -57,8 +57,12 @@ def _build_prompt(
             "This is a structured extraction of the original request. Use it to "
             "locate explicitly stated objectives, design variables, constraints, "
             "conditions, and geometry. The original user request remains "
-            "authoritative. Do not implement any router value that is absent from "
-            "or conflicts with the original request.\n"
+            "authoritative. The extracted lists contain user-stated fields, not an "
+            "exhaustive replacement for the active blueprint formulation. Do not "
+            "delete an existing blueprint constraint, objective, or fixed "
+            "assumption merely because it is absent from Router Context. Do not "
+            "implement any router value that is absent from or conflicts with the "
+            "original request.\n"
             f"{formatted_routing}\n\n"
         )
 

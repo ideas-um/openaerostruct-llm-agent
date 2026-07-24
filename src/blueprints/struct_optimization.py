@@ -80,7 +80,9 @@ surf_dict = {
     "mrho": 3.0e3,  # [kg/m^3] material density
     # Structural design parameters
     "fem_origin": 0.35,  # normalized chordwise location of the spar
+    # Fixed physical assumption: preserve 0.15 unless the user explicitly requests t/c.
     "t_over_c_cp": np.array([0.15]),  # maximum airfoil thickness ratio
+    # This is the DV initializer, not its bound. Preserve it when it remains feasible.
     "thickness_cp": np.ones((3)) * 0.1,
     # Weight and coupling flags
     "wing_weight_ratio": 2.0,
@@ -101,7 +103,11 @@ ny = surf_dict["mesh"].shape[1]
 # OAS structural loads are (ny, 6): Fx, Fy, Fz, Mx, My, Mz.
 # Upward load belongs in the vertical force component only.
 # With symmetry=True, a user-stated total wing load must be divided by two
-# before it is distributed over these modeled half-wing nodes.
+# and then divided by ny before assignment to every modeled half-wing node.
+# For a user-stated total T:
+#   loads[:, 2] = T / (2.0 * ny)  # symmetry=True
+# The required check is np.sum(loads[:, 2]) == T / 2.0.
+# Do not use loads[:, 2] = T / 2.0; that applies T/2 at every node.
 loads = np.zeros((ny, 6))
 loads[:, 2] = 2e5
 
@@ -138,6 +144,7 @@ prob.model.add_constraint("wing.failure", upper=0.0)
 prob.model.add_constraint("wing.thickness_intersects", upper=0.0)
 
 # --- Objective ---
+# Preserve this existing scaler unless runtime feedback specifically requires repair.
 prob.model.add_objective("wing.structural_mass", scaler=1e-5)
 # === AGENT EDITABLE SECTION END ===
 

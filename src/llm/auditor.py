@@ -76,16 +76,6 @@ def _high_risk_diff_lines(diff_text: str) -> list[str]:
     ]
 
 
-def _format_high_risk_summary(diff_text: str, limit: int = 80) -> str:
-    lines = _high_risk_diff_lines(diff_text)
-    if not lines:
-        return "No high-risk executable diff lines detected."
-    shown = lines[:limit]
-    if len(lines) > limit:
-        shown.append(f"... {len(lines) - limit} more high-risk lines omitted")
-    return "\n".join(shown)
-
-
 _WATCHED_CALLS = {
     "add_subsystem",
     "add_constraint",
@@ -97,9 +87,6 @@ _WATCHED_CALLS = {
 }
 
 _WATCHED_ASSIGNMENTS = {
-    "mesh_dict",
-    "surf_dict",
-    "surface",
     "loads",
     "loads_array",
     "forces",
@@ -422,10 +409,32 @@ def _semantic_changes(blueprint_code: str, generated_code: str) -> list[dict[str
     return changes
 
 
+def _audit_change_priority(change: dict[str, str]) -> tuple[int, str]:
+    item = change.get("item", "")
+    status = change.get("status", "")
+    if status == "removed" and item.startswith(
+        ("call:add_constraint:", "call:add_objective:", "call:add_design_var:")
+    ):
+        return 0, item
+    if item.startswith("assign:loads") or item.startswith("assign:forces"):
+        return 1, item
+    if item.startswith("dict:"):
+        return 1, item
+    if status == "removed":
+        return 2, item
+    return 3, item
+
+
+def _ordered_semantic_changes(
+    changes: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    return sorted(changes, key=_audit_change_priority)
+
+
 def _format_semantic_changes(changes: list[dict[str, str]], limit: int = 80) -> str:
     if not changes:
         return "No semantic high-risk statement changes detected."
-    shown = changes[:limit]
+    shown = _ordered_semantic_changes(changes)[:limit]
     if len(changes) > limit:
         shown = shown + [
             {
@@ -573,11 +582,16 @@ def audit_blueprint_consistency(
     user_message = (
         f"### USER REQUEST ###\n{user_prompt}\n\n"
         f"### SELECTED BLUEPRINT ###\n{blueprint}\n{blueprint_path}\n\n"
-        f"### HIGH-RISK SEMANTIC STATEMENT CHANGES TO REVIEW ###\n"
+        f"### REQUIRED CHANGE-BY-CHANGE REVIEW ({len(semantic_changes)} ITEMS) ###\n"
+        "Return exactly one decision for every `item` below. Review the items in "
+        "the supplied order. Removed constraints, objectives, and design variables "
+        "and protected physical or discretization values appear first. Do not "
+        "combine several items into one broad decision.\n"
         f"```json\n{_format_semantic_changes(semantic_changes)}\n```\n\n"
-        f"### RAW HIGH-RISK DIFF LINES FOR DEBUG ONLY ###\n"
-        f"```diff\n{_format_high_risk_summary(full_diff)}\n```\n\n"
-        f"### UNIFIED DIFF ###\n```diff\n{full_diff}\n```\n\n"
+        f"### SUPPORTING EXECUTABLE DIFF ###\n"
+        "Use this only to catch relevant executable changes not represented in "
+        "the required review list.\n"
+        f"```diff\n{full_diff}\n```\n\n"
         "Return the audit object."
     )
     in_t = estimate_tokens(system_prompt + "\n" + user_message)

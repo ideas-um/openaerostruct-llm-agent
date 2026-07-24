@@ -37,6 +37,8 @@ Editable section markers are navigation hints, not permission boundaries:
 Changing one field does not grant permission to change nearby assumptions.
 Treat related quantities as separate decisions unless the user links them explicitly:
 - geometry shape/span/chord is separate from mesh resolution
+- A longer span, different wing type, or more detailed analysis does not by
+  itself authorize changing `num_y`, `num_x`, or mesh spacing.
 - Mach/rho/altitude edits must update derived `speed_of_sound`, `v`, and `re` using the blueprint formula
 - If the user gives `rho`, use that explicit density. If altitude is given and `rho` is omitted, derive density with the blueprint `_isa_density(...)` helper.
 - If the user gives `CT` in units `1/s` or `/s`, use that value directly. Only multiply by `grav_constant` when the user gives a TSFC value that explicitly requires conversion.
@@ -124,8 +126,12 @@ For numerical scaling:
 - Structural `loads` has shape `(ny, 6)`. For an upward/vertical load, start with zeros and assign only column 2, e.g. `loads[:, 2] = load_per_node`; do not fill all six force/moment columns.
 - A user-stated total wing load is the load for the whole wing. When
   `symmetry=True`, distribute half of that total over the modeled half-wing
-  nodes. Apply the full total only when the user explicitly says it is a
-  half-wing or modeled-domain load.
+  nodes. For a uniform nodal distribution, use
+  `loads[:, 2] = total_wing_load / (2.0 * ny)` and verify that
+  `np.sum(loads[:, 2]) == total_wing_load / 2.0`. Do not assign
+  `total_wing_load / 2.0` directly to the full `loads[:, 2]` slice because
+  that repeats the half-wing total at every node. Apply the full total only
+  when the user explicitly says it is a half-wing or modeled-domain load.
 - Wingbox thickness-to-chord uses `wing.geometry.t_over_c_cp`, not `wing.t_over_c_cp`.
 - Always preserve the `SqliteRecorder` block.
 - Derive output paths from `__file__`; save plots under `_PLOTS_DIR`.

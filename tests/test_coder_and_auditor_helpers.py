@@ -3,6 +3,7 @@ import pytest
 from agent_logic import APPROVED_RELAXATION_HEADER, build_approved_relaxation_prompt
 from llm.auditor import (
     _make_diff,
+    _ordered_semantic_changes,
     _parse_audit_response,
     _semantic_changes,
     audit_blueprint_consistency,
@@ -59,6 +60,7 @@ def test_coder_prompt_receives_filtered_router_context():
     assert "### ROUTER CONTEXT ###" in prompt
     assert '"name": "twist_cp"' in prompt
     assert "original user request remains authoritative" in prompt
+    assert "not an exhaustive replacement for the active blueprint formulation" in prompt
     assert "input_tokens" not in prompt
 
 
@@ -142,6 +144,49 @@ loads[:, 2] = (4e4 / 2.0) / ny
     assert any(change["item"] == "assign:loads[:, 2]" for change in changes)
 
 
+def test_semantic_changes_include_individual_mesh_resolution_keys():
+    blueprint = """
+mesh_dict = {"num_y": 7, "num_x": 2, "wing_type": "CRM"}
+"""
+    generated = """
+mesh_dict = {"num_y": 15, "num_x": 3, "wing_type": "rect"}
+"""
+
+    items = {change["item"] for change in _semantic_changes(blueprint, generated)}
+
+    assert "dict:mesh_dict.num_y" in items
+    assert "dict:mesh_dict.num_x" in items
+    assert "assign:mesh_dict" not in items
+
+
+def test_audit_orders_removed_constraint_before_other_changes():
+    changes = [
+        {
+            "item": "call:add_output:rho",
+            "status": "changed",
+            "blueprint": "rho=1.0",
+            "generated": "rho=0.8",
+        },
+        {
+            "item": "dict:mesh_dict.num_y",
+            "status": "changed",
+            "blueprint": "num_y=7",
+            "generated": "num_y=15",
+        },
+        {
+            "item": "call:add_constraint:AS_point_1.L_equals_W",
+            "status": "removed",
+            "blueprint": "add_constraint('AS_point_1.L_equals_W')",
+            "generated": "",
+        },
+    ]
+
+    ordered = _ordered_semantic_changes(changes)
+
+    assert ordered[0]["item"] == "call:add_constraint:AS_point_1.L_equals_W"
+    assert ordered[1]["item"] == "dict:mesh_dict.num_y"
+
+
 @pytest.mark.parametrize("passed", [True, False])
 def test_audit_parser_preserves_llm_top_level_decision(passed):
     report = _parse_audit_response(
@@ -173,6 +218,8 @@ def test_auditor_does_not_override_llm_pass_decision(monkeypatch):
 
     assert report["passed"] is True
     assert len(calls) == 1
+    assert "### REQUIRED CHANGE-BY-CHANGE REVIEW" in calls[0]
+    assert "### SUPPORTING EXECUTABLE DIFF ###" in calls[0]
     assert "loads = np.ones" in calls[0]
 
 
