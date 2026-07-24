@@ -160,11 +160,71 @@ mesh_dict = {"num_y": 7, "num_x": 2, "wing_type": "CRM"}
 mesh_dict = {"num_y": 15, "num_x": 3, "wing_type": "rect"}
 """
 
-    items = {change["item"] for change in _semantic_changes(blueprint, generated)}
+    changes = _semantic_changes(blueprint, generated)
+    items = {change["item"] for change in changes}
 
     assert "dict:mesh_dict.num_y" in items
     assert "dict:mesh_dict.num_x" in items
     assert "assign:mesh_dict" not in items
+    mesh_changes = [
+        change for change in changes if change["item"].startswith("dict:mesh_dict.num_")
+    ]
+    assert all("Protected mesh discretization" in change["audit_rule"] for change in mesh_changes)
+
+
+def test_semantic_changes_split_bounds_from_existing_scaling():
+    blueprint = """
+prob.model.add_design_var("wing.thickness_cp", lower=0.01, upper=0.5, ref=0.1)
+prob.model.add_objective("wing.structural_mass", scaler=1e-5)
+"""
+    generated = """
+prob.model.add_design_var("wing.thickness_cp", lower=0.005, upper=0.1, ref=0.01)
+prob.model.add_objective("wing.structural_mass", scaler=1e-2)
+"""
+
+    changes = _semantic_changes(blueprint, generated)
+    by_item = {change["item"]: change for change in changes}
+
+    assert "call:add_design_var:wing.thickness_cp.arg:lower" in by_item
+    assert "call:add_design_var:wing.thickness_cp.arg:upper" in by_item
+    assert "call:add_design_var:wing.thickness_cp.arg:ref" in by_item
+    assert "call:add_objective:wing.structural_mass.arg:scaler" in by_item
+    assert (
+        "Protected existing numerical scaling"
+        in by_item["call:add_design_var:wing.thickness_cp.arg:ref"]["audit_rule"]
+    )
+    assert (
+        "Protected existing numerical scaling"
+        in by_item["call:add_objective:wing.structural_mass.arg:scaler"]["audit_rule"]
+    )
+
+
+def test_semantic_changes_keep_array_elements_when_call_arguments_are_split():
+    blueprint = """
+indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.5]))
+"""
+    generated = """
+indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.0]))
+"""
+
+    changes = _semantic_changes(blueprint, generated)
+
+    assert changes == [
+        {
+            "item": "call:add_output:load_factor.arg:val",
+            "status": "changed",
+            "blueprint": "np.array([1.0, 2.5])",
+            "generated": "np.array([1.0, 2.0])",
+            "element_changes": [
+                {
+                    "index": 1,
+                    "status": "changed",
+                    "blueprint": "2.5",
+                    "generated": "2.0",
+                }
+            ],
+        }
+    ]
 
 
 def test_audit_orders_removed_constraint_before_other_changes():

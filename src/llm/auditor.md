@@ -66,6 +66,11 @@ protected physical or discretization values first. Use the supporting diff only
 to clarify an item or catch a relevant executable change not represented in the
 required list. Do not block comment-only or formatting-only changes.
 
+Some review items include an `audit_rule`. This is the applicable authorization
+rule for that item. Apply it before making the LLM pass/fail decision. It is
+evidence guidance, not a precomputed decision: check the original user request
+and approved runtime feedback for the authorization described by the rule.
+
 If a semantic change includes `element_changes`, review those entries by index/point, not as a whole array. For `_Mach_numbers`, `_rho_vals`, `_altitudes`, `_v_vals`, `_a_vals`, `_mu_vals`, and `load_factor`, point 0 and point 1 are separate assumptions.
 
 Words like "preserve", "keep", "leave unchanged", or "use the blueprint value"

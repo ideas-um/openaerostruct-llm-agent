@@ -247,6 +247,47 @@ def _array_element_changes(old: str, new: str) -> list[dict[str, str]] | None:
     return changes or None
 
 
+def _call_keyword_values(statement: str) -> dict[str, str] | None:
+    try:
+        tree = ast.parse(statement)
+    except SyntaxError:
+        return None
+    if not tree.body:
+        return None
+    node = tree.body[0]
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return None
+    return {
+        keyword.arg: _ast_code(keyword.value)
+        for keyword in node.value.keywords
+        if keyword.arg is not None
+    }
+
+
+def _call_keyword_changes(old: str, new: str) -> list[dict[str, str]] | None:
+    old_values = _call_keyword_values(old)
+    new_values = _call_keyword_values(new)
+    if old_values is None or new_values is None:
+        return None
+
+    changes = []
+    for name in sorted(set(old_values) | set(new_values)):
+        old_value = old_values.get(name, "")
+        new_value = new_values.get(name, "")
+        if old_value == new_value:
+            continue
+        status = "changed" if old_value and new_value else "added" if new_value else "removed"
+        changes.append(
+            {
+                "name": name,
+                "status": status,
+                "blueprint": old_value,
+                "generated": new_value,
+            }
+        )
+    return changes or None
+
+
 def _literal_string(node: ast.AST) -> str:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
@@ -395,6 +436,21 @@ def _semantic_changes(blueprint_code: str, generated_code: str) -> list[dict[str
         new = new_units.get(key, "")
         if old and new and _semantically_same(old, new):
             continue
+        if old and new and key.startswith("call:"):
+            keyword_changes = _call_keyword_changes(old, new)
+            if keyword_changes:
+                for keyword_change in keyword_changes:
+                    name = keyword_change.pop("name")
+                    change = {
+                        "item": f"{key}.arg:{name}",
+                        **keyword_change,
+                    }
+                    if name == "val":
+                        element_changes = _array_element_changes(old, new)
+                        if element_changes:
+                            change["element_changes"] = element_changes
+                    changes.append(_annotate_audit_rule(change))
+                continue
         status = "changed" if old and new else "added" if new else "removed"
         change = {
             "item": key,
@@ -405,8 +461,35 @@ def _semantic_changes(blueprint_code: str, generated_code: str) -> list[dict[str
         element_changes = _array_element_changes(old, new)
         if element_changes:
             change["element_changes"] = element_changes
-        changes.append(change)
+        changes.append(_annotate_audit_rule(change))
     return changes
+
+
+def _annotate_audit_rule(change: dict[str, str]) -> dict[str, str]:
+    item = change.get("item", "")
+    if item in {
+        "dict:mesh_dict.num_y",
+        "dict:mesh_dict.num_x",
+        "dict:mesh_dict.span_cos_spacing",
+        "dict:mesh_dict.chord_cos_spacing",
+    }:
+        change["audit_rule"] = (
+            "Protected mesh discretization. Preserve the blueprint value unless "
+            "the user explicitly requests mesh resolution, panel count, "
+            "discretization, num_y, or num_x, or approved runtime feedback names "
+            "this exact repair. Geometry, wing type, analysis quality, and "
+            "'better resolution' are not authorization. Do not classify this "
+            "change as required_wiring."
+        )
+    elif item.endswith((".arg:ref", ".arg:scaler")) and change.get("blueprint"):
+        change["audit_rule"] = (
+            "Protected existing numerical scaling. Preserve this blueprint "
+            "ref/scaler unless the user explicitly requests scaling or approved "
+            "runtime feedback identifies a scaling or conditioning repair. "
+            "Requested bounds, variables, objectives, or constraints do not "
+            "authorize changing or removing their existing scaling."
+        )
+    return change
 
 
 def _audit_change_priority(change: dict[str, str]) -> tuple[int, str]:
@@ -417,6 +500,8 @@ def _audit_change_priority(change: dict[str, str]) -> tuple[int, str]:
     ):
         return 0, item
     if item.startswith("assign:loads") or item.startswith("assign:forces"):
+        return 1, item
+    if item.endswith((".arg:ref", ".arg:scaler")):
         return 1, item
     if item.startswith("dict:"):
         return 1, item
@@ -597,7 +682,9 @@ def audit_blueprint_consistency(
         "Return exactly one decision for every `item` below. Review the items in "
         "the supplied order. Removed constraints, objectives, and design variables "
         "and protected physical or discretization values appear first. Do not "
-        "combine several items into one broad decision.\n"
+        "combine several items into one broad decision. An `audit_rule` is the "
+        "applicable authorization rule for that item and must be applied before "
+        "making the LLM pass/fail decision.\n"
         f"```json\n{_format_semantic_changes(semantic_changes)}\n```\n\n"
         f"### SUPPORTING EXECUTABLE DIFF ###\n"
         "Use this only to catch relevant executable changes not represented in "
