@@ -5,7 +5,7 @@ import uuid
 import streamlit as st
 
 from llm.router import route_intent_stream
-from llm.config import is_ollama_provider
+from llm.config import is_ollama_provider, list_gemini_model_names
 from agent_logic import (
     build_approved_relaxation_prompt,
     run_agent,
@@ -177,13 +177,10 @@ if is_ollama_provider(provider):
         if ollama_warning:
             st.sidebar.warning(ollama_warning)
 else:
-    model_name = st.sidebar.selectbox(
-        "Gemini Model",
-        [
-            "gemini-flash-lite-latest",
-            "gemini-2.0-flash",
-        ],
-    )
+    gemini_models, gemini_warning = list_gemini_model_names()
+    model_name = st.sidebar.selectbox("Gemini Model", gemini_models)
+    if gemini_warning:
+        st.sidebar.warning(gemini_warning)
 
 max_retries = st.sidebar.slider("Max retries", min_value=1, max_value=6, value=3)
 

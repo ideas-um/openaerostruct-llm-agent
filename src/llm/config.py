@@ -37,15 +37,50 @@ _SRC_DIR = os.path.dirname(_LLM_DIR)
 _LOG_FILE = os.path.join(_SRC_DIR, "agent_backend.log")
 _STATS_FILE = os.path.join(_SRC_DIR, "usage_stats.csv")
 
+
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _env_int_list(name: str, default: list[int]) -> list[int]:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    values = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            values.append(max(0, int(item)))
+        except ValueError:
+            return default
+    return values or default
+
 # ---------------------------------------------------------------------------
 # Gemini streaming retry config — imported by coder.py and router.py.
 # get_llm_response() handles non-streaming retries internally; these
 # constants are only needed for the streaming paths that call the SDK
 # directly and therefore bypass get_llm_response().
 # ---------------------------------------------------------------------------
-GEMINI_STREAM_RETRY_WAIT = 60  # seconds to wait before retrying a stream
-GEMINI_STREAM_MAX_RETRIES = 3  # maximum stream retries per call
-LLM_REQUEST_TIMEOUT_MS = int(os.getenv("LLM_REQUEST_TIMEOUT_MS", "60000"))
+GEMINI_STREAM_RETRY_WAIT = _env_int("GEMINI_STREAM_RETRY_WAIT_SECONDS", 60)
+GEMINI_STREAM_MAX_RETRIES = _env_int("GEMINI_STREAM_MAX_RETRIES", 3, minimum=1)
+GEMINI_RETRY_WAIT_SECONDS = _env_int_list(
+    "GEMINI_RETRY_WAIT_SECONDS", [5, 10, 20, 40, 60]
+)
+LLM_REQUEST_TIMEOUT_MS = _env_int("LLM_REQUEST_TIMEOUT_MS", 60000, minimum=1000)
 
 _GEMINI_TRANSIENT_MESSAGES = (
     "resource_exhausted",
@@ -94,14 +129,16 @@ def is_gemini_transient_error(exc: Exception) -> bool:
 # every path automatically. No changes needed elsewhere.
 # ---------------------------------------------------------------------------
 
-RPM_LIMIT = 14  # stay one below the hard 15-RPM cap for safety
-_RL_WINDOW = 60.0  # sliding window in seconds
+RPM_LIMIT = _env_int("GEMINI_RPM_LIMIT", 14)  # set 0 to disable local throttling
+_RL_WINDOW = _env_float("GEMINI_RATE_LIMIT_WINDOW_SECONDS", 60.0, minimum=1.0)
 _rl_lock = _threading.Lock()
 _rl_times: _collections.deque = _collections.deque()
 
 
 def _gemini_rate_limit() -> None:
     """Block until issuing a Gemini call would not exceed RPM_LIMIT/min."""
+    if RPM_LIMIT <= 0:
+        return
     while True:
         with _rl_lock:
             now = _time.monotonic()
@@ -148,6 +185,80 @@ def _make_gemini_client():
         api_key=api_key,
         http_options=types.HttpOptions(timeout=LLM_REQUEST_TIMEOUT_MS),
     )
+
+
+_GEMINI_MODEL_EXCLUDE_TERMS = (
+    "aqa",
+    "embedding",
+    "imagen",
+    "image",
+    "live",
+    "nano-banana",
+    "tts",
+    "veo",
+    "video",
+)
+
+DEFAULT_GEMINI_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-flash-lite-latest",
+    "gemini-2.0-flash",
+]
+
+
+def _clean_gemini_model_name(model) -> str:
+    name = (
+        getattr(model, "base_model_id", None)
+        or getattr(model, "name", None)
+        or (model.get("baseModelId") if isinstance(model, dict) else None)
+        or (model.get("base_model_id") if isinstance(model, dict) else None)
+        or (model.get("name") if isinstance(model, dict) else "")
+    )
+    return str(name).replace("models/", "").strip()
+
+
+def _supports_generate_content(model) -> bool:
+    actions = (
+        getattr(model, "supported_actions", None)
+        or getattr(model, "supported_generation_methods", None)
+        or (model.get("supportedActions") if isinstance(model, dict) else None)
+        or (
+            model.get("supported_generation_methods")
+            if isinstance(model, dict)
+            else None
+        )
+    )
+    if not actions:
+        return True
+    return any(
+        "generatecontent" in str(action).replace("_", "").lower()
+        for action in actions
+    )
+
+
+def list_gemini_model_names() -> tuple[list[str], str | None]:
+    """Return available Gemini text-generation model names, plus an optional warning."""
+    try:
+        _gemini_rate_limit()
+        client = _make_gemini_client()
+        names = []
+        for model in client.models.list():
+            name = _clean_gemini_model_name(model)
+            lowered = name.lower()
+            if not name or not _supports_generate_content(model):
+                continue
+            if any(term in lowered for term in _GEMINI_MODEL_EXCLUDE_TERMS):
+                continue
+            if "gemini" in lowered:
+                names.append(name)
+        names = sorted(dict.fromkeys(names))
+        if names:
+            return names, None
+        return DEFAULT_GEMINI_MODELS, "Gemini model list was empty; using defaults."
+    except Exception as exc:
+        return DEFAULT_GEMINI_MODELS, f"Could not load Gemini models: {exc}"
 
 
 def get_llm_client(provider: str, model_name: str):
@@ -222,7 +333,7 @@ def get_llm_response(
         )
 
         max_retries = 5
-        wait_times = [5, 10, 20, 40, 60]
+        wait_times = GEMINI_RETRY_WAIT_SECONDS
 
         for i in range(max_retries):
             try:
@@ -236,7 +347,7 @@ def get_llm_response(
                 err_str = str(e).lower()
                 if is_gemini_transient_error(e) or "high demand" in err_str:
                     if i < max_retries - 1:
-                        wait_time = wait_times[i]
+                        wait_time = wait_times[min(i, len(wait_times) - 1)]
                         logger.warning(
                             f"Transient LLM error ({err_str[:50]}). "
                             f"Retrying in {wait_time}s (attempt {i + 1}/{max_retries})"

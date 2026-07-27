@@ -118,7 +118,7 @@ When the app starts, provider and model selection happens in the Streamlit sideb
 - `Provider`: `Gemini API` or `Ollama`
 - `Model`: selected from the sidebar after choosing the provider
 
-For Gemini, the sidebar offers the Gemini models currently wired into the UI. For Ollama, the app reads your installed local models and shows them in the dropdown, which means you can switch models without editing project code as long as the model is already installed in your local Ollama environment.
+For Gemini, the app asks the Gemini API for the text-generation models available to your API key and falls back to a short default list if model discovery fails. For Ollama, the app reads your installed local models and shows them in the dropdown, which means you can switch models without editing project code as long as the model is already installed in your local Ollama environment.
 
 ## Example Prompts
 
