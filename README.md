@@ -10,17 +10,12 @@ A multi-agent framework for running OpenAeroStruct wing analysis and optimizatio
 - **Gokcin Cinar**: Research supervision and concept development (U-M)
 - **Joaquim R.R.A. Martins**: Research supervision and concept development (U-M)
 
-## License
-
-Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab
-[University of Michigan IDEAS Lab](https://ideas.engin.umich.edu)
-[LICENSE](./LICENSE)
-
 ## What It Does
 
-The agent takes a natural-language aircraft design request, routes it to the most appropriate OpenAeroStruct blueprint, edits a validated blueprint in `src/blueprints/`, runs the generated script, retries when execution fails, and saves both plots and optimization summaries for review. In practice, this means a user can describe an analysis or optimization problem in plain language while the system handles workflow selection, code adaptation, execution, and result packaging in a more controlled and repeatable way than writing a brand-new script from scratch each time.
+The agent takes a natural-language aircraft design request, routes it to the most appropriate OpenAeroStruct blueprint, edits a validated blueprint in `src/blueprints/`, runs the generated script, retries when execution fails, and saves plots, metrics, and optimization summaries for review. In practice, this means a user can describe an analysis or optimization problem in plain language while the system handles workflow selection, code adaptation, execution, auditing, and result packaging in a more controlled and repeatable way than writing a brand-new script from scratch each time.
 
 Supported workflows:
+
 - Aerodynamic analysis
 - Aerodynamic optimization
 - Structural optimization
@@ -72,6 +67,7 @@ GEMINI_API_KEY="YOUR_GOOGLE_GEMINI_KEY"
 If you want to use Gemini, you first need to create a Gemini API key through Google AI Studio. Google’s official documentation for key creation and management is available at [Using Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key), and the direct page for creating or viewing a key is [Google AI Studio API keys](https://aistudio.google.com/apikey). After creating a key, paste it into your local `.env` file as `GEMINI_API_KEY="..."`.
 
 Ollama:
+
 - Install Ollama from [ollama.com](https://ollama.com/).
 - Start the Ollama app or daemon locally so the Python client can connect to your local Ollama server.
 - Install any local model you want to use. The app queries Ollama for installed models, so anything available in your local Ollama instance will appear automatically in the UI model dropdown.
@@ -79,7 +75,7 @@ Ollama:
 Installation Example:
 
 ```bash
-ollama run gemini-2.0-flash
+ollama pull llama3.1
 ```
 
 ### Docker Sandbox (Optional)
@@ -97,10 +93,10 @@ OAS_EXECUTION_BACKEND="docker"
 ```
 
 Backend options:
-- `OAS_EXECUTION_BACKEND=host` #On local machine
-- `OAS_EXECUTION_BACKEND=docker` #In Docker (More safe, recommended)
-- `OAS_EXECUTION_BACKEND=auto` #Automatically based on what is avaliable
 
+- `OAS_EXECUTION_BACKEND=host`: run generated scripts on the local machine
+- `OAS_EXECUTION_BACKEND=docker`: run generated scripts in the Docker sandbox
+- `OAS_EXECUTION_BACKEND=auto`: prefer Docker when available, otherwise fall back to host execution
 
 ## Run the App
 
@@ -118,6 +114,7 @@ streamlit run src/app.py
 ```
 
 When the app starts, provider and model selection happens in the Streamlit sidebar rather than in `.env`:
+
 - `Provider`: `Gemini API` or `Ollama`
 - `Model`: selected from the sidebar after choosing the provider
 
@@ -144,24 +141,35 @@ Ollama example:
 
 ```bash
 conda activate openaerostruct
-python src/benchmark.py --max-retries 5 --provider "Ollama" --model "gemini-2.0-flash"
+python src/benchmark.py --max-retries 5 --provider "Ollama" --model "llama3.1"
 ```
 
 In these commands, `--provider` selects the LLM backend, `--model` selects the exact model name passed to that backend, and `--max-retries 5` sets the maximum number of coder retry attempts used when the benchmark tries to recover from execution errors or failed runs.
 
 Outputs are written under `benchmark_run_out/`.
 
-## Project Structure
-
-- `src/app.py`: Streamlit UI
-- `src/agent_logic.py`: orchestration, retries, safety checks, result handling
-- `src/llm/router.py`: intent routing and vagueness detection
-- `src/llm/coder.py`: blueprint adaptation and code generation
-- `src/llm/relaxer.py`: non-convergence relaxation suggestions
-- `src/tools/executor.py`: validation and execution
-- `src/tools/db_reader.py`: OpenMDAO database summaries
-- `src/blueprints/`: curated OpenAeroStruct templates
-
 ## Reference
 
-The related preprint describing this framework can be accessed through the University of Michigan Deep Blue repository at [Link](https://backend.production.deepblue-documents.lib.umich.edu/server/api/core/bitstreams/1986c947-bc2b-4a9b-9a3e-2ee66df5d98c/content), and can also be accessed through [IDEAS Lab Website](https://www.gokcincinar.com/software/openaerostruct/).
+The related preprint describing this framework can be accessed through the University of Michigan Deep Blue repository at this [linked document](https://backend.production.deepblue-documents.lib.umich.edu/server/api/core/bitstreams/1986c947-bc2b-4a9b-9a3e-2ee66df5d98c/content), and can also be accessed through [IDEAS Lab Website](https://www.gokcincinar.com/software/openaerostruct/).
+
+## Citation
+
+If you use this project, please cite the related preprint:
+
+```bibtex
+@misc{lee2025aerodynamic,
+  title = {Aerodynamic Design and Optimization via a Specialized Agentic Generative AI Framework},
+  author = {Lee, Conan and Cinar, Gokcin and Martins, Joaquim R. R. A.},
+  year = {2025},
+  doi = {10.7302/26722},
+  url = {https://dx.doi.org/10.7302/26722}
+}
+```
+
+## License
+
+Copyright 2025-2026, The Regents of the University of Michigan, IDEAS Lab, MDO Lab
+
+[University of Michigan IDEAS Lab](https://ideas.engin.umich.edu)
+
+Released under the terms in [LICENSE](./LICENSE).
