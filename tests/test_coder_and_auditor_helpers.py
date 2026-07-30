@@ -6,6 +6,7 @@ from llm.auditor import (
     _ordered_semantic_changes,
     _parse_audit_response,
     _semantic_changes,
+    _validate_and_aggregate_audit_report,
     audit_blueprint_consistency,
 )
 from llm.coder import _build_prompt, _parse_response
@@ -256,15 +257,67 @@ def test_audit_orders_removed_constraint_before_other_changes():
 
 
 @pytest.mark.parametrize("passed", [True, False])
-def test_audit_parser_preserves_llm_top_level_decision(passed):
+def test_audit_parser_discards_llm_top_level_decision(passed):
     report = _parse_audit_response(
         f'<audit>{{"passed": {str(passed).lower()}, "violations": []}}</audit>'
     )
 
-    assert report["passed"] is passed
+    assert "passed" not in report
 
 
-def test_auditor_does_not_override_llm_pass_decision(monkeypatch):
+def test_audit_aggregate_is_computed_from_item_decisions():
+    semantic_changes = [
+        {"item": "call:add_constraint:AS_point_1.L_equals_W"},
+        {"item": "dict:mesh_dict.num_y"},
+    ]
+    report = {
+        "passed": True,
+        "reviewed_changes": [
+            {
+                "changed_item": "dict:mesh_dict.num_y",
+                "passed": True,
+            }
+        ],
+        "violations": [
+            {
+                "changed_item": "call:add_constraint:AS_point_1.L_equals_W",
+                "passed": False,
+            }
+        ],
+    }
+
+    validated = _validate_and_aggregate_audit_report(report, semantic_changes)
+
+    assert validated["passed"] is False
+
+
+@pytest.mark.parametrize(
+    "reviewed_changes, match",
+    [
+        ([], "missing decisions"),
+        (
+            [
+                {"changed_item": "dict:mesh_dict.num_y", "passed": True},
+                {"changed_item": "dict:mesh_dict.num_y", "passed": True},
+            ],
+            "duplicate decisions",
+        ),
+    ],
+)
+def test_audit_coverage_rejects_missing_or_duplicate_decisions(
+    reviewed_changes, match
+):
+    with pytest.raises(ValueError, match=match):
+        _validate_and_aggregate_audit_report(
+            {
+                "reviewed_changes": reviewed_changes,
+                "violations": [],
+            },
+            [{"item": "dict:mesh_dict.num_y"}],
+        )
+
+
+def test_auditor_fails_closed_when_llm_omits_required_decisions(monkeypatch):
     calls = []
     system_prompts = []
 
@@ -290,8 +343,9 @@ def test_auditor_does_not_override_llm_pass_decision(monkeypatch):
         },
     )
 
-    assert report["passed"] is True
-    assert len(calls) == 1
+    assert report["passed"] is False
+    assert report["audit_infrastructure_error"] is True
+    assert len(calls) == 2
     assert "Omission generally means preserve" in system_prompts[0]
     assert '"authorization"' in system_prompts[0]
     assert "Never classify" in system_prompts[0]

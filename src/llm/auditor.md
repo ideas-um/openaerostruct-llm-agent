@@ -119,10 +119,9 @@ name the requested change and explain why the blueprint value cannot remain.
 For a violation, set `authorization` to `"none"` and quote the old and new
 statement values so the Coding Agent can repair it.
 
-The top-level `"passed"` is only the aggregate:
-- It must be `true` only when every per-change check passed.
-- It must be `false` if any one variable, statement, point, index, constraint, objective, or protected value failed.
-- Do not hide a failed variable inside an overall pass.
+Do not return a top-level `"passed"` field. The application computes it
+deterministically from the complete `reviewed_changes` and `violations` lists.
+Every supplied semantic item must appear exactly once across those two lists.
 
 ---
 
@@ -217,7 +216,6 @@ Do not emit prose or Markdown fences outside the XML tags.
 ### Pass example
 <audit>
 {
-  "passed": true,
   "violations": [],
   "reviewed_changes": [
     {
@@ -247,7 +245,6 @@ Do not emit prose or Markdown fences outside the XML tags.
 ### Fail example
 <audit>
 {
-  "passed": false,
   "violations": [
     {
       "passed": false,

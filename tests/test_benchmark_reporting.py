@@ -1,6 +1,38 @@
 import benchmark
 
 
+def test_rep_archive_requires_backend_code_and_audit_records(tmp_path):
+    case_dir = tmp_path / "case_1"
+    rep_dir = case_dir / "rep_1"
+    attempt_dir = rep_dir / "attempt_1"
+    attempt_dir.mkdir(parents=True)
+    (rep_dir / "agent_backend.log").write_text("request and response")
+    (attempt_dir / "code.py").write_text("print('ok')")
+    (attempt_dir / "blueprint_audit.json").write_text('{"passed": true}')
+
+    records = [
+        {"event": "code_ready", "details_path": "rep_1/attempt_1/code.py"},
+        {
+            "event": "blueprint_audit",
+            "details_path": "rep_1/attempt_1/blueprint_audit.json",
+        },
+    ]
+
+    benchmark._validate_rep_archive(str(rep_dir), records)
+
+
+def test_rep_archive_rejects_missing_backend_log(tmp_path):
+    rep_dir = tmp_path / "case_1" / "rep_1"
+    rep_dir.mkdir(parents=True)
+
+    try:
+        benchmark._validate_rep_archive(str(rep_dir), [])
+    except RuntimeError as exc:
+        assert "agent_backend.log" in str(exc)
+    else:
+        raise AssertionError("missing backend log should fail archive validation")
+
+
 def test_default_benchmark_reps_is_full_run_count():
     assert benchmark.NUM_REPS == 10
 

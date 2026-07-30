@@ -1,4 +1,5 @@
 import ast
+from collections import Counter
 import difflib
 import json
 import logging
@@ -571,12 +572,7 @@ def _parse_audit_response(response: str) -> dict:
     json_str = re.sub(r"^```json\s*|^```\s*", "", json_str, flags=re.MULTILINE)
     json_str = re.sub(r"```$", "", json_str, flags=re.MULTILINE).strip()
     data = json.loads(json_str)
-    if "passed" not in data:
-        raise ValueError("Auditor response is missing the required passed field.")
-    passed = data["passed"]
-    if isinstance(passed, str):
-        passed = passed.strip().lower() == "true"
-    data["passed"] = bool(passed)
+    data.pop("passed", None)
     data["violations"] = data.get("violations") or []
     data["reviewed_changes"] = data.get("reviewed_changes") or []
     data["warnings"] = data.get("warnings") or []
@@ -584,12 +580,58 @@ def _parse_audit_response(response: str) -> dict:
     return data
 
 
+def _validate_and_aggregate_audit_report(
+    report: dict, semantic_changes: list[dict]
+) -> dict:
+    reviewed = report.get("reviewed_changes")
+    violations = report.get("violations")
+    if not isinstance(reviewed, list) or not isinstance(violations, list):
+        raise ValueError("reviewed_changes and violations must be JSON arrays.")
+
+    errors = []
+    decisions = []
+    for group_name, group, expected_passed in (
+        ("reviewed_changes", reviewed, True),
+        ("violations", violations, False),
+    ):
+        for decision in group:
+            if not isinstance(decision, dict):
+                errors.append(f"{group_name} contains a non-object decision.")
+                continue
+            item = decision.get("changed_item")
+            if not isinstance(item, str) or not item:
+                errors.append(f"{group_name} contains a decision without changed_item.")
+                continue
+            if decision.get("passed") is not expected_passed:
+                errors.append(
+                    f"{item} must have passed={str(expected_passed).lower()} "
+                    f"inside {group_name}."
+                )
+            decisions.append(item)
+
+    counts = Counter(decisions)
+    expected_items = [change["item"] for change in semantic_changes]
+    missing = [item for item in expected_items if counts[item] == 0]
+    duplicated = [item for item in expected_items if counts[item] > 1]
+    if missing:
+        errors.append("missing decisions for: " + ", ".join(missing))
+    if duplicated:
+        errors.append("duplicate decisions for: " + ", ".join(duplicated))
+    if errors:
+        raise ValueError("; ".join(errors))
+
+    report["passed"] = not violations
+    return report
+
+
 def _malformed_audit_retry_message(user_message: str, error: Exception) -> str:
     return (
         f"{user_message}\n\n"
-        "### PREVIOUS AUDIT RESPONSE WAS MALFORMED ###\n"
-        f"The previous auditor response could not be parsed as the required JSON object: {error}\n\n"
-        "Return exactly one <audit> XML section containing valid JSON. Do not include "
+        "### PREVIOUS AUDIT RESPONSE WAS INVALID ###\n"
+        "The previous response did not satisfy the audit schema or exact-coverage "
+        f"rules: {error}\n\n"
+        "Return exactly one <audit> XML section containing valid JSON. Include "
+        "exactly one decision for every supplied semantic item. Do not include "
         "Markdown fences, comments, trailing commas, or prose outside the XML tags."
     )
 
@@ -651,7 +693,7 @@ def audit_blueprint_consistency(
     provider: str,
     routing_context: dict | None = None,
 ) -> tuple[dict, int, int]:
-    """Give the LLM Auditor the evidence and return its decision unchanged."""
+    """Audit generated code and deterministically aggregate item-level decisions."""
     blueprint = blueprints[0] if blueprints else ""
     blueprint_path, blueprint_code = _load_blueprint(blueprint)
     if not blueprint_code:
@@ -702,8 +744,9 @@ def audit_blueprint_consistency(
         out_t += estimate_tokens(response)
         try:
             report = _parse_audit_response(response)
+            report = _validate_and_aggregate_audit_report(report, semantic_changes)
         except Exception as parse_exc:
-            logger.warning("Blueprint auditor returned malformed output; retrying once.")
+            logger.warning("Blueprint auditor returned invalid output; retrying once.")
             retry_message = _malformed_audit_retry_message(user_message, parse_exc)
             retry_response = get_llm_response(
                 retry_message, model_name, system_prompt, provider=provider
@@ -712,10 +755,13 @@ def audit_blueprint_consistency(
             out_t += estimate_tokens(retry_response)
             try:
                 report = _parse_audit_response(retry_response)
+                report = _validate_and_aggregate_audit_report(
+                    report, semantic_changes
+                )
                 report["auditor_retry"] = True
             except Exception as retry_exc:
                 report = _audit_infrastructure_report(
-                    f"Auditor response malformed after retry: {retry_exc}"
+                    f"Auditor response invalid after retry: {retry_exc}"
                 )
                 report["auditor_retry"] = True
 

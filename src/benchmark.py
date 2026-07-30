@@ -152,6 +152,25 @@ def _write_json(path: str, data: dict):
         json.dump(data, fh, indent=2, sort_keys=True)
 
 
+def _validate_rep_archive(rep_dir: str, attempt_records: list[dict]):
+    case_dir = os.path.dirname(rep_dir)
+    required_paths = [os.path.join(rep_dir, "agent_backend.log")]
+    required_paths.extend(
+        os.path.join(case_dir, record["details_path"])
+        for record in attempt_records
+        if record["event"] in {"code_ready", "blueprint_audit"}
+    )
+    missing = [
+        os.path.relpath(path, rep_dir)
+        for path in required_paths
+        if not os.path.isfile(path) or os.path.getsize(path) == 0
+    ]
+    if missing:
+        raise RuntimeError(
+            "Incomplete benchmark repetition archive: " + ", ".join(missing)
+        )
+
+
 def _summarize_error(error: str) -> str:
     text = " ".join(str(error).split())
     if not text:
@@ -376,9 +395,16 @@ def _run_single_rep(
         elif event == "code_ready":
             attempt_dir = attempt_dirs.get(attempt, rep_dir)
             code = data.get("code", "")
+            reasoning = data.get("reasoning") or ""
             code_path = os.path.join(attempt_dir, "code.py")
             with open(code_path, "w", encoding="utf-8") as fh:
                 fh.write(code)
+            with open(
+                os.path.join(attempt_dir, "coder_reasoning.md"),
+                "w",
+                encoding="utf-8",
+            ) as fh:
+                fh.write(reasoning)
             attempt_records.append(
                 {
                     "id": q["id"],
@@ -388,7 +414,7 @@ def _run_single_rep(
                     "event": event,
                     "passed_audit": "",
                     "status": "code_generated",
-                    "summary": (data.get("reasoning") or "")[:240],
+                    "summary": reasoning[:240],
                     "details_path": _rel(code_path),
                 }
             )
@@ -484,6 +510,7 @@ def _run_single_rep(
     # Cleanup and release current repetition log handler
     backend_logger.removeHandler(file_handler)
     file_handler.close()
+    _validate_rep_archive(rep_dir, attempt_records)
 
     return {
         "selected_blueprints": selected,
