@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 
 import benchmark
 
@@ -81,6 +82,65 @@ def test_attempt_results_headers_cover_per_iteration_logging():
         "summary",
         "details_path",
     ]
+
+
+def test_single_rep_uses_non_streaming_router_and_coder(tmp_path, monkeypatch):
+    q = {
+        "id": "1",
+        "category": "test_case",
+        "query": "Run the test.",
+        "expected_blueprints": '["aero_analysis.py"]',
+    }
+    rep_dir = tmp_path / "case_1" / "rep_1"
+    seen = {}
+
+    def fake_route(user_prompt, model_name, provider):
+        logging.getLogger("LLM_Backend").warning("non-streaming router response")
+        seen["route"] = (user_prompt, model_name, provider)
+        return {
+            "blueprints": ["aero_analysis.py"],
+            "input_tokens": 10,
+            "output_tokens": 5,
+        }
+
+    def fake_run_agent(**kwargs):
+        seen["stream"] = kwargs["stream"]
+        callback = kwargs["callback"]
+        callback("attempt_start", {"attempt": 1})
+        callback(
+            "code_ready",
+            {"attempt": 1, "code": "print('ok')\n", "reasoning": "test"},
+        )
+        callback(
+            "blueprint_audit",
+            {"attempt": 1, "report": {"passed": True}, "diff": ""},
+        )
+        callback("exec_success", {"attempt": 1})
+        return benchmark.AgentResult(
+            final_code="print('ok')\n",
+            success=True,
+            converged="n/a",
+            attempts=1,
+        )
+
+    monkeypatch.setattr(benchmark, "route_intent", fake_route)
+    monkeypatch.setattr(benchmark, "run_agent", fake_run_agent)
+    monkeypatch.setattr(benchmark, "_OAS_OUT_DIR", str(tmp_path / "oas_out"))
+    monkeypatch.setattr(benchmark, "_PLOTS_DIR", str(tmp_path / "plots"))
+    monkeypatch.setattr(benchmark, "_GEN_RUN_DIR", str(tmp_path / "generated"))
+    monkeypatch.setattr(benchmark, "_BENCH_SCRIPT", str(tmp_path / "benchmark_run.py"))
+
+    result = benchmark._run_single_rep(
+        q,
+        str(rep_dir),
+        model="test-model",
+        provider="test-provider",
+        max_retries=5,
+    )
+
+    assert seen["route"] == ("Run the test.", "test-model", "test-provider")
+    assert seen["stream"] is False
+    assert result["success"] is True
 
 
 def test_resume_restarts_only_incomplete_repetition(tmp_path, monkeypatch):

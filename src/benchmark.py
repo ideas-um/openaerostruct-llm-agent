@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 from llm.config import LLMBackendTransientError
-from llm.router import route_intent_stream
+from llm.router import route_intent
 from agent_logic import run_agent, AgentResult
 
 # ---------------------------------------------------------------------------
@@ -361,11 +361,9 @@ def _run_single_rep(
     # 1. Intent routing
     routing_data = {}
     try:
-        for chunk in route_intent_stream(
+        routing_data = route_intent(
             q["query"], model_name=model, provider=provider
-        ):
-            if isinstance(chunk, dict):
-                routing_data = chunk
+        )
 
         blueprints = routing_data.get("blueprints", [])
         selected = ", ".join(blueprints)
@@ -509,7 +507,7 @@ def _run_single_rep(
             model_name=model,
             provider=provider,
             max_retries=max_retries,
-            stream=True,
+            stream=False,
             callback=bench_callback,
             gen_script_path=_BENCH_SCRIPT,
             retry_on_no_converge=True,
