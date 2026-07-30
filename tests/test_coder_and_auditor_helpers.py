@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from agent_logic import APPROVED_RELAXATION_HEADER, build_approved_relaxation_prompt
@@ -10,7 +12,7 @@ from llm.auditor import (
     audit_blueprint_consistency,
 )
 from llm.coder import _build_prompt, _parse_response
-from llm.config import is_gemini_transient_error
+from llm.config import get_llm_response, is_gemini_transient_error
 from llm.relaxer import suggest_relaxation
 
 
@@ -319,10 +321,18 @@ def test_audit_coverage_rejects_missing_or_duplicate_decisions(
 
 def test_auditor_fails_closed_when_llm_omits_required_decisions(monkeypatch):
     calls = []
+    schemas = []
     system_prompts = []
 
-    def fake_response(prompt, model_name, system_prompt, provider):
+    def fake_response(
+        prompt,
+        model_name,
+        system_prompt,
+        provider,
+        response_json_schema=None,
+    ):
         calls.append(prompt)
+        schemas.append(response_json_schema)
         system_prompts.append(system_prompt)
         return (
             '<audit>{"passed":true,"reviewed_changes":[],'
@@ -345,7 +355,7 @@ def test_auditor_fails_closed_when_llm_omits_required_decisions(monkeypatch):
 
     assert report["passed"] is False
     assert report["audit_infrastructure_error"] is True
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert "Omission generally means preserve" in system_prompts[0]
     assert '"authorization"' in system_prompts[0]
     assert "Never classify" in system_prompts[0]
@@ -355,9 +365,102 @@ def test_auditor_fails_closed_when_llm_omits_required_decisions(monkeypatch):
     assert "### REQUIRED CHANGE-BY-CHANGE REVIEW" in calls[0]
     assert "### SUPPORTING EXECUTABLE DIFF ###" in calls[0]
     assert "loads = np.ones" in calls[0]
+    assert '"reviewed_changes", "violations"' in calls[1]
+    assert 'must contain the key "changed_item"' in calls[1]
+    assert "never use the item identifier itself as a JSON property name" in calls[1]
+    assert all(schema["additionalProperties"] is False for schema in schemas)
+    assert all(
+        "changed_item"
+        in schema["properties"]["reviewed_changes"]["items"]["required"]
+        for schema in schemas
+    )
+
+
+def test_auditor_recovers_on_third_schema_attempt(monkeypatch):
+    responses = iter(
+        [
+            "<audit>{invalid}</audit>",
+            '<audit>{"reviewed_changes":[],"violations":[]}</audit>',
+            (
+                '<audit>{"reviewed_changes":['
+                '{"changed_item":"assign:Mach_number","passed":true}],'
+                '"violations":[]}</audit>'
+            ),
+        ]
+    )
+    calls = []
+
+    def fake_response(
+        prompt,
+        model_name,
+        system_prompt,
+        provider,
+        response_json_schema=None,
+    ):
+        calls.append(prompt)
+        assert response_json_schema["additionalProperties"] is False
+        return next(responses)
+
+    monkeypatch.setattr("llm.auditor.get_llm_response", fake_response)
+    monkeypatch.setattr(
+        "llm.auditor._load_blueprint",
+        lambda blueprint: ("/tmp/blueprint.py", "Mach_number = 1\n"),
+    )
+
+    report, _, _ = audit_blueprint_consistency(
+        user_prompt="Set Mach number to 2.",
+        blueprints=["blueprint.py"],
+        generated_code="Mach_number = 2\n",
+        model_name="test-model",
+        provider="test-provider",
+    )
+
+    assert len(calls) == 3
+    assert report["passed"] is True
+    assert report["auditor_retry"] is True
 
 
 def test_server_disconnect_is_transient_backend_error():
     assert is_gemini_transient_error(
         RuntimeError("Server disconnected without sending a response.")
     )
+
+
+def test_gemini_native_json_schema_is_applied(monkeypatch):
+    captured = {}
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            captured["config"] = config
+            return SimpleNamespace(
+                text='{"reviewed_changes":[]}',
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=1,
+                    candidates_token_count=1,
+                    total_token_count=2,
+                ),
+            )
+
+    monkeypatch.setattr(
+        "llm.config._make_gemini_client",
+        lambda: SimpleNamespace(models=FakeModels()),
+    )
+    monkeypatch.setattr("llm.config._gemini_rate_limit", lambda: None)
+    monkeypatch.setattr("llm.config.log_token_usage", lambda *args: None)
+
+    schema = {
+        "type": "object",
+        "properties": {"reviewed_changes": {"type": "array"}},
+        "required": ["reviewed_changes"],
+    }
+    response = get_llm_response(
+        "Audit this.",
+        "test-model",
+        "System prompt.",
+        provider="Gemini API",
+        response_json_schema=schema,
+    )
+
+    assert response == '{"reviewed_changes":[]}'
+    assert captured["config"].response_mime_type == "application/json"
+    assert captured["config"].response_json_schema == schema

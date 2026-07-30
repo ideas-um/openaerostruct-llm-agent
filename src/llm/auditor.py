@@ -12,6 +12,55 @@ logger = logging.getLogger("LLM_Backend")
 _LLM_DIR = os.path.dirname(os.path.abspath(__file__))
 _SRC_DIR = os.path.dirname(_LLM_DIR)
 _BLUEPRINTS_DIR = os.path.realpath(os.path.join(_SRC_DIR, "blueprints"))
+_AUDITOR_RESPONSE_ATTEMPTS = 3
+_AUDIT_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "passed": {"type": "boolean"},
+        "changed_item": {"type": "string"},
+        "classification": {"type": "string"},
+        "authorization": {"type": "string"},
+        "blueprint_value": {"type": "string"},
+        "generated_value": {"type": "string"},
+        "reason": {"type": "string"},
+        "severity": {"type": "string"},
+        "repair_instruction": {"type": "string"},
+    },
+    "required": [
+        "passed",
+        "changed_item",
+        "authorization",
+        "blueprint_value",
+        "generated_value",
+        "reason",
+    ],
+    "additionalProperties": False,
+}
+_AUDIT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reviewed_changes": {
+            "type": "array",
+            "items": _AUDIT_DECISION_SCHEMA,
+        },
+        "violations": {
+            "type": "array",
+            "items": _AUDIT_DECISION_SCHEMA,
+        },
+        "warnings": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "feedback_for_coder": {"type": "string"},
+    },
+    "required": [
+        "reviewed_changes",
+        "violations",
+        "warnings",
+        "feedback_for_coder",
+    ],
+    "additionalProperties": False,
+}
 
 
 def _compact_code(text: str) -> str:
@@ -630,9 +679,13 @@ def _malformed_audit_retry_message(user_message: str, error: Exception) -> str:
         "### PREVIOUS AUDIT RESPONSE WAS INVALID ###\n"
         "The previous response did not satisfy the audit schema or exact-coverage "
         f"rules: {error}\n\n"
-        "Return exactly one <audit> XML section containing valid JSON. Include "
-        "exactly one decision for every supplied semantic item. Do not include "
-        "Markdown fences, comments, trailing commas, or prose outside the XML tags."
+        "Return one valid JSON audit object. Include exactly one decision for every "
+        "supplied semantic item. Do not include Markdown fences, comments, trailing "
+        "commas, XML tags, or prose outside the JSON object. "
+        'Use exactly these top-level keys: "reviewed_changes", "violations", '
+        '"warnings", and "feedback_for_coder". Every decision object must contain '
+        'the key "changed_item". Copy its value exactly from the supplied "item"; '
+        "never use the item identifier itself as a JSON property name."
     )
 
 
@@ -738,32 +791,41 @@ def audit_blueprint_consistency(
     out_t = 0
 
     try:
-        response = get_llm_response(
-            user_message, model_name, system_prompt, provider=provider
-        )
-        out_t += estimate_tokens(response)
-        try:
-            report = _parse_audit_response(response)
-            report = _validate_and_aggregate_audit_report(report, semantic_changes)
-        except Exception as parse_exc:
-            logger.warning("Blueprint auditor returned invalid output; retrying once.")
-            retry_message = _malformed_audit_retry_message(user_message, parse_exc)
-            retry_response = get_llm_response(
-                retry_message, model_name, system_prompt, provider=provider
+        audit_message = user_message
+        report = None
+        for response_attempt in range(_AUDITOR_RESPONSE_ATTEMPTS):
+            response = get_llm_response(
+                audit_message,
+                model_name,
+                system_prompt,
+                provider=provider,
+                response_json_schema=_AUDIT_RESPONSE_SCHEMA,
             )
-            in_t += estimate_tokens(system_prompt + "\n" + retry_message)
-            out_t += estimate_tokens(retry_response)
+            if response_attempt:
+                in_t += estimate_tokens(system_prompt + "\n" + audit_message)
+            out_t += estimate_tokens(response)
             try:
-                report = _parse_audit_response(retry_response)
+                report = _parse_audit_response(response)
                 report = _validate_and_aggregate_audit_report(
                     report, semantic_changes
                 )
-                report["auditor_retry"] = True
-            except Exception as retry_exc:
-                report = _audit_infrastructure_report(
-                    f"Auditor response invalid after retry: {retry_exc}"
+                if response_attempt:
+                    report["auditor_retry"] = True
+                break
+            except Exception as parse_exc:
+                if response_attempt + 1 == _AUDITOR_RESPONSE_ATTEMPTS:
+                    report = _audit_infrastructure_report(
+                        "Auditor response invalid after "
+                        f"{_AUDITOR_RESPONSE_ATTEMPTS} attempts: {parse_exc}"
+                    )
+                    report["auditor_retry"] = True
+                    break
+                logger.warning(
+                    "Blueprint auditor returned invalid output; retrying audit."
                 )
-                report["auditor_retry"] = True
+                audit_message = _malformed_audit_retry_message(
+                    user_message, parse_exc
+                )
 
         if not report.get("passed", True) and not report.get(
             "audit_infrastructure_error"

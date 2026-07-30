@@ -218,55 +218,51 @@ For pointwise arrays, a pass must cite every changed index/point explicitly; oth
 
 ## OUTPUT FORMAT
 
-Return exactly one XML section: `<audit>`.
-Do not emit prose or Markdown fences outside the XML tags.
+Return only the audit JSON object required by the response schema. Do not emit
+XML tags, Markdown fences, comments, or surrounding prose. Put accepted changes
+in `reviewed_changes` and blocking changes in `violations`. Copy each supplied
+semantic `item` exactly into that decision's `changed_item`.
 
 ### Pass example
-<audit>
+
+If the supplied semantic item is `assign:_Mach_numbers index 0`, a valid pass
+response is:
+
 {
-  "violations": [],
   "reviewed_changes": [
     {
       "passed": true,
       "changed_item": "assign:_Mach_numbers index 0",
       "classification": "requested_change",
       "authorization": "User request: \"Mach 0.78\"",
-      "blueprint_value": "_Mach_numbers = np.array([0.5, 0.3])",
-      "generated_value": "_Mach_numbers = np.array([0.78, 0.3])",
-      "reason": "Index 0 is the requested cruise point. Index 1 is unchanged from the blueprint."
-    },
-    {
-      "passed": true,
-      "changed_item": "velocity formula",
-      "classification": "equivalent_formatting",
-      "authorization": "Algebraically equivalent to the blueprint formula.",
-      "blueprint_value": "v = Mach_number * speed_of_sound",
-      "generated_value": "v = speed_of_sound * Mach_number",
-      "reason": "The formula is algebraically equivalent and keeps the same speed-of-sound assumption."
+      "blueprint_value": "_Mach_numbers[0] = 0.5",
+      "generated_value": "_Mach_numbers[0] = 0.78",
+      "reason": "The user explicitly requested Mach 0.78 for this flight point."
     }
   ],
+  "violations": [],
   "warnings": [],
   "feedback_for_coder": ""
 }
-</audit>
 
 ### Fail example
-<audit>
+
+If the supplied semantic item is `dict:mesh_dict.num_y`, a valid rejection is:
+
 {
+  "reviewed_changes": [],
   "violations": [
     {
       "passed": false,
-      "severity": "blocking",
       "changed_item": "dict:mesh_dict.num_y",
       "authorization": "none",
       "blueprint_value": "mesh_dict['num_y'] = 7",
       "generated_value": "mesh_dict['num_y'] = 15",
-      "reason": "The requested span does not request a panel count, and the blueprint mesh can execute the requested geometry.",
+      "reason": "The user did not request a mesh-resolution change.",
+      "severity": "blocking",
       "repair_instruction": "Restore the blueprint num_y value."
     }
   ],
-  "reviewed_changes": [],
   "warnings": [],
-  "feedback_for_coder": "Blueprint consistency error: restore mesh_dict num_y. Geometry dimensions do not authorize mesh-resolution changes."
+  "feedback_for_coder": "Restore mesh_dict num_y to the blueprint value."
 }
-</audit>

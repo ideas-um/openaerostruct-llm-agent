@@ -310,10 +310,12 @@ def get_llm_response(
     model_name: str,
     system_prompt: str = None,
     provider: str = "Gemini API",
+    response_json_schema: dict | None = None,
 ) -> str:
     """
     Send a prompt to either Gemini or Ollama and return the response text.
     Retries automatically on transient Gemini errors (503, quota exhaustion).
+    Gemini responses use native structured output when a JSON schema is supplied.
     """
     logger.info(f"========== NEW LLM REQUEST ({model_name} via {provider}) ==========")
     if system_prompt:
@@ -326,11 +328,17 @@ def get_llm_response(
 
         _gemini_rate_limit()
         client = _make_gemini_client()
-        config = types.GenerateContentConfig(
+        config_kwargs = dict(
             system_instruction=system_prompt or None,
             temperature=0.2,
             max_output_tokens=8192,
         )
+        if response_json_schema is not None:
+            config_kwargs.update(
+                response_mime_type="application/json",
+                response_json_schema=response_json_schema,
+            )
+        config = types.GenerateContentConfig(**config_kwargs)
 
         max_retries = 5
         wait_times = GEMINI_RETRY_WAIT_SECONDS
