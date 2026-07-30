@@ -562,7 +562,9 @@ prob.model.add_design_var("fuel_mass", lower=0.0, upper=2e5, scaler=1e-5)
 #   "fuel_diff"                         — fuel mass consistency: fuel_mass == fuelburn, equals=0
 
 prob.model.add_constraint("AS_point_0.CL", equals=0.6)
-prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)  # Required maneuver trim constraint.
+# Maneuver load factor, structural failure, and maneuver trim are separate requirements.
+# Keep this L_equals_W constraint unless the user explicitly requests its removal.
+prob.model.add_constraint("AS_point_1.L_equals_W", equals=0.0)
 prob.model.add_constraint("AS_point_1.wing_perf.failure", upper=0.0)
 prob.model.add_constraint("fuel_vol_delta.fuel_vol_delta", lower=0.0)  # Required fuel-volume feasibility constraint.
 prob.model.add_constraint("fuel_diff", equals=0.0)  # Required fuel-mass consistency constraint.
