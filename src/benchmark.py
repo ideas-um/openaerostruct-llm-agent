@@ -104,6 +104,32 @@ def _append_result(results_file: str, row: dict, headers: list, write_header: bo
         writer.writerow(row)
 
 
+def _read_result_rows(results_file: str) -> list[dict]:
+    if not os.path.exists(results_file):
+        return []
+    with open(results_file, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _csv_bool(value) -> bool:
+    return str(value).strip().lower() == "true"
+
+
+def _resolve_resume_run_dir(resume_run: str) -> str:
+    bench_root = os.path.realpath(_BENCH_OUT_DIR)
+    candidate = (
+        resume_run
+        if os.path.isabs(resume_run)
+        else os.path.join(bench_root, resume_run)
+    )
+    candidate = os.path.realpath(candidate)
+    if candidate == bench_root or os.path.commonpath([bench_root, candidate]) != bench_root:
+        raise ValueError("Resume run must be a directory inside benchmark_run_out.")
+    if not os.path.isdir(candidate):
+        raise FileNotFoundError(f"Benchmark run not found: {candidate}")
+    return candidate
+
+
 def _cleanup_run_artifacts():
     if os.path.exists(_OAS_OUT_DIR):
         for fname in os.listdir(_OAS_OUT_DIR):
@@ -537,32 +563,47 @@ def run_benchmark(
     max_retries=DEFAULT_MAX_RETRIES,
     num_reps=NUM_REPS,
     case_ids=None,
+    resume_run=None,
 ):
     os.makedirs(_OAS_OUT_DIR, exist_ok=True)
     os.makedirs(_BENCH_OUT_DIR, exist_ok=True)
 
-    run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join(_BENCH_OUT_DIR, f"run_{run_ts}_{_safe_name(model)}")
-    os.makedirs(run_dir, exist_ok=True)
+    if resume_run:
+        run_dir = _resolve_resume_run_dir(resume_run)
+        metadata_file = os.path.join(run_dir, "run_metadata.json")
+        with open(metadata_file) as fh:
+            metadata = json.load(fh)
+        model = metadata["model"]
+        provider = metadata["provider"]
+        max_retries = metadata["max_retry_count"]
+        num_reps = metadata["num_reps"]
+        stored_case_ids = metadata.get("case_ids")
+        case_ids = {str(item) for item in stored_case_ids} if stored_case_ids else None
+        limit = metadata.get("limit")
+        print(f"--- Resuming Benchmark: {os.path.basename(run_dir)} ---")
+    else:
+        run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir = os.path.join(_BENCH_OUT_DIR, f"run_{run_ts}_{_safe_name(model)}")
+        os.makedirs(run_dir, exist_ok=True)
+        metadata_file = os.path.join(run_dir, "run_metadata.json")
+        with open(metadata_file, "w") as fh:
+            json.dump(
+                {
+                    "model": model,
+                    "provider": provider,
+                    "max_retry_count": max_retries,
+                    "num_reps": num_reps,
+                    "case_ids": sorted(case_ids) if case_ids else None,
+                    "limit": limit,
+                    "timestamp": run_ts,
+                },
+                fh,
+                indent=2,
+            )
 
     rep_results_file = os.path.join(run_dir, "rep_results.csv")
     attempt_results_file = os.path.join(run_dir, "attempt_results.csv")
     summary_results_file = os.path.join(run_dir, "benchmark_results.csv")
-    metadata_file = os.path.join(run_dir, "run_metadata.json")
-
-    with open(metadata_file, "w") as fh:
-        json.dump(
-            {
-                "model": model,
-                "provider": provider,
-                "max_retry_count": max_retries,
-                "num_reps": num_reps,
-                "case_ids": sorted(case_ids) if case_ids else None,
-                "timestamp": run_ts,
-            },
-            fh,
-            indent=2,
-        )
 
     queries = []
     with open(_INPUT_FILE, "r") as f:
@@ -576,7 +617,22 @@ def run_benchmark(
 
     print(f"--- Starting Benchmark ({len(queries)} cases × {num_reps} reps) ---")
 
-    total_success, total_runs, rep_row_idx, attempt_row_idx, sum_row_idx = 0, 0, 0, 0, 0
+    existing_rep_rows = _read_result_rows(rep_results_file)
+    existing_attempt_rows = _read_result_rows(attempt_results_file)
+    existing_summary_rows = _read_result_rows(summary_results_file)
+    completed_reps = {}
+    for row in existing_rep_rows:
+        key = (row["id"], int(row["rep"]))
+        if key in completed_reps:
+            raise RuntimeError(f"Duplicate completed repetition in rep_results.csv: {key}")
+        completed_reps[key] = row
+    summarized_cases = {row["id"] for row in existing_summary_rows}
+
+    total_success = sum(_csv_bool(row["success"]) for row in existing_rep_rows)
+    total_runs = len(existing_rep_rows)
+    rep_row_idx = len(existing_rep_rows)
+    attempt_row_idx = len(existing_attempt_rows)
+    sum_row_idx = len(existing_summary_rows)
 
     for idx, q in enumerate(queries):
         case_id = q["id"]
@@ -585,17 +641,49 @@ def run_benchmark(
 
         print(f"\n[Case {case_id}] {q['category']}: {q['query'][:80]}...")
 
-        rep_successes, rep_converged_count, opt_reps = 0, 0, 0
-        rep_attempts_list, rep_elapsed_list, rep_in_tok, rep_out_tok = [], [], [], []
-        rep_routing_correct, all_errors = [], []
-        rep_metric_hashes = []
-        selected_last = "ERROR"
+        prior_rows = [
+            completed_reps[(case_id, rep)]
+            for rep in range(1, num_reps + 1)
+            if (case_id, rep) in completed_reps
+        ]
+        if len(prior_rows) == num_reps and case_id in summarized_cases:
+            print("  Already complete; skipping.")
+            continue
+        if case_id in summarized_cases:
+            raise RuntimeError(
+                f"Case {case_id} has a summary row but only "
+                f"{len(prior_rows)}/{num_reps} completed repetitions."
+            )
+
+        rep_successes = sum(_csv_bool(row["success"]) for row in prior_rows)
+        rep_converged_count = sum(row["converged"] == "yes" for row in prior_rows)
+        opt_reps = sum(row["converged"] in ("yes", "no") for row in prior_rows)
+        rep_attempts_list = [int(row["attempts"]) for row in prior_rows]
+        rep_elapsed_list = [float(row["elapsed_s"]) for row in prior_rows]
+        rep_in_tok = [int(row["input_tokens"]) for row in prior_rows]
+        rep_out_tok = [int(row["output_tokens"]) for row in prior_rows]
+        rep_routing_correct = [_csv_bool(row["routing_correct"]) for row in prior_rows]
+        all_errors = [
+            error
+            for row in prior_rows
+            for error in row["error_log"].split(" ||| ")
+            if error
+        ]
+        rep_metric_hashes = [row["result_metrics_hash"] for row in prior_rows]
+        selected_last = prior_rows[-1]["selected_blueprints"] if prior_rows else "ERROR"
 
         rep = 1
         backend_retries = 0
         while rep <= num_reps:
+            if (case_id, rep) in completed_reps:
+                print(f"  [Rep {rep}/{num_reps}] Already complete; skipping.")
+                rep += 1
+                continue
             print(f"  [Rep {rep}/{num_reps}]", end=" ", flush=True)
             rep_dir = os.path.join(case_dir, f"rep_{rep}")
+            if resume_run and os.path.exists(rep_dir):
+                print("restarting incomplete repetition...", end=" ", flush=True)
+                shutil.rmtree(rep_dir)
             start_time = time.time()
             try:
                 res = _run_single_rep(q, rep_dir, model, provider, max_retries)
@@ -740,6 +828,14 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gemini-flash-lite-latest")
     parser.add_argument("--provider", type=str, default="Gemini API")
     parser.add_argument(
+        "--resume-run",
+        type=str,
+        help=(
+            "Resume an existing run directory under benchmark_run_out. "
+            "The stored run metadata overrides model and repetition settings."
+        ),
+    )
+    parser.add_argument(
         "--max-retries",
         type=int,
         default=DEFAULT_MAX_RETRIES,
@@ -756,4 +852,5 @@ if __name__ == "__main__":
         max_retries=args.max_retries,
         num_reps=args.num_reps,
         case_ids=case_ids,
+        resume_run=args.resume_run,
     )

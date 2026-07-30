@@ -148,6 +148,16 @@ In these commands, `--provider` selects the LLM backend, `--model` selects the e
 
 Outputs are written under `benchmark_run_out/`.
 
+If a benchmark is interrupted, resume it in the same output directory with:
+
+```bash
+python src/benchmark.py --resume-run run_YYYYMMDD_HHMMSS_model-name
+```
+
+The runner reads the original configuration from `run_metadata.json`, skips
+repetitions already recorded in `rep_results.csv`, and restarts any incomplete
+repetition directory before continuing.
+
 ## Reference
 
 The related preprint describing this framework can be accessed through the University of Michigan Deep Blue repository at this [linked document](https://backend.production.deepblue-documents.lib.umich.edu/server/api/core/bitstreams/1986c947-bc2b-4a9b-9a3e-2ee66df5d98c/content), and can also be accessed through [IDEAS Lab Website](https://www.gokcincinar.com/software/openaerostruct/).

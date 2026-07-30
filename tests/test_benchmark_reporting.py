@@ -1,3 +1,6 @@
+import csv
+import json
+
 import benchmark
 
 
@@ -78,3 +81,101 @@ def test_attempt_results_headers_cover_per_iteration_logging():
         "summary",
         "details_path",
     ]
+
+
+def test_resume_restarts_only_incomplete_repetition(tmp_path, monkeypatch):
+    bench_root = tmp_path / "benchmark_run_out"
+    run_dir = bench_root / "run_test_model"
+    partial_rep = run_dir / "case_1" / "rep_3"
+    partial_rep.mkdir(parents=True)
+    (partial_rep / "partial.log").write_text("interrupted")
+
+    metadata = {
+        "model": "stored-model",
+        "provider": "stored-provider",
+        "max_retry_count": 5,
+        "num_reps": 3,
+        "case_ids": None,
+        "limit": None,
+        "timestamp": "test",
+    }
+    (run_dir / "run_metadata.json").write_text(json.dumps(metadata))
+
+    queries_file = tmp_path / "queries.csv"
+    queries_file.write_text(
+        "id,category,query,expected_blueprints\n"
+        '1,test_case,"Run the test.","[""test.py""]"\n'
+    )
+
+    rep_results = run_dir / "rep_results.csv"
+    for rep in (1, 2):
+        row = {header: "" for header in benchmark.REP_HEADERS}
+        row.update(
+            {
+                "id": "1",
+                "category": "test_case",
+                "query": "Run the test.",
+                "rep": rep,
+                "selected_blueprints": "test.py",
+                "routing_correct": True,
+                "attempts": 1,
+                "exit_code": 0,
+                "converged": "yes",
+                "elapsed_s": 1.0,
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "success": True,
+                "result_metrics": "{}",
+                "result_metrics_hash": "",
+                "error_log": "",
+            }
+        )
+        benchmark._append_result(
+            str(rep_results),
+            row,
+            benchmark.REP_HEADERS,
+            write_header=(rep == 1),
+        )
+
+    calls = []
+
+    def fake_run(q, rep_dir, model, provider, max_retries):
+        calls.append((rep_dir, model, provider, max_retries))
+        assert not (partial_rep / "partial.log").exists()
+        return {
+            "selected_blueprints": "test.py",
+            "routing_correct": True,
+            "attempts": 1,
+            "exit_code": 0,
+            "converged": "yes",
+            "success": True,
+            "error_logs": [],
+            "result_metrics": {},
+            "input_tokens": 12,
+            "output_tokens": 6,
+            "attempt_records": [],
+        }
+
+    monkeypatch.setattr(benchmark, "_BENCH_OUT_DIR", str(bench_root))
+    monkeypatch.setattr(benchmark, "_OAS_OUT_DIR", str(tmp_path / "oas_out"))
+    monkeypatch.setattr(benchmark, "_INPUT_FILE", str(queries_file))
+    monkeypatch.setattr(benchmark, "_run_single_rep", fake_run)
+
+    benchmark.run_benchmark(resume_run=run_dir.name)
+
+    assert calls == [
+        (
+            str(partial_rep),
+            "stored-model",
+            "stored-provider",
+            5,
+        )
+    ]
+    with rep_results.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert [row["rep"] for row in rows] == ["1", "2", "3"]
+
+    with (run_dir / "benchmark_results.csv").open(newline="") as f:
+        summary_rows = list(csv.DictReader(f))
+    assert len(summary_rows) == 1
+    assert summary_rows[0]["num_runs"] == "3"
