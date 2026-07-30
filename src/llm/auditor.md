@@ -127,6 +127,14 @@ Every supplied semantic item must appear exactly once across those two lists.
 
 ## COMMON FALSE PASSES TO BLOCK
 
+- In `aerostruct_wingbox.py`, maneuver load factor, structural failure, and
+  `AS_point_1.L_equals_W` serve different purposes and remain separate parts of
+  the formulation. Neither load factor nor the failure constraint replaces or
+  makes maneuver trim redundant. A user constraint list that mentions failure
+  but omits maneuver `L_equals_W` does not authorize removing it. Pass its
+  removal only when the user explicitly requests removing or disabling
+  maneuver trim; never classify the removal as `required_wiring` merely because
+  load factor or failure is present.
 - A request for Mach/rho/altitude must preserve the blueprint derivation for `speed_of_sound`, `v`, and `re`; stale fixed `v` or `re` values are assumption drift.
 - If the user gives `rho`, using a different ISA-derived density is assumption drift. If the user gives altitude but omits `rho`, deriving density with `_isa_density(...)` is required wiring.
 - If the user gives `CT` in `1/s` or `/s`, multiplying it by `grav_constant` is assumption drift. Only allow `grav_constant * ...` when the user explicitly gives TSFC requiring conversion.
