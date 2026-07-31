@@ -62,6 +62,25 @@ Same needs as `aerostruct_tube.py`.
 
 Use this to write concrete `missing_info` responses — list relevant options from these tables, not generic advice.
 
+### Wing definition and mesh
+| Parameter | What it controls |
+|---|---|
+| `wing_type` | Initial wing geometry: rectangular (`rect`), CRM, or `uCRM_based` |
+| `span` | Full wingspan [m]; used with a rectangular mesh |
+| `root_chord` | Root chord [m]; used with a rectangular mesh |
+| `num_x` | Number of chordwise mesh vertices |
+| `num_y` | Number of spanwise mesh vertices for the full wing |
+| `chord_cos_spacing` | Chordwise mesh spacing, from uniform to cosine |
+| `span_cos_spacing` | Spanwise mesh spacing, from uniform to cosine |
+| `symmetry` | Whether only one half of the wing is modeled |
+
+Treat the initial wing geometry and the mesh discretization as separate
+decisions. A request for a rectangular wing, span, root chord, taper, sweep, or
+dihedral does not authorize a change to `num_x`, `num_y`, or mesh spacing.
+For rectangular wings, map span and root chord to the mesh definition. Map
+taper, sweep, and dihedral to the surface geometry rather than the mesh
+dictionary.
+
 ### Design variables
 | Variable | What it controls |
 |---|---|
@@ -77,7 +96,7 @@ Use this to write concrete `missing_info` responses — list relevant options fr
 | `radius_cp` | Tube outer radius [m] — tube spar |
 | `spar_thickness_cp` | Spar wall thickness [m] — wingbox |
 | `skin_thickness_cp` | Skin panel thickness [m] — wingbox |
-| `t_over_c_cp` | Thickness-to-chord ratio — wingbox |
+| `t_over_c_cp` | Thickness-to-chord ratio used by the aerodynamic or wingbox model |
 | `fuel_mass` | Fuel mass [kg] — wingbox fuel loop |
 
 Map natural physical descriptions to these canonical variable names. For
