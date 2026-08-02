@@ -1,46 +1,35 @@
 # OpenAeroStruct LLM Agent
 
-A multi-agent framework for running OpenAeroStruct wing analysis and optimization from natural-language prompts.
+A multi-agent framework that turns natural-language aircraft design requests into
+OpenAeroStruct analyses and optimizations.
 
 ![OpenAeroStruct architecture](./.github/workflows/Architecture.png)
 
-## Contributors
-
-- **Conan Lee**: Lead developer and primary author (HKUST)
-- **Gokcin Cinar**: Research supervision and concept development (U-M)
-- **Joaquim R.R.A. Martins**: Research supervision and concept development (U-M)
-
 ## What It Does
 
-The agent takes a natural-language aircraft design request, routes it to the most appropriate OpenAeroStruct blueprint, edits a validated blueprint in `src/blueprints/`, runs the generated script, retries when execution fails, and saves plots, metrics, and optimization summaries for review. In practice, this means a user can describe an analysis or optimization problem in plain language while the system handles workflow selection, code adaptation, execution, auditing, and result packaging in a more controlled and repeatable way than writing a brand-new script from scratch each time.
+Describe a wing analysis or optimization in plain language. The agent selects
+the right blueprint, generates and checks the code, runs OpenAeroStruct, and
+returns plots and numerical results. If required information is missing, it
+asks before running.
 
-Supported workflows:
+It supports:
 
-- Aerodynamic analysis
-- Aerodynamic optimization
+- Aerodynamic analysis and optimization
 - Structural optimization
-- Aerostructural tube-spar optimization
-- Aerostructural wingbox optimization
+- Aerostructural optimization with tube-spar or wingbox models
 - Multipoint optimization
 
 ## Quick Start
 
-### Requirements
+Requires Python `3.12` and either a Gemini API key or a local Ollama model.
 
-- Python `3.12`
-- Either `uv` or Conda
-- One LLM provider:
-  Gemini with `GEMINI_API_KEY` or `GOOGLE_API_KEY`, or Ollama running locally
-
-### Install
-
-Using `uv`:
+### 1. Install
 
 ```bash
 uv sync --python-preference only-managed
 ```
 
-Using Conda:
+Conda alternative:
 
 ```bash
 conda create -n openaerostruct python=3.12
@@ -48,87 +37,73 @@ conda activate openaerostruct
 pip install -e .
 ```
 
-### Choose a Provider and Model
+### 2. Choose an LLM Provider
 
-The project reads provider credentials from a local `.env` file in the repository root. A starter template is provided in [.env.example](./.env.example), and if you have not already created the file during installation you can create it with:
+Copy the environment template:
 
 ```bash
 cp .env.example .env
 ```
 
-This creates a local copy that you can edit without changing the tracked example file in the repository.
-
-Gemini:
+For Gemini, add your [Google AI Studio key](https://aistudio.google.com/apikey)
+to `.env`:
 
 ```bash
 GEMINI_API_KEY="YOUR_GOOGLE_GEMINI_KEY"
 ```
 
-If you want to use Gemini, you first need to create a Gemini API key through Google AI Studio. Google’s official documentation for key creation and management is available at [Using Gemini API keys](https://ai.google.dev/gemini-api/docs/api-key), and the direct page for creating or viewing a key is [Google AI Studio API keys](https://aistudio.google.com/apikey). After creating a key, paste it into your local `.env` file as `GEMINI_API_KEY="..."`.
-
-Ollama:
-
-- Install Ollama from [ollama.com](https://ollama.com/).
-- Start the Ollama app or daemon locally so the Python client can connect to your local Ollama server.
-- Install any local model you want to use. The app queries Ollama for installed models, so anything available in your local Ollama instance will appear automatically in the UI model dropdown.
-
-Installation Example:
+For local use, install and start [Ollama](https://ollama.com/), then pull a model:
 
 ```bash
 ollama pull llama3.1
 ```
 
-### Docker Sandbox (Optional)
+### 3. Configure the Execution Environment
 
-If you want generated OpenAeroStruct scripts to run in Docker instead of the local Python subprocess, build the sandbox image once and then set the execution backend before launching the app or benchmark. This changes where the generated OpenAeroStruct scripts run, but it does not change which LLM provider or model you use for routing and code generation.
+Generated OpenAeroStruct scripts can run in Docker or in the current Python
+environment. For the Docker sandbox, build the image:
 
 ```bash
 docker build -f docker/sandbox.Dockerfile -t openaerostruct-sandbox:latest .
 ```
 
-Then set the backend in your local `.env` file:
+Then set the backend in `.env`:
 
 ```bash
 OAS_EXECUTION_BACKEND="docker"
 ```
 
-Backend options:
+Use `host` to run scripts in the current Python environment, or `auto` to use
+Docker when it is available and otherwise fall back to the host.
 
-- `OAS_EXECUTION_BACKEND=host`: run generated scripts on the local machine
-- `OAS_EXECUTION_BACKEND=docker`: run generated scripts in the Docker sandbox
-- `OAS_EXECUTION_BACKEND=auto`: prefer Docker when available, otherwise fall back to host execution
-
-## Run the App
-
-Using `uv`:
+### 4. Run the App
 
 ```bash
 uv run streamlit run src/app.py
 ```
 
-Using Conda:
+With Conda:
 
 ```bash
 conda activate openaerostruct
 streamlit run src/app.py
 ```
 
-When the app starts, provider and model selection happens in the Streamlit sidebar rather than in `.env`:
-
-- `Provider`: `Gemini API` or `Ollama`
-- `Model`: selected from the sidebar after choosing the provider
-
-For Gemini, the app asks the Gemini API for the text-generation models available to your API key and falls back to a short default list if model discovery fails. For Ollama, the app reads your installed local models and shows them in the dropdown, which means you can switch models without editing project code as long as the model is already installed in your local Ollama environment.
+Choose a provider and model in the sidebar, then enter a request in the chat box.
 
 ## Example Prompts
 
-- `Analyze a tapered wing at Mach 0.55 and altitude 6000 m. Plot CL vs alpha and drag polar.`
-- `Minimize drag on a CRM wing at Mach 0.78, altitude 11000 m. DVs: alpha, twist_cp, chord_cp. Constraint: CL = 0.45.`
-- `Minimize fuel burn for a rectangular wing with a tube spar. Cruise at Mach 0.45, range 2000 km, constrain failure <= 0 and L = W.`
+Include the wing, flight condition, and desired result. For optimization, also
+name the objective, design variables, and constraints.
+
+- `Analyze a CRM wing at Mach 0.78 and 11,000 m. Sweep alpha from -2 to 8 deg and plot lift and drag.`
+- `Minimize drag on a CRM wing at Mach 0.78 and 11,000 m. Vary alpha and twist, with CL = 0.5.`
+- `Minimize fuel burn for a rectangular wing with a tube spar at Mach 0.45 and 4,000 m. Vary alpha, twist, and tube thickness. Constrain failure <= 0 and lift = weight.`
 
 ## Benchmarking
 
-The benchmark does not use the Streamlit interface. Instead, you choose the provider and model directly from the command line, which makes benchmark runs easier to reproduce and compare across different settings.
+The benchmark runs from the command line so provider and model choices are
+explicit and reproducible.
 
 Gemini example:
 
@@ -144,7 +119,8 @@ conda activate openaerostruct
 python src/benchmark.py --max-retries 5 --provider "Ollama" --model "llama3.1"
 ```
 
-In these commands, `--provider` selects the LLM backend, `--model` selects the exact model name passed to that backend, and `--max-retries 5` sets the maximum number of coder retry attempts used when the benchmark tries to recover from execution errors or failed runs.
+`--max-retries` sets the maximum number of coding attempts used to recover from
+audit and execution failures.
 
 Outputs are written under `benchmark_run_out/`.
 
@@ -154,13 +130,20 @@ If a benchmark is interrupted, resume it in the same output directory with:
 python src/benchmark.py --resume-run run_YYYYMMDD_HHMMSS_model-name
 ```
 
-The runner reads the original configuration from `run_metadata.json`, skips
-repetitions already recorded in `rep_results.csv`, and restarts any incomplete
-repetition directory before continuing.
+The runner restores the configuration from `run_metadata.json`, skips completed
+repetitions in `rep_results.csv`, and restarts incomplete repetitions.
 
 ## Reference
 
-The related preprint describing this framework can be accessed through the University of Michigan Deep Blue repository at this [linked document](https://backend.production.deepblue-documents.lib.umich.edu/server/api/core/bitstreams/1986c947-bc2b-4a9b-9a3e-2ee66df5d98c/content), and can also be accessed through [IDEAS Lab Website](https://www.gokcincinar.com/software/openaerostruct/).
+The related preprint is available from the [University of Michigan Deep Blue
+repository](https://backend.production.deepblue-documents.lib.umich.edu/server/api/core/bitstreams/1986c947-bc2b-4a9b-9a3e-2ee66df5d98c/content)
+and the [IDEAS Lab website](https://www.gokcincinar.com/software/openaerostruct/).
+
+## Contributors
+
+- **Conan Lee**: lead developer and primary author (HKUST)
+- **Gokcin Cinar**: research supervision and concept development (U-M)
+- **Joaquim R. R. A. Martins**: research supervision and concept development (U-M)
 
 ## Citation
 
