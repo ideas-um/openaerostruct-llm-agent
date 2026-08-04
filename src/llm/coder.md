@@ -109,6 +109,10 @@ For active optimized variables:
   within the active DV bounds.
 - This freedom applies only to active DVs. Do not change an unrequested or
   inactive physical parameter under the label of initialization.
+- If `alpha = 0` gives `SVD did not converge`, `inf`/`nan`, or failed trim,
+  retry with a nonzero interior `alpha` initializer, preferably the blueprint
+  value clipped to bounds. Do not change formulation or existing scalers for
+  this repair.
 
 For fuel-weight setup:
 - If the blueprint defines reserve fuel separately and computes `W0` with `+ surf_dict["Wf_reserve"]`, preserve that formula.
