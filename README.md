@@ -131,7 +131,7 @@ approval of Convergence Agent recommendations. Run five repetitions with:
 
 ```bash
 conda activate openaerostruct
-python src/benchmark_case3.py --num-reps 5 --max-retries 5 --max-convergence-tries 3 --provider "Gemini API" --model "gemini-3.5-flash-lite"
+python src/benchmark_case3.py --num-reps 5 --max-retries 5 --max-convergence-tries 3 --provider "Gemini API" --model "gemini-flash-lite-latest"
 ```
 
 Outputs are written under `benchmark_run_out/run_*_framework_case3_*`. The
