@@ -124,6 +124,15 @@ audit and execution failures.
 
 Outputs are written under `benchmark_run_out/`.
 
+If a benchmark is interrupted, resume it in the same output directory with:
+
+```bash
+python src/benchmark.py --resume-run run_YYYYMMDD_HHMMSS_model-name
+```
+
+The runner restores the configuration from `run_metadata.json`, skips completed
+repetitions in `rep_results.csv`, and restarts incomplete repetitions.
+
 ### Case Study 3 rerun
 
 The paper Case Study 3 experiment uses a fixed custom prompt with automatic
@@ -137,15 +146,6 @@ python src/benchmark_case3.py --num-reps 5 --max-retries 5 --max-convergence-tri
 Outputs are written under `benchmark_run_out/run_*_framework_case3_*`. The
 paper-specific summary file is `case3_results.csv`, which records auditor loops,
 convergence approvals, and final fuel-burn objective values for each repetition.
-
-If a benchmark is interrupted, resume it in the same output directory with:
-
-```bash
-python src/benchmark.py --resume-run run_YYYYMMDD_HHMMSS_model-name
-```
-
-The runner restores the configuration from `run_metadata.json`, skips completed
-repetitions in `rep_results.csv`, and restarts incomplete repetitions.
 
 ## Reference
 
