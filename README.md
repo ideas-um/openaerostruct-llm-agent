@@ -124,6 +124,20 @@ audit and execution failures.
 
 Outputs are written under `benchmark_run_out/`.
 
+### Case Study 3 rerun
+
+The paper Case Study 3 experiment uses a fixed custom prompt with automatic
+approval of Convergence Agent recommendations. Run five repetitions with:
+
+```bash
+conda activate openaerostruct
+python src/benchmark_case3.py --num-reps 5 --max-retries 5 --max-convergence-tries 3 --provider "Gemini API" --model "gemini-3.5-flash-lite"
+```
+
+Outputs are written under `benchmark_run_out/run_*_framework_case3_*`. The
+paper-specific summary file is `case3_results.csv`, which records auditor loops,
+convergence approvals, and final fuel-burn objective values for each repetition.
+
 If a benchmark is interrupted, resume it in the same output directory with:
 
 ```bash
