@@ -70,6 +70,10 @@ Some review items include an `audit_rule`. This is the applicable authorization
 rule for that item. Apply it before making the LLM pass/fail decision. It is
 evidence guidance, not a precomputed decision: check the original user request
 and approved runtime feedback for the authorization described by the rule.
+If an `audit_rule` says to preserve an existing `ref` or `scaler`, that item
+must go in `violations` unless the user explicitly requested a scaling change
+or approved retry feedback names a scaling/conditioning repair for that same
+item.
 
 If a semantic change includes `element_changes`, review those entries by index/point, not as a whole array. For `_Mach_numbers`, `_rho_vals`, `_altitudes`, `_v_vals`, `_a_vals`, `_mu_vals`, and `load_factor`, point 0 and point 1 are separate assumptions.
 
@@ -189,6 +193,11 @@ Every supplied semantic item must appear exactly once across those two lists.
   when the formulation still requires it.
 - A requested constraint/objective does not permit deleting preserved constraints/objectives.
 - A changed existing `ref`/`scaler` must fail unless the user requested scaling or the retry error explicitly required scaling/conditioning repair. Same objective/DV/constraint path is not enough.
+- Removing an existing `ref`/`scaler` is a changed existing scaling choice.
+  Requested DV/objective/constraint bounds, initials, or values do not make the
+  scaler "new" and do not authorize removing it. Do not classify scaler removal
+  as `requested_change` or `numerical_scaling` just because the associated
+  bounds changed.
 - In `aerostruct_tube.py`, preserve the blueprint's W0-relative fuel-burn
   objective reference. A requested W0 change must flow through the named `W0`
   value; replacing the relative reference with a fixed CRM-scale scaler is a
