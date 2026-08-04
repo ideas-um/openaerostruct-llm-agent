@@ -140,6 +140,9 @@ Every supplied semantic item must appear exactly once across those two lists.
 - If the user gives `CT` in `1/s` or `/s`, multiplying it by `grav_constant` is assumption drift. Only allow `grav_constant * ...` when the user explicitly gives TSFC requiring conversion.
 - If the blueprint computes `W0` with `+ surf_dict["Wf_reserve"]`, removing that reserve-fuel term is assumption drift unless the user explicitly says W0 already includes reserve fuel.
 - A request for one variable family does not permit neighboring assumption drift.
+- Material properties are protected physical assumptions. Do not derive or change
+  `E`, `G`, density, yield, safety factor, or structural-model constants from
+  engineering convention unless the user explicitly requests that value.
 - Geometry and discretization are separate decisions. A different span, chord,
   taper, sweep, dihedral, or wing type does not authorize changing `num_y`,
   `num_x`, or mesh spacing. Terms such as "analyze", "optimize", "regional
@@ -206,7 +209,7 @@ Every supplied semantic item must appear exactly once across those two lists.
 - Multiline arrays rewritten on one line with the same values.
 - `np.ones(3) * 0.1` versus `np.array([0.1, 0.1, 0.1])`.
 - New `ref`/`scaler` values for newly added DV/objective/constraint using the blueprint's local scaling style; put these in `warnings`.
-- Existing `ref`/`scaler` changes during a runtime retry when the previous error specifically identifies scaling, conditioning, line-search, positive directional derivative, or iteration-limit trouble from badly scaled variables.
+- Existing `ref`/`scaler` changes during a runtime retry when the previous error specifically identifies scaling, conditioning, line-search, positive directional derivative, or iteration-limit trouble from badly scaled variables, and the repair is documented as numerical conditioning rather than a formulation change.
 - Weighted multipoint CD implemented with `ExecComp` when the user requested weights.
 - Runtime-retry fixes that preserve assumptions, such as fixing CRM/rect `generate_mesh` unpacking.
 
