@@ -429,7 +429,8 @@ indep_var_comp.add_output("rho", val=_rho_vals, units="kg/m**3")
 indep_var_comp.add_output("speed_of_sound", val=_a_vals, units="m/s")
 indep_var_comp.add_output("CT", val=0.43 / 3600, units="1/s")
 indep_var_comp.add_output("R", val=2e6, units="m")  # Range [m]
-# Preserve the reserve-fuel addition unless the user explicitly says W0 already includes reserve fuel.
+# W0 is the non-reserve mass. If the user changes W0, replace only 25400 below.
+# Keep + Wf_reserve unless the user explicitly says W0 already includes reserve fuel.
 indep_var_comp.add_output("W0", val=25400 + surf_dict["Wf_reserve"], units="kg")
 indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.5]))  # [cruise, maneuver]
 indep_var_comp.add_output("alpha", val=0.0, units="deg")  # Cruise AoA
