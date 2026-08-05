@@ -187,25 +187,19 @@ def _make_gemini_client():
     )
 
 
-_GEMINI_MODEL_EXCLUDE_TERMS = (
-    "aqa",
-    "embedding",
-    "imagen",
-    "image",
-    "live",
-    "nano-banana",
-    "tts",
-    "veo",
-    "video",
-)
-
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_GEMINI_MODELS = [
+    DEFAULT_GEMINI_MODEL,
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-flash-lite-latest",
-    "gemini-2.0-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
 ]
+_GEMINI_TEXT_MODEL_SET = set(DEFAULT_GEMINI_MODELS)
 
 
 def _clean_gemini_model_name(model) -> str:
@@ -246,14 +240,14 @@ def list_gemini_model_names() -> tuple[list[str], str | None]:
         names = []
         for model in client.models.list():
             name = _clean_gemini_model_name(model)
-            lowered = name.lower()
             if not name or not _supports_generate_content(model):
                 continue
-            if any(term in lowered for term in _GEMINI_MODEL_EXCLUDE_TERMS):
-                continue
-            if "gemini" in lowered:
+            if name in _GEMINI_TEXT_MODEL_SET:
                 names.append(name)
-        names = sorted(dict.fromkeys(names))
+        names = sorted(
+            dict.fromkeys(names),
+            key=lambda item: DEFAULT_GEMINI_MODELS.index(item),
+        )
         if names:
             return names, None
         return DEFAULT_GEMINI_MODELS, "Gemini model list was empty; using defaults."

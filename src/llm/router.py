@@ -13,6 +13,7 @@ from .config import (
     is_gemini_provider,
     GEMINI_STREAM_RETRY_WAIT,
     GEMINI_STREAM_MAX_RETRIES,
+    DEFAULT_GEMINI_MODEL,
 )
 
 logger = logging.getLogger("LLM_Backend")
@@ -141,7 +142,9 @@ def _router_repair_prompt(user_prompt: str, previous_response: str, error: str) 
 
 
 def route_intent(
-    user_prompt: str, model_name: str = "gemini-2.0-flash", provider: str = "Gemini API"
+    user_prompt: str,
+    model_name: str = DEFAULT_GEMINI_MODEL,
+    provider: str = "Gemini API",
 ) -> dict:
     system_prompt = _load_system_prompt()
     logger.info(
@@ -179,7 +182,9 @@ def route_intent(
 
 
 def route_intent_stream(
-    user_prompt: str, model_name: str = "gemini-2.0-flash", provider: str = "Gemini API"
+    user_prompt: str,
+    model_name: str = DEFAULT_GEMINI_MODEL,
+    provider: str = "Gemini API",
 ):
     system_prompt = _load_system_prompt()
     try:

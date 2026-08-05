@@ -171,7 +171,7 @@ if is_ollama_provider(provider):
     else:
         model_name = st.sidebar.text_input(
             "Ollama Model",
-            value="gemini-2.0-flash",
+            value="llama3.1",
             help="Enter the exact local Ollama model name to use.",
         )
         if ollama_warning:

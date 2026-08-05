@@ -109,7 +109,7 @@ Gemini example:
 
 ```bash
 conda activate openaerostruct
-python src/benchmark.py --max-retries 5 --provider "Gemini API" --model "gemini-flash-lite-latest"
+python src/benchmark.py --max-retries 5 --provider "Gemini API" --model "gemini-3.5-flash-lite"
 ```
 
 Ollama example:
@@ -140,7 +140,7 @@ approval of Convergence Agent recommendations. Run five repetitions with:
 
 ```bash
 conda activate openaerostruct
-python src/benchmark_case3.py --num-reps 5 --max-retries 5 --max-convergence-tries 3 --provider "Gemini API" --model "gemini-flash-lite-latest"
+python src/benchmark_case3.py --num-reps 5 --max-retries 5 --max-convergence-tries 3 --provider "Gemini API" --model "gemini-3.5-flash-lite"
 ```
 
 Outputs are written under `benchmark_run_out/run_*_framework_case3_*`. The

@@ -556,7 +556,7 @@ def _run_single_rep(
 # ---------------------------------------------------------------------------
 def run_benchmark(
     limit=None,
-    model="gemini-flash-lite-latest",
+    model="gemini-3.5-flash-lite",
     provider="Gemini API",
     max_retries=DEFAULT_MAX_RETRIES,
     num_reps=NUM_REPS,
@@ -823,7 +823,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, help="Limit test cases")
     parser.add_argument("--num-reps", type=int, default=NUM_REPS, help="Number of reps per selected case")
     parser.add_argument("--case-ids", type=str, help="Comma-separated benchmark case ids to run, e.g. 4,5")
-    parser.add_argument("--model", type=str, default="gemini-flash-lite-latest")
+    parser.add_argument("--model", type=str, default="gemini-3.5-flash-lite")
     parser.add_argument("--provider", type=str, default="Gemini API")
     parser.add_argument(
         "--resume-run",
