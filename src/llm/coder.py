@@ -204,7 +204,7 @@ def generate_code_stream(
         try:
             from google.genai import types
 
-            cfg = types.GenerateContentConfig(system_instruction=sys, temperature=0.2)
+            cfg = types.GenerateContentConfig(system_instruction=sys, temperature=0.1)
             for chunk in client.models.generate_content_stream(
                 model=model_name, contents=p, config=cfg
             ):

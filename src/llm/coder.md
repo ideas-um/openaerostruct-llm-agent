@@ -32,12 +32,14 @@ Use Router Context only as a map for information that is actually present in
 the original request. A router omission does not erase a user instruction, and a
 router-only inference does not authorize a blueprint change.
 
-Every executable change must fit one category:
-- **requested_change**: the user explicitly asked for this exact item or a clear natural alias.
-- **required_wiring**: the requested change cannot run correctly unless this line changes.
-- **runtime_repair**: previous runtime/auditor feedback names this exact repair.
+Every executable change has a binary decision:
+- **YES**: the exact change is explicitly requested by the user or named by exact
+  approved repair feedback. Code strictly required to wire or report an explicit
+  request is also YES only when it changes no unrelated engineering or numerical
+  value.
+- **NO**: keep the blueprint line.
 
-If none applies, keep the blueprint line.
+Do not invent another reason to change the blueprint.
 
 ---
 

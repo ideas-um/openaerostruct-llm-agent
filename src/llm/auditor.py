@@ -18,7 +18,6 @@ _AUDIT_DECISION_SCHEMA = {
     "properties": {
         "passed": {"type": "boolean"},
         "changed_item": {"type": "string"},
-        "classification": {"type": "string"},
         "authorization": {"type": "string"},
         "blueprint_value": {"type": "string"},
         "generated_value": {"type": "string"},
@@ -394,7 +393,9 @@ def _call_signature(call: ast.Call) -> tuple[str, str] | None:
     short_name = func_name.split(".")[-1]
     if short_name not in _WATCHED_CALLS:
         return None
-    first_arg = _literal_string(call.args[0]) if call.args else ""
+    first_arg = ""
+    if call.args:
+        first_arg = _literal_string(call.args[0]) or _ast_code(call.args[0])
     if short_name == "connect":
         source = _ast_code(call.args[0]) if call.args else ""
         target = _ast_code(call.args[1]) if len(call.args) > 1 else ""
@@ -528,8 +529,26 @@ def _annotate_audit_rule(change: dict[str, str]) -> dict[str, str]:
             "the user explicitly requests mesh resolution, panel count, "
             "discretization, num_y, or num_x, or approved runtime feedback names "
             "this exact repair. Geometry, wing type, analysis quality, and "
-            "'better resolution' are not authorization. Do not classify this "
-            "change as required_wiring."
+            "'better resolution' are not authorization. Do not treat this as "
+            "implementation wiring required by a geometry request."
+        )
+    elif item in {
+        "dict:surface.E",
+        "dict:surface.G",
+        "dict:surface.yield",
+        "dict:surface.mrho",
+        "dict:surface.safety_factor",
+        "dict:surface.fem_origin",
+    }:
+        change["audit_rule"] = (
+            "Protected material or structural property. Pass if the user supplied "
+            "this same physical property and matching value by code name or clear "
+            "natural-language name; for example, material density authorizes "
+            "mrho. An approved relaxation may also authorize the change only when "
+            "it names this same property. Naming a material, requesting no failure, "
+            "changing a related property, or using engineering convention does not "
+            "authorize any other property. Otherwise reject and restore the "
+            "blueprint value."
         )
     elif item.endswith((".arg:ref", ".arg:scaler")) and change.get("blueprint"):
         change["audit_rule"] = (
@@ -673,12 +692,21 @@ def _validate_and_aggregate_audit_report(
     return report
 
 
-def _malformed_audit_retry_message(user_message: str, error: Exception) -> str:
+def _malformed_audit_retry_message(
+    user_message: str, previous_response: str, error: Exception
+) -> str:
     return (
         f"{user_message}\n\n"
         "### PREVIOUS AUDIT RESPONSE WAS INVALID ###\n"
         "The previous response did not satisfy the audit schema or exact-coverage "
         f"rules: {error}\n\n"
+        "Repair the previous response below; do not perform a new audit. Preserve "
+        "every existing item's pass/fail decision, authorization, and reason. Add "
+        "only missing decisions and correct schema or coverage errors. If duplicate "
+        "decisions agree, keep one. If they conflict, keep the violation "
+        "(`passed: false`) and remove the reviewed-change copy. Do not turn an "
+        "existing violation into a reviewed change or invent new authorization.\n\n"
+        f"### PREVIOUS AUDIT RESPONSE ###\n{previous_response}\n\n"
         "Return one valid JSON audit object. Include exactly one decision for every "
         "supplied semantic item. Do not include Markdown fences, comments, trailing "
         "commas, XML tags, or prose outside the JSON object. "
@@ -824,7 +852,7 @@ def audit_blueprint_consistency(
                     "Blueprint auditor returned invalid output; retrying audit."
                 )
                 audit_message = _malformed_audit_retry_message(
-                    user_message, parse_exc
+                    user_message, response, parse_exc
                 )
 
         if not report.get("passed", True) and not report.get(

@@ -202,6 +202,26 @@ prob.model.add_objective("wing.structural_mass", scaler=1e-2)
     )
 
 
+def test_semantic_changes_treat_fstring_constraint_target_as_keyword_change():
+    blueprint = """
+prob.model.add_constraint(f"{point_name}.wing_perf.CL", equals=0.5)
+"""
+    generated = """
+prob.model.add_constraint(f"{point_name}.wing_perf.CL", equals=0.45)
+"""
+
+    changes = _semantic_changes(blueprint, generated)
+
+    assert changes == [
+        {
+            "item": "call:add_constraint:f'{point_name}.wing_perf.CL'.arg:equals",
+            "status": "changed",
+            "blueprint": "0.5",
+            "generated": "0.45",
+        }
+    ]
+
+
 def test_semantic_changes_keep_array_elements_when_call_arguments_are_split():
     blueprint = """
 indep_var_comp.add_output("load_factor", val=np.array([1.0, 2.5]))
@@ -358,7 +378,8 @@ def test_auditor_fails_closed_when_llm_omits_required_decisions(monkeypatch):
     assert len(calls) == 3
     assert "Omission generally means preserve" in system_prompts[0]
     assert '"authorization"' in system_prompts[0]
-    assert "Never classify" in system_prompts[0]
+    assert "Every item has only two outcomes" in system_prompts[0]
+    assert "requested material density" in system_prompts[0]
     assert "including equality at either" in system_prompts[0]
     assert "### ROUTER CONTEXT ###" in calls[0]
     assert '"total_load": 40000.0' in calls[0]
@@ -368,7 +389,18 @@ def test_auditor_fails_closed_when_llm_omits_required_decisions(monkeypatch):
     assert '"reviewed_changes", "violations"' in calls[1]
     assert 'must contain the key "changed_item"' in calls[1]
     assert "never use the item identifier itself as a JSON property name" in calls[1]
+    assert "do not perform a new audit" in calls[1]
+    assert "Do not turn an existing violation into a reviewed change" in calls[1]
+    assert (
+        '<audit>{"passed":true,"reviewed_changes":[],'
+        '"violations":[],"warnings":[]}</audit>' in calls[1]
+    )
     assert all(schema["additionalProperties"] is False for schema in schemas)
+    assert all(
+        "classification"
+        not in schema["properties"]["reviewed_changes"]["items"]["properties"]
+        for schema in schemas
+    )
     assert all(
         "changed_item"
         in schema["properties"]["reviewed_changes"]["items"]["required"]

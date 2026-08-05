@@ -27,21 +27,31 @@ For every supplied semantic `item`, decide exactly once: put it in
 
 ---
 
-## REJECT FIRST
+## BINARY DECISION
 
 For each changed executable item, identify the exact blueprint-to-generated
 difference.
 
-If that exact difference is not explicitly requested or named by an approved
-relaxation, put it in `violations`.
+Every item has only two outcomes:
+- **YES**: put it in `reviewed_changes` with `passed` set to `true`.
+- **NO**: put it in `violations`.
+
+YES is allowed only when the exact difference is explicitly requested by the
+user, named by an exact approved relaxation, or strictly required to wire or
+report an explicit request without changing any unrelated engineering or
+numerical value. If none applies, the answer is NO.
+
+A clear natural-language name counts as the same property; the user does not
+need to use the Python identifier. For example, requested material density
+authorizes the matching `mrho` value. It does not authorize any other material
+property.
 
 Authorization applies to the exact difference, not merely to the same variable,
 line, design variable, objective, or constraint being mentioned by the user.
 
-Only changes that survive this rejection check may be evaluated by the allowed
-pass classifications. Violations do not require a classification.
+Explain the authorization in `reason`; do not assign a decision category.
 
-### Reject-first examples
+### Decision examples
 
 - Geometry request: changing span, chord, taper, sweep, or wing type is allowed;
   changing `num_x` or `num_y` is not unless mesh resolution was requested.
@@ -54,16 +64,15 @@ pass classifications. Violations do not require a classification.
 
 ---
 
-## DECISION CHECKLIST
+## EXACT AUTHORIZATION
 
-A changed executable item may pass only if one of these is true:
-- **requested_change**: the original user request explicitly asks for this exact item or a clear natural alias. For an explicitly requested element that is absent from the blueprint, values needed to create it may be chosen within any stated bounds and local blueprint style. The authorization must quote the user phrase.
-- **required_wiring**: a model-structure change is strictly necessary to connect an explicit requested change. This covers wiring, paths, subsystems, and required shapes, never changing an existing parameter value. The authorization must name the requested change.
-- **approved_relaxation**: allowed only when the prompt contains a `USER-APPROVED RELAXATION AFTER NON-CONVERGENCE` section that names this exact item.
-- **harmless_reporting**: printing, plotting, paths, or comments only.
-- **equivalent_formatting**: same executable value in a different format.
+For an explicitly requested element absent from the blueprint, values needed to
+create it may be chosen within stated bounds and local blueprint style. Required
+wiring, plotting, and output code may pass only when it directly implements an
+explicit request and changes no unrelated parameter value.
 
-Everything else is unrequested assumption drift and must fail.
+An approved relaxation authorizes only the exact item it names. Everything else
+is unrequested assumption drift and must fail.
 
 When the semantic list splits one requested objective/constraint target edit
 into an added item and a removed item with the same OpenMDAO path, treat them
@@ -81,8 +90,8 @@ If the explicit approved-relaxation section is absent, no approved repair
 exists. Never cite previous runs, previous attempts, retry feedback, or repair
 wording as approval.
 
-If an item includes an `audit_rule`, apply that rule directly. No classification
-may override it unless the audit rule allows that exact exception.
+If an item includes an `audit_rule`, apply that rule directly. Nothing may
+override it unless the audit rule allows that exact exception.
 
 ---
 
@@ -173,8 +182,7 @@ For violations:
 
 For accepted changes:
 - set `passed` to `true`
-- use one of the allowed classifications above
-- quote the exact user phrase for `requested_change`
+- quote the exact user or approved-repair phrase that authorizes the change
 
 Do not return a top-level `passed` field. The application computes it from the
 presence or absence of `violations`.
@@ -198,7 +206,6 @@ response is:
     {
       "passed": true,
       "changed_item": "assign:_Mach_numbers index 0",
-      "classification": "requested_change",
       "authorization": "User request: \"Mach 0.78\"",
       "blueprint_value": "_Mach_numbers[0] = 0.5",
       "generated_value": "_Mach_numbers[0] = 0.78",

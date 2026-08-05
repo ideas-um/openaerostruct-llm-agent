@@ -324,7 +324,7 @@ def get_llm_response(
         client = _make_gemini_client()
         config_kwargs = dict(
             system_instruction=system_prompt or None,
-            temperature=0.2,
+            temperature=0.1,
             max_output_tokens=8192,
         )
         if response_json_schema is not None:
